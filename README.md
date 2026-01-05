@@ -1,7 +1,5 @@
 # E-Commerce Platform for Local Brands - Backend API
 
-[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Project Code:** SP26SE114  
 **Duration:** January 2026 - April 2026  
