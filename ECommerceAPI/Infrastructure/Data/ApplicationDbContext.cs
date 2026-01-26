@@ -1,0 +1,1191 @@
+﻿using System;
+using System.Collections.Generic;
+using ECommerceAPI.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+
+namespace ECommerceAPI.Infrastructure.Data;
+
+public partial class ApplicationDbContext : DbContext
+{
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : base(options)
+    {
+    }
+
+    public virtual DbSet<Address> Addresses { get; set; }
+
+    public virtual DbSet<AiMaterialSuggestion> AiMaterialSuggestions { get; set; }
+
+    public virtual DbSet<AiTagSuggestion> AiTagSuggestions { get; set; }
+
+    public virtual DbSet<Cart> Carts { get; set; }
+
+    public virtual DbSet<CartItem> CartItems { get; set; }
+
+    public virtual DbSet<Category> Categories { get; set; }
+
+    public virtual DbSet<Conversation> Conversations { get; set; }
+
+    public virtual DbSet<FavoriteProduct> FavoriteProducts { get; set; }
+
+    public virtual DbSet<Inventory> Inventories { get; set; }
+
+    public virtual DbSet<Material> Materials { get; set; }
+
+    public virtual DbSet<Message> Messages { get; set; }
+
+    public virtual DbSet<Notification> Notifications { get; set; }
+
+    public virtual DbSet<Order> Orders { get; set; }
+
+    public virtual DbSet<OrderItem> OrderItems { get; set; }
+
+    public virtual DbSet<Payment> Payments { get; set; }
+
+    public virtual DbSet<Product> Products { get; set; }
+
+    public virtual DbSet<ProductImage> ProductImages { get; set; }
+
+    public virtual DbSet<ProductReview> ProductReviews { get; set; }
+
+    public virtual DbSet<ProductVariant> ProductVariants { get; set; }
+
+    public virtual DbSet<ProductTag> ProductTags { get; set; }
+
+    public virtual DbSet<ProductMaterial> ProductMaterials { get; set; }
+
+    public virtual DbSet<SellerWallet> SellerWallets { get; set; }
+
+    public virtual DbSet<SellerWalletLedger> SellerWalletLedgers { get; set; }
+
+    public virtual DbSet<SellerWithdrawalRequest> SellerWithdrawalRequests { get; set; }
+
+    public virtual DbSet<Shop> Shops { get; set; }
+
+    public virtual DbSet<ShopDocument> ShopDocuments { get; set; }
+
+    public virtual DbSet<ShopReview> ShopReviews { get; set; }
+
+    public virtual DbSet<Tag> Tags { get; set; }
+
+    public virtual DbSet<Transaction> Transactions { get; set; }
+
+    public virtual DbSet<User> Users { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder
+            .HasPostgresEnum("auth", "aal_level", new[] { "aal1", "aal2", "aal3" })
+            .HasPostgresEnum("auth", "code_challenge_method", new[] { "s256", "plain" })
+            .HasPostgresEnum("auth", "factor_status", new[] { "unverified", "verified" })
+            .HasPostgresEnum("auth", "factor_type", new[] { "totp", "webauthn", "phone" })
+            .HasPostgresEnum("auth", "oauth_authorization_status", new[] { "pending", "approved", "denied", "expired" })
+            .HasPostgresEnum("auth", "oauth_client_type", new[] { "public", "confidential" })
+            .HasPostgresEnum("auth", "oauth_registration_type", new[] { "dynamic", "manual" })
+            .HasPostgresEnum("auth", "oauth_response_type", new[] { "code" })
+            .HasPostgresEnum("auth", "one_time_token_type", new[] { "confirmation_token", "reauthentication_token", "recovery_token", "email_change_token_new", "email_change_token_current", "phone_change_token" })
+            .HasPostgresEnum("realtime", "action", new[] { "INSERT", "UPDATE", "DELETE", "TRUNCATE", "ERROR" })
+            .HasPostgresEnum("realtime", "equality_op", new[] { "eq", "neq", "lt", "lte", "gt", "gte", "in" })
+            .HasPostgresEnum("storage", "buckettype", new[] { "STANDARD", "ANALYTICS", "VECTOR" })
+            .HasPostgresEnum("user_role", new[] { "customer", "seller", "admin" })
+            .HasPostgresExtension("extensions", "pg_stat_statements")
+            .HasPostgresExtension("extensions", "pgcrypto")
+            .HasPostgresExtension("extensions", "uuid-ossp")
+            .HasPostgresExtension("graphql", "pg_graphql")
+            .HasPostgresExtension("unaccent")
+            .HasPostgresExtension("vault", "supabase_vault");
+
+        modelBuilder.Entity<Address>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("addresses_pkey");
+
+            entity.ToTable("addresses");
+
+            entity.HasIndex(e => new { e.UserId, e.IsDefault }, "idx_addresses_default");
+
+            entity.HasIndex(e => e.UserId, "idx_addresses_user");
+
+            entity.HasIndex(e => e.UserId, "ux_addresses_one_default_per_user")
+                .IsUnique()
+                .HasFilter("(is_default = true)");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.AddressLine1).HasColumnName("address_line1");
+            entity.Property(e => e.AddressLine2).HasColumnName("address_line2");
+            entity.Property(e => e.City).HasColumnName("city");
+            entity.Property(e => e.Country)
+                .HasDefaultValueSql("'VN'::text")
+                .HasColumnName("country");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.District).HasColumnName("district");
+            entity.Property(e => e.FullName).HasColumnName("full_name");
+            entity.Property(e => e.IsDefault)
+                .HasDefaultValue(false)
+                .HasColumnName("is_default");
+            entity.Property(e => e.Label).HasColumnName("label");
+            entity.Property(e => e.Phone).HasColumnName("phone");
+            entity.Property(e => e.PostalCode).HasColumnName("postal_code");
+            entity.Property(e => e.Province).HasColumnName("province");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Ward).HasColumnName("ward");
+
+            entity.HasOne(d => d.User).WithOne(p => p.Address)
+                .HasForeignKey<Address>(d => d.UserId)
+                .HasConstraintName("addresses_user_id_fkey");
+        });
+
+        modelBuilder.Entity<AiMaterialSuggestion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ai_material_suggestions_pkey");
+
+            entity.ToTable("ai_material_suggestions");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Action)
+                .HasDefaultValueSql("'accepted'::text")
+                .HasColumnName("action");
+            entity.Property(e => e.ChosenMaterialIds).HasColumnName("chosen_material_ids");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.SellerId).HasColumnName("seller_id");
+            entity.Property(e => e.SuggestedMaterials)
+                .HasColumnType("jsonb")
+                .HasColumnName("suggested_materials");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.AiMaterialSuggestions)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("ai_material_suggestions_product_id_fkey");
+
+            entity.HasOne(d => d.Seller).WithMany(p => p.AiMaterialSuggestions)
+                .HasForeignKey(d => d.SellerId)
+                .HasConstraintName("ai_material_suggestions_seller_id_fkey");
+        });
+
+        modelBuilder.Entity<AiTagSuggestion>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ai_tag_suggestions_pkey");
+
+            entity.ToTable("ai_tag_suggestions");
+
+            entity.HasIndex(e => e.ProductId, "idx_ai_suggest_product");
+
+            entity.HasIndex(e => e.SellerId, "idx_ai_suggest_seller");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Action)
+                .HasDefaultValueSql("'accepted'::text")
+                .HasColumnName("action");
+            entity.Property(e => e.ChosenCategoryId).HasColumnName("chosen_category_id");
+            entity.Property(e => e.ChosenTags)
+                .HasDefaultValueSql("'[]'::jsonb")
+                .HasColumnType("jsonb")
+                .HasColumnName("chosen_tags");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.InputDescription).HasColumnName("input_description");
+            entity.Property(e => e.InputTitle).HasColumnName("input_title");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.SellerId).HasColumnName("seller_id");
+            entity.Property(e => e.SuggestedCategoryId).HasColumnName("suggested_category_id");
+            entity.Property(e => e.SuggestedTags)
+                .HasDefaultValueSql("'[]'::jsonb")
+                .HasColumnType("jsonb")
+                .HasColumnName("suggested_tags");
+
+            entity.HasOne(d => d.ChosenCategory).WithMany(p => p.AiTagSuggestionChosenCategories)
+                .HasForeignKey(d => d.ChosenCategoryId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("ai_tag_suggestions_chosen_category_id_fkey");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.AiTagSuggestions)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("ai_tag_suggestions_product_id_fkey");
+
+            entity.HasOne(d => d.Seller).WithMany(p => p.AiTagSuggestions)
+                .HasForeignKey(d => d.SellerId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("ai_tag_suggestions_seller_id_fkey");
+
+            entity.HasOne(d => d.SuggestedCategory).WithMany(p => p.AiTagSuggestionSuggestedCategories)
+                .HasForeignKey(d => d.SuggestedCategoryId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("ai_tag_suggestions_suggested_category_id_fkey");
+        });
+
+        modelBuilder.Entity<Cart>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("carts_pkey");
+
+            entity.ToTable("carts");
+
+            entity.HasIndex(e => new { e.CustomerId, e.Status }, "carts_customer_id_status_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)0)
+                .HasColumnName("status");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Customer).WithMany(p => p.Carts)
+                .HasForeignKey(d => d.CustomerId)
+                .HasConstraintName("carts_customer_id_fkey");
+        });
+
+        modelBuilder.Entity<CartItem>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("cart_items_pkey");
+
+            entity.ToTable("cart_items");
+
+            entity.HasIndex(e => new { e.CartId, e.VariantId }, "cart_items_cart_id_variant_id_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CartId).HasColumnName("cart_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.ProductName).HasColumnName("product_name");
+            entity.Property(e => e.Quantity).HasColumnName("quantity");
+            entity.Property(e => e.UnitPrice)
+                .HasPrecision(12, 2)
+                .HasColumnName("unit_price");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.VariantId).HasColumnName("variant_id");
+
+            entity.HasOne(d => d.Cart).WithMany(p => p.CartItems)
+                .HasForeignKey(d => d.CartId)
+                .HasConstraintName("cart_items_cart_id_fkey");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.CartItems)
+                .HasForeignKey(d => d.ProductId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("cart_items_product_id_fkey");
+
+            entity.HasOne(d => d.Variant).WithMany(p => p.CartItems)
+                .HasForeignKey(d => d.VariantId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("cart_items_variant_id_fkey");
+        });
+
+        modelBuilder.Entity<Category>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("categories_pkey");
+
+            entity.ToTable("categories");
+
+            entity.HasIndex(e => e.Slug, "categories_slug_key").IsUnique();
+
+            entity.HasIndex(e => e.IsActive, "idx_categories_active");
+
+            entity.HasIndex(e => e.ParentId, "idx_categories_parent");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.IsActive)
+                .HasDefaultValue(true)
+                .HasColumnName("is_active");
+            entity.Property(e => e.Level)
+                .HasDefaultValue((short)1)
+                .HasColumnName("level");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.ParentId).HasColumnName("parent_id");
+            entity.Property(e => e.Slug).HasColumnName("slug");
+
+            entity.HasOne(d => d.Parent).WithMany(p => p.InverseParent)
+                .HasForeignKey(d => d.ParentId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("categories_parent_id_fkey");
+        });
+
+        modelBuilder.Entity<Conversation>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("conversations_pkey");
+
+            entity.ToTable("conversations");
+
+            entity.HasIndex(e => new { e.BuyerId, e.SellerId, e.ShopId }, "conversations_buyer_id_seller_id_shop_id_key").IsUnique();
+
+            entity.HasIndex(e => e.BuyerId, "idx_conversations_buyer");
+
+            entity.HasIndex(e => e.SellerId, "idx_conversations_seller");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.BuyerId).HasColumnName("buyer_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.SellerId).HasColumnName("seller_id");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+
+            entity.HasOne(d => d.Buyer).WithMany(p => p.ConversationBuyers)
+                .HasForeignKey(d => d.BuyerId)
+                .HasConstraintName("conversations_buyer_id_fkey");
+
+            entity.HasOne(d => d.Order).WithMany(p => p.Conversations)
+                .HasForeignKey(d => d.OrderId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("conversations_order_id_fkey");
+
+            entity.HasOne(d => d.Seller).WithMany(p => p.ConversationSellers)
+                .HasForeignKey(d => d.SellerId)
+                .HasConstraintName("conversations_seller_id_fkey");
+
+            entity.HasOne(d => d.Shop).WithMany(p => p.Conversations)
+                .HasForeignKey(d => d.ShopId)
+                .HasConstraintName("conversations_shop_id_fkey");
+        });
+
+        modelBuilder.Entity<FavoriteProduct>(entity =>
+        {
+            entity.HasKey(e => new { e.UserId, e.ProductId }).HasName("favorite_products_pkey");
+
+            entity.ToTable("favorite_products");
+
+            entity.HasIndex(e => e.ProductId, "idx_fav_products_product");
+
+            entity.HasIndex(e => e.UserId, "idx_fav_products_user");
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.FavoriteProducts)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("favorite_products_product_id_fkey");
+
+            entity.HasOne(d => d.User).WithMany(p => p.FavoriteProducts)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("favorite_products_user_id_fkey");
+        });
+
+        modelBuilder.Entity<Inventory>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("inventories_pkey");
+
+            entity.ToTable("inventories");
+
+            entity.HasIndex(e => new { e.ProductId, e.VariantId }, "inventories_product_id_variant_id_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.Quantity)
+                .HasDefaultValue(0)
+                .HasColumnName("quantity");
+            entity.Property(e => e.ReservedQuantity)
+                .HasDefaultValue(0)
+                .HasColumnName("reserved_quantity");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.VariantId).HasColumnName("variant_id");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.Inventories)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("inventories_product_id_fkey");
+
+            entity.HasOne(d => d.Variant).WithMany(p => p.Inventories)
+                .HasForeignKey(d => d.VariantId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("inventories_variant_id_fkey");
+        });
+
+        modelBuilder.Entity<Material>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("materials_pkey");
+
+            entity.ToTable("materials");
+
+            entity.HasIndex(e => e.IsActive, "idx_materials_active");
+
+            entity.HasIndex(e => e.Slug, "materials_slug_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.IsActive)
+                .HasDefaultValue(true)
+                .HasColumnName("is_active");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Slug).HasColumnName("slug");
+        });
+
+        modelBuilder.Entity<Message>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("messages_pkey");
+
+            entity.ToTable("messages");
+
+            entity.HasIndex(e => e.ConversationId, "idx_messages_conversation");
+
+            entity.HasIndex(e => new { e.ConversationId, e.IsRead }, "idx_messages_unread");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Content).HasColumnName("content");
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.IsRead)
+                .HasDefaultValue(false)
+                .HasColumnName("is_read");
+            entity.Property(e => e.MessageType)
+                .HasDefaultValueSql("'text'::text")
+                .HasColumnName("message_type");
+            entity.Property(e => e.SenderId).HasColumnName("sender_id");
+
+            entity.HasOne(d => d.Conversation).WithMany(p => p.Messages)
+                .HasForeignKey(d => d.ConversationId)
+                .HasConstraintName("messages_conversation_id_fkey");
+
+            entity.HasOne(d => d.Sender).WithMany(p => p.Messages)
+                .HasForeignKey(d => d.SenderId)
+                .HasConstraintName("messages_sender_id_fkey");
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("notifications_pkey");
+
+            entity.ToTable("notifications");
+
+            entity.HasIndex(e => new { e.UserId, e.IsRead }, "idx_notifications_unread");
+
+            entity.HasIndex(e => e.UserId, "idx_notifications_user");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Content).HasColumnName("content");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.IsRead)
+                .HasDefaultValue(false)
+                .HasColumnName("is_read");
+            entity.Property(e => e.ReferenceId).HasColumnName("reference_id");
+            entity.Property(e => e.ReferenceType).HasColumnName("reference_type");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Type).HasColumnName("type");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            entity.HasOne(d => d.User).WithMany(p => p.Notifications)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("notifications_user_id_fkey");
+        });
+
+        modelBuilder.Entity<Order>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("orders_pkey");
+
+            entity.ToTable("orders");
+
+            entity.HasIndex(e => e.CustomerId, "idx_orders_customer");
+
+            entity.HasIndex(e => e.ShopId, "idx_orders_shop");
+
+            entity.HasIndex(e => e.Status, "idx_orders_status");
+
+            entity.HasIndex(e => e.TransactionId, "idx_orders_transaction");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id");
+            entity.Property(e => e.ShipAddress).HasColumnName("ship_address");
+            entity.Property(e => e.ShipFullName).HasColumnName("ship_full_name");
+            entity.Property(e => e.ShipPhone).HasColumnName("ship_phone");
+            entity.Property(e => e.ShippingAddressId).HasColumnName("shipping_address_id");
+            entity.Property(e => e.ShippingFee)
+                .HasPrecision(12, 2)
+                .HasColumnName("shipping_fee");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)0)
+                .HasColumnName("status");
+            entity.Property(e => e.Subtotal)
+                .HasPrecision(12, 2)
+                .HasColumnName("subtotal");
+            entity.Property(e => e.Total)
+                .HasPrecision(12, 2)
+                .HasColumnName("total");
+            entity.Property(e => e.TransactionId).HasColumnName("transaction_id");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Customer).WithMany(p => p.Orders)
+                .HasForeignKey(d => d.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("orders_customer_id_fkey");
+
+            entity.HasOne(d => d.ShippingAddress).WithMany(p => p.Orders)
+                .HasForeignKey(d => d.ShippingAddressId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("orders_shipping_address_id_fkey");
+
+            entity.HasOne(d => d.Shop).WithMany(p => p.Orders)
+                .HasForeignKey(d => d.ShopId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("orders_shop_id_fkey");
+
+            entity.HasOne(d => d.Transaction).WithMany(p => p.Orders)
+                .HasForeignKey(d => d.TransactionId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("orders_transaction_id_fkey");
+        });
+
+        modelBuilder.Entity<OrderItem>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("order_items_pkey");
+
+            entity.ToTable("order_items");
+
+            entity.HasIndex(e => e.OrderId, "idx_order_items_order");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.LineTotal)
+                .HasPrecision(12, 2)
+                .HasColumnName("line_total");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.ProductName).HasColumnName("product_name");
+            entity.Property(e => e.Quantity).HasColumnName("quantity");
+            entity.Property(e => e.UnitPrice)
+                .HasPrecision(12, 2)
+                .HasColumnName("unit_price");
+            entity.Property(e => e.VariantId).HasColumnName("variant_id");
+
+            entity.HasOne(d => d.Order).WithMany(p => p.OrderItems)
+                .HasForeignKey(d => d.OrderId)
+                .HasConstraintName("order_items_order_id_fkey");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.OrderItems)
+                .HasForeignKey(d => d.ProductId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("order_items_product_id_fkey");
+
+            entity.HasOne(d => d.Variant).WithMany(p => p.OrderItems)
+                .HasForeignKey(d => d.VariantId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("order_items_variant_id_fkey");
+        });
+
+        modelBuilder.Entity<Payment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("payments_pkey");
+
+            entity.ToTable("payments");
+
+            entity.HasIndex(e => e.OrderId, "idx_payments_order");
+
+            entity.HasIndex(e => e.Status, "idx_payments_status");
+
+            entity.HasIndex(e => e.TransactionId, "idx_payments_transaction");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Amount)
+                .HasPrecision(12, 2)
+                .HasColumnName("amount");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.PaidAt).HasColumnName("paid_at");
+            entity.Property(e => e.Provider).HasColumnName("provider");
+            entity.Property(e => e.ProviderRef).HasColumnName("provider_ref");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)0)
+                .HasColumnName("status");
+            entity.Property(e => e.TransactionId).HasColumnName("transaction_id");
+
+            entity.HasOne(d => d.Order).WithMany(p => p.Payments)
+                .HasForeignKey(d => d.OrderId)
+                .HasConstraintName("payments_order_id_fkey");
+
+            entity.HasOne(d => d.Transaction).WithMany(p => p.Payments)
+                .HasForeignKey(d => d.TransactionId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("payments_transaction_id_fkey");
+        });
+
+        modelBuilder.Entity<Product>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("products_pkey");
+
+            entity.ToTable("products");
+
+            entity.HasIndex(e => e.CategoryId, "idx_products_category");
+
+            entity.HasIndex(e => e.ShopId, "idx_products_shop");
+
+            entity.HasIndex(e => e.Status, "idx_products_status");
+
+            entity.HasIndex(e => e.SearchVector, "products_search_idx").HasMethod("gin");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.BasePrice)
+                .HasPrecision(12, 2)
+                .HasColumnName("base_price");
+            entity.Property(e => e.CategoryId).HasColumnName("category_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.SearchVector)
+                .HasComputedColumnSql("(setweight(to_tsvector('simple'::regconfig, f_immutable_unaccent(COALESCE(name, ''::text))), 'A'::\"char\") || setweight(to_tsvector('simple'::regconfig, f_immutable_unaccent(COALESCE(description, ''::text))), 'B'::\"char\"))", true)
+                .HasColumnName("search_vector");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)1)
+                .HasColumnName("status");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Category).WithMany(p => p.Products)
+                .HasForeignKey(d => d.CategoryId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("products_category_id_fkey");
+
+            entity.HasOne(d => d.Shop).WithMany(p => p.Products)
+                .HasForeignKey(d => d.ShopId)
+                .HasConstraintName("products_shop_id_fkey");
+        });
+
+        modelBuilder.Entity<ProductTag>(entity =>
+        {
+            entity.HasKey(e => new { e.ProductId, e.TagId }).HasName("product_tags_pkey");
+
+            entity.ToTable("product_tags");
+
+            entity.HasIndex(e => e.TagId, "idx_product_tags_tag");
+
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.TagId).HasColumnName("tag_id");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductTags)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("product_tags_product_id_fkey");
+
+            entity.HasOne(d => d.Tag).WithMany(p => p.ProductTags)
+                .HasForeignKey(d => d.TagId)
+                .HasConstraintName("product_tags_tag_id_fkey");
+        });
+
+        modelBuilder.Entity<ProductMaterial>(entity =>
+        {
+            entity.HasKey(e => new { e.ProductId, e.MaterialId }).HasName("product_materials_pkey");
+
+            entity.ToTable("product_materials");
+
+            entity.HasIndex(e => e.MaterialId, "idx_product_materials_material");
+            entity.HasIndex(e => e.ProductId, "idx_product_materials_product");
+
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.MaterialId).HasColumnName("material_id");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductMaterials)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("product_materials_product_id_fkey");
+
+            entity.HasOne(d => d.Material).WithMany(p => p.ProductMaterials)
+                .HasForeignKey(d => d.MaterialId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("product_materials_material_id_fkey");
+        });
+
+        modelBuilder.Entity<ProductImage>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("product_images_pkey");
+
+            entity.ToTable("product_images");
+
+            entity.HasIndex(e => e.ProductId, "idx_product_images_product");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.ImageUrl).HasColumnName("image_url");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.SortOrder)
+                .HasDefaultValue(0)
+                .HasColumnName("sort_order");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductImages)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("product_images_product_id_fkey");
+        });
+
+        modelBuilder.Entity<ProductReview>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("product_reviews_pkey");
+
+            entity.ToTable("product_reviews");
+
+            entity.HasIndex(e => e.ProductId, "idx_product_reviews_product");
+
+            entity.HasIndex(e => e.Status, "idx_product_reviews_status");
+
+            entity.HasIndex(e => e.UserId, "idx_product_reviews_user");
+
+            entity.HasIndex(e => new { e.ProductId, e.UserId }, "product_reviews_product_id_user_id_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Content).HasColumnName("content");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.Rating).HasColumnName("rating");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)1)
+                .HasColumnName("status");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductReviews)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("product_reviews_product_id_fkey");
+
+            entity.HasOne(d => d.User).WithMany(p => p.ProductReviews)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("product_reviews_user_id_fkey");
+        });
+
+        modelBuilder.Entity<ProductVariant>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("product_variants_pkey");
+
+            entity.ToTable("product_variants");
+
+            entity.HasIndex(e => e.IsActive, "idx_variants_active");
+
+            entity.HasIndex(e => e.ProductId, "idx_variants_product");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Attributes)
+                .HasDefaultValueSql("'{}'::jsonb")
+                .HasColumnType("jsonb")
+                .HasColumnName("attributes");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.IsActive)
+                .HasDefaultValue(true)
+                .HasColumnName("is_active");
+            entity.Property(e => e.Price)
+                .HasPrecision(12, 2)
+                .HasColumnName("price");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.Sku).HasColumnName("sku");
+            entity.Property(e => e.VariantName).HasColumnName("variant_name");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.ProductVariants)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("product_variants_product_id_fkey");
+        });
+
+        modelBuilder.Entity<SellerWallet>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("seller_wallets_pkey");
+
+            entity.ToTable("seller_wallets");
+
+            entity.HasIndex(e => e.SellerId, "idx_seller_wallets_seller");
+
+            entity.HasIndex(e => e.SellerId, "seller_wallets_seller_id_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.AvailableBalance)
+                .HasPrecision(12, 2)
+                .HasColumnName("available_balance");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.PendingBalance)
+                .HasPrecision(12, 2)
+                .HasColumnName("pending_balance");
+            entity.Property(e => e.SellerId).HasColumnName("seller_id");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Seller).WithOne(p => p.SellerWallet)
+                .HasForeignKey<SellerWallet>(d => d.SellerId)
+                .HasConstraintName("seller_wallets_seller_id_fkey");
+        });
+
+        modelBuilder.Entity<SellerWalletLedger>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("seller_wallet_ledger_pkey");
+
+            entity.ToTable("seller_wallet_ledger");
+
+            entity.HasIndex(e => new { e.ReferenceType, e.ReferenceId }, "idx_wallet_ledger_ref");
+
+            entity.HasIndex(e => e.WalletId, "idx_wallet_ledger_wallet");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Amount)
+                .HasPrecision(12, 2)
+                .HasColumnName("amount");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.ReferenceId).HasColumnName("reference_id");
+            entity.Property(e => e.ReferenceType).HasColumnName("reference_type");
+            entity.Property(e => e.Type).HasColumnName("type");
+            entity.Property(e => e.WalletId).HasColumnName("wallet_id");
+
+            entity.HasOne(d => d.Wallet).WithMany(p => p.SellerWalletLedgers)
+                .HasForeignKey(d => d.WalletId)
+                .HasConstraintName("seller_wallet_ledger_wallet_id_fkey");
+        });
+
+        modelBuilder.Entity<SellerWithdrawalRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("seller_withdrawal_requests_pkey");
+
+            entity.ToTable("seller_withdrawal_requests");
+
+            entity.HasIndex(e => e.SellerId, "idx_withdrawals_seller");
+
+            entity.HasIndex(e => e.Status, "idx_withdrawals_status");
+
+            entity.HasIndex(e => e.WalletId, "idx_withdrawals_wallet");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.AdminNote).HasColumnName("admin_note");
+            entity.Property(e => e.Amount)
+                .HasPrecision(12, 2)
+                .HasColumnName("amount");
+            entity.Property(e => e.BankAccountName).HasColumnName("bank_account_name");
+            entity.Property(e => e.BankAccountNumber).HasColumnName("bank_account_number");
+            entity.Property(e => e.BankName).HasColumnName("bank_name");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.PaidAt).HasColumnName("paid_at");
+            entity.Property(e => e.RejectionReason).HasColumnName("rejection_reason");
+            entity.Property(e => e.RequestedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("requested_at");
+            entity.Property(e => e.ReviewedAt).HasColumnName("reviewed_at");
+            entity.Property(e => e.ReviewedBy).HasColumnName("reviewed_by");
+            entity.Property(e => e.SellerId).HasColumnName("seller_id");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)0)
+                .HasColumnName("status");
+            entity.Property(e => e.WalletId).HasColumnName("wallet_id");
+
+            entity.HasOne(d => d.ReviewedByNavigation).WithMany(p => p.SellerWithdrawalRequestReviewedByNavigations)
+                .HasForeignKey(d => d.ReviewedBy)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("seller_withdrawal_requests_reviewed_by_fkey");
+
+            entity.HasOne(d => d.Seller).WithMany(p => p.SellerWithdrawalRequestSellers)
+                .HasForeignKey(d => d.SellerId)
+                .HasConstraintName("seller_withdrawal_requests_seller_id_fkey");
+
+            entity.HasOne(d => d.Wallet).WithMany(p => p.SellerWithdrawalRequests)
+                .HasForeignKey(d => d.WalletId)
+                .HasConstraintName("seller_withdrawal_requests_wallet_id_fkey");
+        });
+
+        modelBuilder.Entity<Shop>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("shops_pkey");
+
+            entity.ToTable("shops");
+
+            entity.HasIndex(e => e.OwnerId, "idx_shops_owner");
+
+            entity.HasIndex(e => e.Status, "idx_shops_status");
+
+            entity.HasIndex(e => e.Slug, "shops_slug_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.LogoUrl).HasColumnName("logo_url");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.OwnerId).HasColumnName("owner_id");
+            entity.Property(e => e.RejectionReason).HasColumnName("rejection_reason");
+            entity.Property(e => e.Slug).HasColumnName("slug");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)1)
+                .HasColumnName("status");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.VerificationStatus)
+                .HasDefaultValue((short)0)
+                .HasColumnName("verification_status");
+            entity.Property(e => e.VerifiedAt).HasColumnName("verified_at");
+            entity.Property(e => e.VerifiedBy).HasColumnName("verified_by");
+
+            entity.HasOne(d => d.Owner).WithMany(p => p.ShopOwners)
+                .HasForeignKey(d => d.OwnerId)
+                .HasConstraintName("shops_owner_id_fkey");
+
+            entity.HasOne(d => d.VerifiedByNavigation).WithMany(p => p.ShopVerifiedByNavigations)
+                .HasForeignKey(d => d.VerifiedBy)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("shops_verified_by_fkey");
+        });
+
+        modelBuilder.Entity<ShopDocument>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("shop_documents_pkey");
+
+            entity.ToTable("shop_documents");
+
+            entity.HasIndex(e => e.ShopId, "idx_shop_documents_shop");
+
+            entity.HasIndex(e => e.Status, "idx_shop_documents_status");
+
+            entity.HasIndex(e => new { e.ShopId, e.DocType }, "idx_shop_documents_type");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.DocType).HasColumnName("doc_type");
+            entity.Property(e => e.FileUrl).HasColumnName("file_url");
+            entity.Property(e => e.RejectionReason).HasColumnName("rejection_reason");
+            entity.Property(e => e.ReviewedAt).HasColumnName("reviewed_at");
+            entity.Property(e => e.ReviewedBy).HasColumnName("reviewed_by");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)1)
+                .HasColumnName("status");
+            entity.Property(e => e.SubmittedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("submitted_at");
+
+            entity.HasOne(d => d.ReviewedByNavigation).WithMany(p => p.ShopDocuments)
+                .HasForeignKey(d => d.ReviewedBy)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("shop_documents_reviewed_by_fkey");
+
+            entity.HasOne(d => d.Shop).WithMany(p => p.ShopDocuments)
+                .HasForeignKey(d => d.ShopId)
+                .HasConstraintName("shop_documents_shop_id_fkey");
+        });
+
+        modelBuilder.Entity<ShopReview>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("shop_reviews_pkey");
+
+            entity.ToTable("shop_reviews");
+
+            entity.HasIndex(e => e.ShopId, "idx_shop_reviews_shop");
+
+            entity.HasIndex(e => e.Status, "idx_shop_reviews_status");
+
+            entity.HasIndex(e => e.UserId, "idx_shop_reviews_user");
+
+            entity.HasIndex(e => new { e.ShopId, e.UserId }, "shop_reviews_shop_id_user_id_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Content).HasColumnName("content");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.Rating).HasColumnName("rating");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)1)
+                .HasColumnName("status");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            entity.HasOne(d => d.Order).WithMany(p => p.ShopReviews)
+                .HasForeignKey(d => d.OrderId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("shop_reviews_order_id_fkey");
+
+            entity.HasOne(d => d.Shop).WithMany(p => p.ShopReviews)
+                .HasForeignKey(d => d.ShopId)
+                .HasConstraintName("shop_reviews_shop_id_fkey");
+
+            entity.HasOne(d => d.User).WithMany(p => p.ShopReviews)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("shop_reviews_user_id_fkey");
+        });
+
+        modelBuilder.Entity<Tag>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("tags_pkey");
+
+            entity.ToTable("tags");
+
+            entity.HasIndex(e => e.Name, "tags_name_key").IsUnique();
+
+            entity.HasIndex(e => e.Slug, "tags_slug_key").IsUnique();
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Slug).HasColumnName("slug");
+        });
+
+        modelBuilder.Entity<Transaction>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("transactions_pkey");
+
+            entity.ToTable("transactions");
+
+            entity.HasIndex(e => e.CustomerId, "idx_transactions_customer");
+
+            entity.HasIndex(e => e.Status, "idx_transactions_status");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.Amount)
+                .HasPrecision(12, 2)
+                .HasColumnName("amount");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id");
+            entity.Property(e => e.PaidAt).HasColumnName("paid_at");
+            entity.Property(e => e.Provider).HasColumnName("provider");
+            entity.Property(e => e.ProviderRef).HasColumnName("provider_ref");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)0)
+                .HasColumnName("status");
+
+            entity.HasOne(d => d.Customer).WithMany(p => p.Transactions)
+                .HasForeignKey(d => d.CustomerId)
+                .HasConstraintName("transactions_customer_id_fkey");
+        });
+
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("profiles_pkey");
+
+            entity.ToTable("users");
+
+            entity.HasIndex(e => e.Status, "idx_profiles_status");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.FullName).HasColumnName("full_name");
+            entity.Property(e => e.Phone).HasColumnName("phone");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)1)
+                .HasColumnName("status");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+        });
+
+        OnModelCreatingPartial(modelBuilder);
+    }
+
+    partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
+}
