@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using ECommerceAPI.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -1176,6 +1176,9 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("created_at");
             entity.Property(e => e.FullName).HasColumnName("full_name");
             entity.Property(e => e.Phone).HasColumnName("phone");
+            entity.Property(e => e.Role)
+                .HasDefaultValueSql("'customer'::text")
+                .HasColumnName("role");
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)
                 .HasColumnName("status");

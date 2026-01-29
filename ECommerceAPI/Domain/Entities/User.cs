@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -10,6 +10,8 @@ public partial class User
     public string? FullName { get; set; }
 
     public string? Phone { get; set; }
+
+    public string Role { get; set; } = "customer"; // customer, seller, admin
 
     public short Status { get; set; }
 
