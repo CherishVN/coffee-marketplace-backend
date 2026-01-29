@@ -2,6 +2,7 @@ using System.Text;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Application.Services;
 using ECommerceAPI.Infrastructure.Data;
+using ECommerceAPI.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -15,16 +16,13 @@ namespace ECommerceAPI
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container.
-
-            // Database Configuration - Supabase PostgreSQL
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-            // Register Services
+            builder.Services.AddScoped<IUserRepository, UserRepository>();
             builder.Services.AddScoped<IJwtService, JwtService>();
+            builder.Services.AddScoped<IAuthService, AuthService>();
 
-            // JWT Authentication Configuration (using our own JWT, not Supabase's)
             var jwtSettings = builder.Configuration.GetSection("Jwt");
             var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey is not configured");
 
@@ -46,46 +44,27 @@ namespace ECommerceAPI
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
                     ClockSkew = TimeSpan.Zero
                 };
-
-                options.Events = new JwtBearerEvents
-                {
-                    OnAuthenticationFailed = context =>
-                    {
-                        Console.WriteLine($"Authentication failed: {context.Exception.Message}");
-                        return Task.CompletedTask;
-                    },
-                    OnTokenValidated = context =>
-                    {
-                        Console.WriteLine($"Token validated for user: {context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value}");
-                        return Task.CompletedTask;
-                    }
-                };
             });
 
             builder.Services.AddAuthorization();
-
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
             
-            // Swagger Configuration with JWT support
             builder.Services.AddSwaggerGen(options =>
             {
                 options.SwaggerDoc("v1", new OpenApiInfo
                 {
                     Title = "E-Commerce API",
-                    Version = "v1",
-                    Description = "API cho hệ thống E-Commerce"
+                    Version = "v1"
                 });
 
-                // Add JWT Authentication to Swagger
                 options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
                 {
                     Name = "Authorization",
                     Type = SecuritySchemeType.Http,
                     Scheme = "Bearer",
                     BearerFormat = "JWT",
-                    In = ParameterLocation.Header,
-                    Description = "Nhập JWT token vào đây. Token lấy từ endpoint /api/auth/login"
+                    In = ParameterLocation.Header
                 });
 
                 options.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -104,7 +83,6 @@ namespace ECommerceAPI
                 });
             });
 
-            // CORS Configuration
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAll", policy =>
@@ -117,7 +95,6 @@ namespace ECommerceAPI
 
             var app = builder.Build();
 
-            // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
             {
                 app.UseSwagger();
@@ -125,15 +102,10 @@ namespace ECommerceAPI
             }
 
             app.UseHttpsRedirection();
-
             app.UseCors("AllowAll");
-
-            // Authentication & Authorization middleware
             app.UseAuthentication();
             app.UseAuthorization();
-
             app.MapControllers();
-
             app.Run();
         }
     }
