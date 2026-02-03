@@ -4,6 +4,7 @@ using ECommerceAPI.Application.Services;
 using ECommerceAPI.Infrastructure.Data;
 using ECommerceAPI.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -22,16 +23,21 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IUserRepository, UserRepository>();
             builder.Services.AddScoped<IJwtService, JwtService>();
             builder.Services.AddScoped<IAuthService, AuthService>();
+            builder.Services.AddScoped<IUserAdminService, UserAdminService>();
+            builder.Services.AddScoped<IWithdrawAdminService, WithdrawAdminService>();
+            builder.Services.AddScoped<ISellerApprovalService, SellerApprovalService>();
 
             var jwtSettings = builder.Configuration.GetSection("Jwt");
             var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey is not configured");
+            var supabaseJwtSecret = builder.Configuration["Supabase:JwtSecret"] ?? throw new InvalidOperationException("Supabase JwtSecret is not configured");
+            var supabaseUrl = builder.Configuration["Supabase:Url"]!;
 
             builder.Services.AddAuthentication(options =>
             {
-                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultAuthenticateScheme = "MultiAuth";
+                options.DefaultChallengeScheme = "MultiAuth";
             })
-            .AddJwtBearer(options =>
+            .AddJwtBearer("Backend", options =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
@@ -43,6 +49,42 @@ namespace ECommerceAPI
                     ValidAudience = jwtSettings["Audience"],
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
                     ClockSkew = TimeSpan.Zero
+                };
+            })
+            .AddJwtBearer("Supabase", options =>
+            {
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = $"{supabaseUrl}/auth/v1",
+                    ValidAudience = "authenticated",
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(supabaseJwtSecret)),
+                    ClockSkew = TimeSpan.Zero
+                };
+            })
+            .AddPolicyScheme("MultiAuth", "Backend or Supabase", options =>
+            {
+                options.ForwardDefaultSelector = context =>
+                {
+                    var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+                    if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
+                        return "Backend";
+
+                    var token = authHeader.Substring("Bearer ".Length);
+                    var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+
+                    try
+                    {
+                        var jwt = handler.ReadJwtToken(token);
+                        if (jwt.Issuer.Contains("supabase"))
+                            return "Supabase";
+                    }
+                    catch { }
+
+                    return "Backend";
                 };
             });
 

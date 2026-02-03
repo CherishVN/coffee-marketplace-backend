@@ -27,6 +27,12 @@ public partial class Shop
 
     public string? RejectionReason { get; set; }
 
+    public string? SuspensionReason { get; set; }
+
+    public DateTime? SuspendedAt { get; set; }
+
+    public Guid? SuspendedBy { get; set; }
+
     public DateTime? VerifiedAt { get; set; }
 
     public Guid? VerifiedBy { get; set; }

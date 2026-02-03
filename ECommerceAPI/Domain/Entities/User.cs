@@ -11,9 +11,15 @@ public partial class User
 
     public string? Phone { get; set; }
 
-    public string Role { get; set; } = "customer"; // customer, seller, admin
+    public string Role { get; set; } = "customer";
 
     public short Status { get; set; }
+
+    public string? SuspensionReason { get; set; }
+
+    public DateTime? SuspendedAt { get; set; }
+
+    public Guid? SuspendedBy { get; set; }
 
     public DateTime CreatedAt { get; set; }
 

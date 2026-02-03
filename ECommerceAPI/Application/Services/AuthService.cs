@@ -59,6 +59,15 @@ public class AuthService : IAuthService
             });
         }
 
+        if (user.Status == 0)
+        {
+            return new LoginResponseDto
+            {
+                Success = false,
+                Message = "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ admin."
+            };
+        }
+
         var token = _jwtService.GenerateToken(user, email);
         var expiresAt = _jwtService.GetTokenExpiration();
 

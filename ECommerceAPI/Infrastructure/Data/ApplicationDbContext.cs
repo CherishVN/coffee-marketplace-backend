@@ -72,6 +72,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<UserAuditLog> UserAuditLogs { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder
@@ -999,6 +1001,9 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.OwnerId).HasColumnName("owner_id");
             entity.Property(e => e.RejectionReason).HasColumnName("rejection_reason");
+            entity.Property(e => e.SuspensionReason).HasColumnName("suspension_reason");
+            entity.Property(e => e.SuspendedAt).HasColumnName("suspended_at");
+            entity.Property(e => e.SuspendedBy).HasColumnName("suspended_by");
             entity.Property(e => e.Slug).HasColumnName("slug");
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)
@@ -1182,9 +1187,45 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)
                 .HasColumnName("status");
+            entity.Property(e => e.SuspensionReason).HasColumnName("suspension_reason");
+            entity.Property(e => e.SuspendedAt).HasColumnName("suspended_at");
+            entity.Property(e => e.SuspendedBy).HasColumnName("suspended_by");
             entity.Property(e => e.UpdatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<UserAuditLog>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("user_audit_logs_pkey");
+
+            entity.ToTable("user_audit_logs");
+
+            entity.HasIndex(e => e.UserId, "idx_user_audit_logs_user");
+            entity.HasIndex(e => e.EditorId, "idx_user_audit_logs_editor");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.EditorId).HasColumnName("editor_id");
+            entity.Property(e => e.Action).HasColumnName("action");
+            entity.Property(e => e.FieldName).HasColumnName("field_name");
+            entity.Property(e => e.OldValue).HasColumnName("old_value");
+            entity.Property(e => e.NewValue).HasColumnName("new_value");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.User).WithMany()
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("user_audit_logs_user_id_fkey");
+
+            entity.HasOne(d => d.Editor).WithMany()
+                .HasForeignKey(d => d.EditorId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("user_audit_logs_editor_id_fkey");
         });
 
         OnModelCreatingPartial(modelBuilder);
