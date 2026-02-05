@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -48,4 +48,7 @@ public partial class Order
     public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
 
     public virtual Transaction? Transaction { get; set; }
+
+    // Dispute (mỗi order chỉ có tối đa 1 dispute)
+    public virtual Dispute? Dispute { get; set; }
 }

@@ -26,6 +26,10 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<Conversation> Conversations { get; set; }
 
+    public virtual DbSet<Dispute> Disputes { get; set; }
+
+    public virtual DbSet<DisputeMessage> DisputeMessages { get; set; }
+
     public virtual DbSet<FavoriteProduct> FavoriteProducts { get; set; }
 
     public virtual DbSet<Inventory> Inventories { get; set; }
@@ -375,6 +379,126 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.Shop).WithMany(p => p.Conversations)
                 .HasForeignKey(d => d.ShopId)
                 .HasConstraintName("conversations_shop_id_fkey");
+        });
+
+        modelBuilder.Entity<Dispute>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("disputes_pkey");
+
+            entity.ToTable("disputes");
+
+            entity.HasIndex(e => e.OrderId, "idx_disputes_order");
+            entity.HasIndex(e => e.CustomerId, "idx_disputes_customer");
+            entity.HasIndex(e => e.ShopId, "idx_disputes_shop");
+            entity.HasIndex(e => e.Status, "idx_disputes_status");
+            entity.HasIndex(e => e.Type, "idx_disputes_type");
+            entity.HasIndex(e => e.CreatedAt, "idx_disputes_created").IsDescending();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.Type)
+                .HasDefaultValue((short)0)
+                .HasColumnName("type");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)0)
+                .HasColumnName("status");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Reason).HasColumnName("reason");
+            entity.Property(e => e.EvidenceUrls)
+                .HasDefaultValueSql("'[]'::jsonb")
+                .HasColumnType("jsonb")
+                .HasColumnName("evidence_urls");
+            entity.Property(e => e.RequestedAmount)
+                .HasPrecision(12, 2)
+                .HasDefaultValue(0m)
+                .HasColumnName("requested_amount");
+            entity.Property(e => e.ApprovedAmount)
+                .HasPrecision(12, 2)
+                .HasColumnName("approved_amount");
+            entity.Property(e => e.SellerResponse).HasColumnName("seller_response");
+            entity.Property(e => e.SellerEvidenceUrls)
+                .HasDefaultValueSql("'[]'::jsonb")
+                .HasColumnType("jsonb")
+                .HasColumnName("seller_evidence_urls");
+            entity.Property(e => e.SellerRespondedAt).HasColumnName("seller_responded_at");
+            entity.Property(e => e.Resolution).HasColumnName("resolution");
+            entity.Property(e => e.AdminNote).HasColumnName("admin_note");
+            entity.Property(e => e.ResolvedBy).HasColumnName("resolved_by");
+            entity.Property(e => e.ResolvedAt).HasColumnName("resolved_at");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Order).WithOne(p => p.Dispute)
+                .HasForeignKey<Dispute>(d => d.OrderId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("disputes_order_id_fkey");
+
+            entity.HasOne(d => d.Customer).WithMany(p => p.DisputesAsCustomer)
+                .HasForeignKey(d => d.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("disputes_customer_id_fkey");
+
+            entity.HasOne(d => d.Shop).WithMany(p => p.Disputes)
+                .HasForeignKey(d => d.ShopId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("disputes_shop_id_fkey");
+
+            entity.HasOne(d => d.ResolvedByNavigation).WithMany(p => p.DisputesResolvedByNavigation)
+                .HasForeignKey(d => d.ResolvedBy)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("disputes_resolved_by_fkey");
+        });
+
+        modelBuilder.Entity<DisputeMessage>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("dispute_messages_pkey");
+
+            entity.ToTable("dispute_messages");
+
+            entity.HasIndex(e => e.DisputeId, "idx_dispute_messages_dispute");
+            entity.HasIndex(e => e.SenderId, "idx_dispute_messages_sender");
+            entity.HasIndex(e => new { e.DisputeId, e.IsRead }, "idx_dispute_messages_unread")
+                .HasFilter("(is_read = false)");
+            entity.HasIndex(e => e.CreatedAt, "idx_dispute_messages_created").IsDescending();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.DisputeId).HasColumnName("dispute_id");
+            entity.Property(e => e.SenderId).HasColumnName("sender_id");
+            entity.Property(e => e.SenderRole)
+                .HasDefaultValue((short)0)
+                .HasColumnName("sender_role");
+            entity.Property(e => e.Content).HasColumnName("content");
+            entity.Property(e => e.Attachments)
+                .HasDefaultValueSql("'[]'::jsonb")
+                .HasColumnType("jsonb")
+                .HasColumnName("attachments");
+            entity.Property(e => e.IsRead)
+                .HasDefaultValue(false)
+                .HasColumnName("is_read");
+            entity.Property(e => e.ReadAt).HasColumnName("read_at");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Dispute).WithMany(p => p.DisputeMessages)
+                .HasForeignKey(d => d.DisputeId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("dispute_messages_dispute_id_fkey");
+
+            entity.HasOne(d => d.Sender).WithMany(p => p.DisputeMessages)
+                .HasForeignKey(d => d.SenderId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("dispute_messages_sender_id_fkey");
         });
 
         modelBuilder.Entity<FavoriteProduct>(entity =>

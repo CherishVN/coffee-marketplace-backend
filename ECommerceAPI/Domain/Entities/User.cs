@@ -62,4 +62,9 @@ public partial class User
     public virtual ICollection<Shop> ShopVerifiedByNavigations { get; set; } = new List<Shop>();
 
     public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
+
+    // Disputes
+    public virtual ICollection<Dispute> DisputesAsCustomer { get; set; } = new List<Dispute>();
+    public virtual ICollection<Dispute> DisputesResolvedByNavigation { get; set; } = new List<Dispute>();
+    public virtual ICollection<DisputeMessage> DisputeMessages { get; set; } = new List<DisputeMessage>();
 }

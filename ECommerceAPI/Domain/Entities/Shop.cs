@@ -50,4 +50,7 @@ public partial class Shop
     public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
 
     public virtual User? VerifiedByNavigation { get; set; }
+
+    // Disputes
+    public virtual ICollection<Dispute> Disputes { get; set; } = new List<Dispute>();
 }
