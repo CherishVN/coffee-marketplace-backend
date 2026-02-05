@@ -308,10 +308,18 @@ public partial class ApplicationDbContext : DbContext
 
             entity.HasIndex(e => e.ParentId, "idx_categories_parent");
 
+            entity.HasIndex(e => new { e.Code, e.Level }, "idx_categories_code_level").IsUnique();
+
+            entity.HasIndex(e => new { e.Name, e.Level }, "idx_categories_name_level").IsUnique();
+
             entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Code).HasColumnName("code");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
             entity.Property(e => e.IsActive)
                 .HasDefaultValue(true)
                 .HasColumnName("is_active");

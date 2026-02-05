@@ -26,6 +26,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IUserAdminService, UserAdminService>();
             builder.Services.AddScoped<IWithdrawAdminService, WithdrawAdminService>();
             builder.Services.AddScoped<ISellerApprovalService, SellerApprovalService>();
+            builder.Services.AddScoped<ICategoryAdminService, CategoryAdminService>();
 
             var jwtSettings = builder.Configuration.GetSection("Jwt");
             var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey is not configured");
