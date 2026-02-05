@@ -436,3 +436,7 @@ yarn-error.log*
 *.crt
 *.cer
 *.pem
+
+# Documentation files
+*.md
+!README.md

@@ -1,8 +1,10 @@
 using System.Text;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Application.Services;
+using ECommerceAPI.Infrastructure.Configuration;
 using ECommerceAPI.Infrastructure.Data;
 using ECommerceAPI.Infrastructure.Repositories;
+using ECommerceAPI.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -17,16 +19,31 @@ namespace ECommerceAPI
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            // Database
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+            // Configuration Settings
+            builder.Services.Configure<AiServiceSettings>(
+                builder.Configuration.GetSection(AiServiceSettings.SectionName));
+
+            // Repositories
             builder.Services.AddScoped<IUserRepository, UserRepository>();
+
+            // Services
             builder.Services.AddScoped<IJwtService, JwtService>();
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IUserAdminService, UserAdminService>();
             builder.Services.AddScoped<IWithdrawAdminService, WithdrawAdminService>();
             builder.Services.AddScoped<ISellerApprovalService, SellerApprovalService>();
             builder.Services.AddScoped<ICategoryAdminService, CategoryAdminService>();
+            builder.Services.AddScoped<ITagAdminService, TagAdminService>();
+            builder.Services.AddScoped<IProductModerationService, ProductModerationService>();
+            builder.Services.AddScoped<IDisputeAdminService, DisputeAdminService>();
+            builder.Services.AddScoped<IDashboardService, DashboardService>();
+
+            // AI Service - HTTP Client
+            builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
             var jwtSettings = builder.Configuration.GetSection("Jwt");
             var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey is not configured");
