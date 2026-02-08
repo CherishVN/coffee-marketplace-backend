@@ -5,6 +5,7 @@ using ECommerceAPI.Infrastructure.Configuration;
 using ECommerceAPI.Infrastructure.Data;
 using ECommerceAPI.Infrastructure.Repositories;
 using ECommerceAPI.Infrastructure.Services;
+using ECommerceAPI.Middleware;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -31,8 +32,8 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IUserRepository, UserRepository>();
 
             // Services
-            builder.Services.AddScoped<IJwtService, JwtService>();
-            builder.Services.AddScoped<IAuthService, AuthService>();
+            builder.Services.AddHttpContextAccessor(); // Required for UserClaimsService
+            builder.Services.AddScoped<IUserClaimsService, UserClaimsService>();
             builder.Services.AddScoped<IUserAdminService, UserAdminService>();
             builder.Services.AddScoped<IWithdrawAdminService, WithdrawAdminService>();
             builder.Services.AddScoped<ISellerApprovalService, SellerApprovalService>();
@@ -45,31 +46,12 @@ namespace ECommerceAPI
             // AI Service - HTTP Client
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
-            var jwtSettings = builder.Configuration.GetSection("Jwt");
-            var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey is not configured");
+            // Supabase JWT Configuration
             var supabaseJwtSecret = builder.Configuration["Supabase:JwtSecret"] ?? throw new InvalidOperationException("Supabase JwtSecret is not configured");
             var supabaseUrl = builder.Configuration["Supabase:Url"]!;
 
-            builder.Services.AddAuthentication(options =>
-            {
-                options.DefaultAuthenticateScheme = "MultiAuth";
-                options.DefaultChallengeScheme = "MultiAuth";
-            })
-            .AddJwtBearer("Backend", options =>
-            {
-                options.TokenValidationParameters = new TokenValidationParameters
-                {
-                    ValidateIssuer = true,
-                    ValidateAudience = true,
-                    ValidateLifetime = true,
-                    ValidateIssuerSigningKey = true,
-                    ValidIssuer = jwtSettings["Issuer"],
-                    ValidAudience = jwtSettings["Audience"],
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
-                    ClockSkew = TimeSpan.Zero
-                };
-            })
-            .AddJwtBearer("Supabase", options =>
+            builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(options =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
@@ -81,28 +63,6 @@ namespace ECommerceAPI
                     ValidAudience = "authenticated",
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(supabaseJwtSecret)),
                     ClockSkew = TimeSpan.Zero
-                };
-            })
-            .AddPolicyScheme("MultiAuth", "Backend or Supabase", options =>
-            {
-                options.ForwardDefaultSelector = context =>
-                {
-                    var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
-                    if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
-                        return "Backend";
-
-                    var token = authHeader.Substring("Bearer ".Length);
-                    var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-
-                    try
-                    {
-                        var jwt = handler.ReadJwtToken(token);
-                        if (jwt.Issuer.Contains("supabase"))
-                            return "Supabase";
-                    }
-                    catch { }
-
-                    return "Backend";
                 };
             });
 
@@ -164,6 +124,7 @@ namespace ECommerceAPI
             app.UseHttpsRedirection();
             app.UseCors("AllowAll");
             app.UseAuthentication();
+            app.UseMiddleware<UserSyncMiddleware>(); // Auto-create user on first request
             app.UseAuthorization();
             app.MapControllers();
             app.Run();
