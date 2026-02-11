@@ -45,18 +45,28 @@ public class UserSyncMiddleware
                         };
 
                         await userRepository.CreateAsync(newUser);
+                        _logger.LogInformation("Auto-created user {UserId} with role {Role}", userClaims.UserId, newUser.Role);
+                        existingUser = newUser;
+                    }
+                    
+                    // Enrich claims with role from database
+                    if (existingUser != null && context.User.Identity is System.Security.Claims.ClaimsIdentity identity)
+                    {
+                        // Remove existing role claim (from Supabase JWT which is "authenticated")
+                        var existingRoleClaim = identity.FindFirst(System.Security.Claims.ClaimTypes.Role);
+                        if (existingRoleClaim != null)
+                        {
+                            identity.RemoveClaim(existingRoleClaim);
+                        }
                         
-                        _logger.LogInformation(
-                            "Auto-created user in local database: {UserId}, Email: {Email}", 
-                            userClaims.UserId, 
-                            userClaims.Email
-                        );
+                        // Add role claim from database
+                        identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, existingUser.Role));
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error auto-creating user {UserId}", userClaims.UserId);
-                    // Don't block the request if user creation fails
+                    _logger.LogError(ex, "Error processing user {UserId}", userClaims.UserId);
+                    // Don't block the request if user processing fails
                     // The user is still authenticated via Supabase
                 }
             }
