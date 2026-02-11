@@ -47,12 +47,14 @@ namespace ECommerceAPI
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
             // Supabase JWT Configuration
-            var supabaseJwtSecret = builder.Configuration["Supabase:JwtSecret"] ?? throw new InvalidOperationException("Supabase JwtSecret is not configured");
             var supabaseUrl = builder.Configuration["Supabase:Url"]!;
+            var jwksUrl = $"{supabaseUrl}/auth/v1/.well-known/jwks.json";
 
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
+                options.RequireHttpsMetadata = false; // Set to true in production
+                
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
@@ -61,8 +63,48 @@ namespace ECommerceAPI
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = $"{supabaseUrl}/auth/v1",
                     ValidAudience = "authenticated",
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(supabaseJwtSecret)),
-                    ClockSkew = TimeSpan.Zero
+                    ClockSkew = TimeSpan.FromMinutes(5),
+                    
+                    // Automatically fetch signing keys from JWKS endpoint
+                    IssuerSigningKeyResolver = (token, securityToken, kid, parameters) =>
+                    {
+                        var httpClient = new HttpClient();
+                        var jwks = httpClient.GetStringAsync(jwksUrl).Result;
+                        var keys = new Microsoft.IdentityModel.Tokens.JsonWebKeySet(jwks);
+                        return keys.Keys;
+                    }
+                };
+                
+                options.Events = new JwtBearerEvents
+                {
+                    OnAuthenticationFailed = context =>
+                    {
+                        Console.WriteLine($"Authentication failed: {context.Exception.Message}");
+                        if (context.Exception.InnerException != null)
+                        {
+                            Console.WriteLine($"   Inner exception: {context.Exception.InnerException.Message}");
+                        }
+                        return Task.CompletedTask;
+                    },
+                    OnTokenValidated = context =>
+                    {
+                        Console.WriteLine("Token validated successfully");
+                        var claims = context.Principal?.Claims.Select(c => $"{c.Type}: {c.Value}");
+                        if (claims != null)
+                        {
+                            Console.WriteLine($"   Claims: {string.Join(", ", claims)}");
+                        }
+                        return Task.CompletedTask;
+                    },
+                    OnMessageReceived = context =>
+                    {
+                        var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
+                        if (!string.IsNullOrEmpty(token))
+                        {
+                            Console.WriteLine($"📨 Token received (first 50 chars): {token.Substring(0, Math.Min(50, token.Length))}...");
+                        }
+                        return Task.CompletedTask;
+                    }
                 };
             });
 
