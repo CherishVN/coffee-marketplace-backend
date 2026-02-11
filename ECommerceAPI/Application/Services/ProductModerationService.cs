@@ -45,7 +45,8 @@ public class ProductModerationService : IProductModerationService
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-                query = query.Where(p => p.Name.Contains(search));
+                var searchLower = search.ToLower();
+                query = query.Where(p => p.Name.ToLower().Contains(searchLower));
             }
 
             var totalCount = await query.CountAsync();

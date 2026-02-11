@@ -24,114 +24,145 @@ public class DashboardService : IDashboardService
         try
         {
             var now = DateTime.UtcNow;
-            var startOfMonth = new DateTime(now.Year, now.Month, 1);
-            var startOfToday = now.Date;
-
-            // User Stats
-            var totalUsers = await _context.Users.CountAsync();
-            var activeUsers = await _context.Users.CountAsync(u => u.Status == (short)UserStatus.Active);
-            var suspendedUsers = await _context.Users.CountAsync(u => u.Status == (short)UserStatus.Suspended);
-            var newUsersThisMonth = await _context.Users.CountAsync(u => u.CreatedAt >= startOfMonth);
-            var customers = await _context.Users.CountAsync(u => u.Role == "customer");
-            var sellers = await _context.Users.CountAsync(u => u.Role == "seller");
-
-            // Shop Stats
-            var totalShops = await _context.Shops.CountAsync();
-            var activeShops = await _context.Shops.CountAsync(s => s.Status == (short)ShopStatus.Active);
-            var pendingShops = await _context.Shops.CountAsync(s => s.VerificationStatus == (short)ShopVerificationStatus.Pending);
-            var suspendedShops = await _context.Shops.CountAsync(s => s.Status == (short)ShopStatus.Suspended);
-            var newShopsThisMonth = await _context.Shops.CountAsync(s => s.CreatedAt >= startOfMonth);
-
-            // Product Stats
-            var totalProducts = await _context.Products.CountAsync();
-            var activeProducts = await _context.Products.CountAsync(p => p.Status == (short)ProductStatus.Active);
-            var draftProducts = await _context.Products.CountAsync(p => p.Status == (short)ProductStatus.Draft);
-            var hiddenProducts = await _context.Products.CountAsync(p => p.Status == (short)ProductStatus.Hidden);
-            var outOfStockProducts = await _context.Products.CountAsync(p => p.Status == (short)ProductStatus.OutOfStock);
-            var newProductsThisMonth = await _context.Products.CountAsync(p => p.CreatedAt >= startOfMonth);
-
-            // Order Stats
-            var totalOrders = await _context.Orders.CountAsync();
-            var pendingOrders = await _context.Orders.CountAsync(o => 
-                o.Status == (short)OrderStatus.PendingPayment || 
-                o.Status == (short)OrderStatus.PendingConfirmation);
-            var processingOrders = await _context.Orders.CountAsync(o => 
-                o.Status == (short)OrderStatus.Processing || 
-                o.Status == (short)OrderStatus.Shipping);
-            var completedOrders = await _context.Orders.CountAsync(o => o.Status == (short)OrderStatus.Completed);
-            var cancelledOrders = await _context.Orders.CountAsync(o => o.Status == (short)OrderStatus.Cancelled);
-            var todayOrders = await _context.Orders.CountAsync(o => o.CreatedAt >= startOfToday);
-            var thisMonthOrders = await _context.Orders.CountAsync(o => o.CreatedAt >= startOfMonth);
-
-            // Revenue Stats
-            var totalRevenue = await _context.Orders
-                .Where(o => o.Status == (short)OrderStatus.Completed || o.Status == (short)OrderStatus.Delivered)
-                .SumAsync(o => o.Total);
-                
-            var todayRevenue = await _context.Orders
-                .Where(o => o.CreatedAt >= startOfToday && 
-                           (o.Status == (short)OrderStatus.Completed || o.Status == (short)OrderStatus.Delivered))
-                .SumAsync(o => o.Total);
-                
-            var thisMonthRevenue = await _context.Orders
-                .Where(o => o.CreatedAt >= startOfMonth && 
-                           (o.Status == (short)OrderStatus.Completed || o.Status == (short)OrderStatus.Delivered))
-                .SumAsync(o => o.Total);
-
+            var startOfMonth = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            var startOfToday = DateTime.SpecifyKind(now.Date, DateTimeKind.Utc);
             var lastMonthStart = startOfMonth.AddMonths(-1);
-            var lastMonthRevenue = await _context.Orders
-                .Where(o => o.CreatedAt >= lastMonthStart && o.CreatedAt < startOfMonth &&
-                           (o.Status == (short)OrderStatus.Completed || o.Status == (short)OrderStatus.Delivered))
-                .SumAsync(o => o.Total);
 
-            var growthPercentage = lastMonthRevenue > 0 
-                ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100 
-                : 0;
+            // Batch all counts per entity into single queries to avoid
+            // multiple round-trips AND DbContext concurrency issues.
 
-            // Dispute Stats
-            var totalDisputes = await _context.Disputes.CountAsync();
-            var pendingDisputes = await _context.Disputes.CountAsync(d => d.Status == (short)DisputeStatus.Pending);
-            var underReviewDisputes = await _context.Disputes.CountAsync(d => d.Status == (short)DisputeStatus.UnderReview);
-            var resolvedDisputes = await _context.Disputes.CountAsync(d => d.Status == (short)DisputeStatus.Resolved);
-            var refundedDisputes = await _context.Disputes.CountAsync(d => d.Status == (short)DisputeStatus.Refunded);
+            // 1) User Stats — single query
+            var userStats = await _context.Users
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Active = g.Count(u => u.Status == (short)UserStatus.Active),
+                    Suspended = g.Count(u => u.Status == (short)UserStatus.Suspended),
+                    NewThisMonth = g.Count(u => u.CreatedAt >= startOfMonth),
+                    Customers = g.Count(u => u.Role == "customer"),
+                    Sellers = g.Count(u => u.Role == "seller"),
+                })
+                .FirstOrDefaultAsync();
+
+            // 2) Shop Stats — single query
+            var shopStats = await _context.Shops
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Active = g.Count(s => s.Status == (short)ShopStatus.Active),
+                    PendingVerification = g.Count(s => s.VerificationStatus == (short)ShopVerificationStatus.Pending),
+                    Suspended = g.Count(s => s.Status == (short)ShopStatus.Suspended),
+                    NewThisMonth = g.Count(s => s.CreatedAt >= startOfMonth),
+                })
+                .FirstOrDefaultAsync();
+
+            // 3) Product Stats — single query
+            var productStats = await _context.Products
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Active = g.Count(p => p.Status == (short)ProductStatus.Active),
+                    Draft = g.Count(p => p.Status == (short)ProductStatus.Draft),
+                    Hidden = g.Count(p => p.Status == (short)ProductStatus.Hidden),
+                    OutOfStock = g.Count(p => p.Status == (short)ProductStatus.OutOfStock),
+                    NewThisMonth = g.Count(p => p.CreatedAt >= startOfMonth),
+                })
+                .FirstOrDefaultAsync();
+
+            // 4) Order Stats — single query
+            var orderStats = await _context.Orders
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Pending = g.Count(o =>
+                        o.Status == (short)OrderStatus.PendingPayment ||
+                        o.Status == (short)OrderStatus.PendingConfirmation),
+                    Processing = g.Count(o =>
+                        o.Status == (short)OrderStatus.Processing ||
+                        o.Status == (short)OrderStatus.Shipping),
+                    Completed = g.Count(o => o.Status == (short)OrderStatus.Completed),
+                    Cancelled = g.Count(o => o.Status == (short)OrderStatus.Cancelled),
+                    TodayOrders = g.Count(o => o.CreatedAt >= startOfToday),
+                    ThisMonthOrders = g.Count(o => o.CreatedAt >= startOfMonth),
+                })
+                .FirstOrDefaultAsync();
+
+            // 5) Revenue Stats — single query
+            var revenueStats = await _context.Orders
+                .Where(o => o.Status == (short)OrderStatus.Completed || o.Status == (short)OrderStatus.Delivered)
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    TotalRevenue = g.Sum(o => (decimal?)o.Total) ?? 0m,
+                    TodayRevenue = g.Where(o => o.CreatedAt >= startOfToday).Sum(o => (decimal?)o.Total) ?? 0m,
+                    ThisMonthRevenue = g.Where(o => o.CreatedAt >= startOfMonth).Sum(o => (decimal?)o.Total) ?? 0m,
+                    LastMonthRevenue = g.Where(o => o.CreatedAt >= lastMonthStart && o.CreatedAt < startOfMonth).Sum(o => (decimal?)o.Total) ?? 0m,
+                })
+                .FirstOrDefaultAsync();
+
+            var totalRevenue = revenueStats?.TotalRevenue ?? 0m;
+            var todayRevenue = revenueStats?.TodayRevenue ?? 0m;
+            var thisMonthRevenue = revenueStats?.ThisMonthRevenue ?? 0m;
+            var lastMonthRevenue = revenueStats?.LastMonthRevenue ?? 0m;
+
+            var growthPercentage = lastMonthRevenue > 0
+                ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
+                : 0m;
+
+            // 6) Dispute Stats — single query
+            var disputeStats = await _context.Disputes
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Pending = g.Count(d => d.Status == (short)DisputeStatus.Pending),
+                    UnderReview = g.Count(d => d.Status == (short)DisputeStatus.UnderReview),
+                    Resolved = g.Count(d => d.Status == (short)DisputeStatus.Resolved),
+                    Refunded = g.Count(d => d.Status == (short)DisputeStatus.Refunded),
+                })
+                .FirstOrDefaultAsync();
 
             var stats = new DashboardStatsDto
             {
                 Users = new UserStats
                 {
-                    Total = totalUsers,
-                    Active = activeUsers,
-                    Suspended = suspendedUsers,
-                    NewThisMonth = newUsersThisMonth,
-                    Customers = customers,
-                    Sellers = sellers
+                    Total = userStats?.Total ?? 0,
+                    Active = userStats?.Active ?? 0,
+                    Suspended = userStats?.Suspended ?? 0,
+                    NewThisMonth = userStats?.NewThisMonth ?? 0,
+                    Customers = userStats?.Customers ?? 0,
+                    Sellers = userStats?.Sellers ?? 0
                 },
                 Shops = new ShopStats
                 {
-                    Total = totalShops,
-                    Active = activeShops,
-                    PendingVerification = pendingShops,
-                    Suspended = suspendedShops,
-                    NewThisMonth = newShopsThisMonth
+                    Total = shopStats?.Total ?? 0,
+                    Active = shopStats?.Active ?? 0,
+                    PendingVerification = shopStats?.PendingVerification ?? 0,
+                    Suspended = shopStats?.Suspended ?? 0,
+                    NewThisMonth = shopStats?.NewThisMonth ?? 0
                 },
                 Products = new ProductStats
                 {
-                    Total = totalProducts,
-                    Active = activeProducts,
-                    Draft = draftProducts,
-                    Hidden = hiddenProducts,
-                    OutOfStock = outOfStockProducts,
-                    NewThisMonth = newProductsThisMonth
+                    Total = productStats?.Total ?? 0,
+                    Active = productStats?.Active ?? 0,
+                    Draft = productStats?.Draft ?? 0,
+                    Hidden = productStats?.Hidden ?? 0,
+                    OutOfStock = productStats?.OutOfStock ?? 0,
+                    NewThisMonth = productStats?.NewThisMonth ?? 0
                 },
                 Orders = new OrderStats
                 {
-                    Total = totalOrders,
-                    Pending = pendingOrders,
-                    Processing = processingOrders,
-                    Completed = completedOrders,
-                    Cancelled = cancelledOrders,
-                    TodayOrders = todayOrders,
-                    ThisMonthOrders = thisMonthOrders
+                    Total = orderStats?.Total ?? 0,
+                    Pending = orderStats?.Pending ?? 0,
+                    Processing = orderStats?.Processing ?? 0,
+                    Completed = orderStats?.Completed ?? 0,
+                    Cancelled = orderStats?.Cancelled ?? 0,
+                    TodayOrders = orderStats?.TodayOrders ?? 0,
+                    ThisMonthOrders = orderStats?.ThisMonthOrders ?? 0
                 },
                 Revenue = new RevenueStats
                 {
@@ -143,11 +174,11 @@ public class DashboardService : IDashboardService
                 },
                 Disputes = new DisputeStats
                 {
-                    Total = totalDisputes,
-                    Pending = pendingDisputes,
-                    UnderReview = underReviewDisputes,
-                    Resolved = resolvedDisputes,
-                    Refunded = refundedDisputes
+                    Total = disputeStats?.Total ?? 0,
+                    Pending = disputeStats?.Pending ?? 0,
+                    UnderReview = disputeStats?.UnderReview ?? 0,
+                    Resolved = disputeStats?.Resolved ?? 0,
+                    Refunded = disputeStats?.Refunded ?? 0
                 }
             };
 

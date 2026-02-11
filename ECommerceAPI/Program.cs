@@ -42,6 +42,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IProductModerationService, ProductModerationService>();
             builder.Services.AddScoped<IDisputeAdminService, DisputeAdminService>();
             builder.Services.AddScoped<IDashboardService, DashboardService>();
+            builder.Services.AddScoped<IOrderAdminService, OrderAdminService>();
 
             // AI Service - HTTP Client
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
