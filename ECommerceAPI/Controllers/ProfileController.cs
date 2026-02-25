@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -5,107 +7,195 @@ using Microsoft.AspNetCore.Mvc;
 namespace ECommerceAPI.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-[Authorize] // Requires Supabase JWT token
+[Route("api/user")]
+[Authorize]
 public class ProfileController : ControllerBase
 {
     private readonly IUserClaimsService _userClaimsService;
-    private readonly IUserRepository _userRepository;
-    private readonly ILogger<ProfileController> _logger;
+    private readonly IUserProfileService _userProfileService;
 
     public ProfileController(
         IUserClaimsService userClaimsService,
-        IUserRepository userRepository,
-        ILogger<ProfileController> logger)
+        IUserProfileService userProfileService)
     {
         _userClaimsService = userClaimsService;
-        _userRepository = userRepository;
-        _logger = logger;
+        _userProfileService = userProfileService;
     }
 
     /// <summary>
     /// Get current user profile
-    /// Example: GET /api/profile/me
-    /// Requires: Authorization: Bearer {supabase_access_token}
     /// </summary>
-    [HttpGet("me")]
-    public async Task<IActionResult> GetMyProfile()
+    [HttpGet("profile")]
+    public async Task<IActionResult> GetProfile()
     {
-        // Extract user ID from Supabase JWT claims
         var userId = _userClaimsService.GetUserId();
         
         if (userId == null)
         {
-            return Unauthorized(new { message = "Invalid token" });
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
         }
 
-        // Get user from local database
-        var user = await _userRepository.GetByIdAsync(userId.Value);
-        
-        if (user == null)
+        try
         {
-            return NotFound(new { message = "User not found" });
+            var profile = await _userProfileService.GetProfileAsync(userId.Value);
+            
+            var email = _userClaimsService.GetEmail();
+            profile.Email = email;
+
+            return Ok(new { success = true, data = profile });
         }
-
-        // Get email from claims (not stored in local DB)
-        var email = _userClaimsService.GetEmail();
-
-        return Ok(new
+        catch (Exception ex)
         {
-            id = user.Id,
-            email = email,
-            fullName = user.FullName,
-            phone = user.Phone,
-            role = user.Role,
-            status = user.Status,
-            createdAt = user.CreatedAt
-        });
+            return NotFound(new { success = false, message = ex.Message });
+        }
     }
 
     /// <summary>
     /// Update current user profile
-    /// Example: PUT /api/profile/me
     /// </summary>
-    [HttpPut("me")]
-    public async Task<IActionResult> UpdateMyProfile([FromBody] UpdateProfileDto dto)
+    [HttpPut("profile")]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
     {
         var userId = _userClaimsService.GetUserId();
         
         if (userId == null)
         {
-            return Unauthorized(new { message = "Invalid token" });
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
         }
 
-        var user = await _userRepository.GetByIdAsync(userId.Value);
-        
-        if (user == null)
-        {
-            return NotFound(new { message = "User not found" });
-        }
+        var result = await _userProfileService.UpdateProfileAsync(userId.Value, dto);
 
-        // Update user profile
-        user.FullName = dto.FullName ?? user.FullName;
-        user.Phone = dto.Phone ?? user.Phone;
-        user.UpdatedAt = DateTime.UtcNow;
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
 
-        await _userRepository.UpdateAsync(user);
-
-        return Ok(new
-        {
-            message = "Profile updated successfully",
-            user = new
-            {
-                id = user.Id,
-                fullName = user.FullName,
-                phone = user.Phone,
-                role = user.Role
-            }
-        });
+        return Ok(new { success = true, message = result.Message });
     }
 
     /// <summary>
-    /// Example endpoint to demonstrate extracting user claims
-    /// Shows all available claims from Supabase JWT
+    /// Register as seller
+    /// </summary>
+    [HttpPost("register-seller")]
+    public async Task<IActionResult> RegisterAsSeller([FromBody] RegisterSellerDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        
+        if (userId == null)
+        {
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+        }
+
+        var result = await _userProfileService.RegisterAsSellerAsync(userId.Value, dto);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// Get user addresses
+    /// </summary>
+    [HttpGet("addresses")]
+    public async Task<IActionResult> GetAddresses()
+    {
+        var userId = _userClaimsService.GetUserId();
+        
+        if (userId == null)
+        {
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+        }
+
+        var addresses = await _userProfileService.GetAddressesAsync(userId.Value);
+
+        return Ok(new { success = true, data = addresses });
+    }
+
+    /// <summary>
+    /// Add new address
+    /// </summary>
+    [HttpPost("addresses")]
+    public async Task<IActionResult> AddAddress([FromBody] AddAddressDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        
+        if (userId == null)
+        {
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+        }
+
+        var result = await _userProfileService.AddAddressAsync(userId.Value, dto);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message, data = result.Data });
+    }
+
+    /// <summary>
+    /// Update address
+    /// </summary>
+    [HttpPut("addresses/{addressId}")]
+    public async Task<IActionResult> UpdateAddress(Guid addressId, [FromBody] UpdateAddressDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        
+        if (userId == null)
+        {
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+        }
+
+        var result = await _userProfileService.UpdateAddressAsync(userId.Value, addressId, dto);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// Delete address
+    /// </summary>
+    [HttpDelete("addresses/{addressId}")]
+    public async Task<IActionResult> DeleteAddress(Guid addressId)
+    {
+        var userId = _userClaimsService.GetUserId();
+        
+        if (userId == null)
+        {
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+        }
+
+        var result = await _userProfileService.DeleteAddressAsync(userId.Value, addressId);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// Set default address
+    /// </summary>
+    [HttpPost("addresses/{addressId}/set-default")]
+    public async Task<IActionResult> SetDefaultAddress(Guid addressId)
+    {
+        var userId = _userClaimsService.GetUserId();
+        
+        if (userId == null)
+        {
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+        }
+
+        var result = await _userProfileService.SetDefaultAddressAsync(userId.Value, addressId);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// Get current user claims (for debugging)
     /// </summary>
     [HttpGet("claims")]
     public IActionResult GetClaims()
@@ -120,14 +210,9 @@ public class ProfileController : ControllerBase
 
         return Ok(new
         {
+            success = true,
             allClaims = claims,
             extractedClaims = userClaims
         });
     }
-}
-
-public class UpdateProfileDto
-{
-    public string? FullName { get; set; }
-    public string? Phone { get; set; }
 }

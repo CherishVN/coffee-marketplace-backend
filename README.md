@@ -254,4 +254,123 @@ This project is developed as part of FPT University Capstone Project requirement
 
 ---
 
-**Last Updated:** January 5, 2026
+**Last Updated:** 2026-02-25
+
+---
+
+## 🚀 Development Sprints Progress
+
+### ✅ Sprint 0: Admin Portal (COMPLETED)
+**Duration:** Tuần 0  
+**Status:** ✅ Complete  
+**APIs:** 44 endpoints  
+**Documentation:** [ADMIN_PORTAL_APIs.md](ADMIN_PORTAL_APIs.md)
+
+**Features:**
+- User Management (suspend, unsuspend, audit logs)
+- Seller Approval (approve, reject shops)
+- Shop Management (activate, suspend, close)
+- Category Management (CRUD, taxonomy tree, migrate products)
+- Tag Management (CRUD)
+- Product Moderation (hide, unhide, remove)
+- Withdrawal Management (approve, reject)
+- Dispute Management (approve refund, reject)
+- Dashboard Statistics (comprehensive metrics)
+
+---
+
+### ✅ Sprint 2: User Profile Management (COMPLETED)
+**Duration:** Tuần 3  
+**Status:** ✅ Complete  
+**APIs:** 8 endpoints  
+**Documentation:** [USER_PROFILE_APIs.md](USER_PROFILE_APIs.md) | [Sprint Summary](SPRINT_2_SUMMARY.md)
+
+**Features:**
+- Get/Update user profile
+- Register as seller (with business info)
+- Address management (CRUD + set default)
+- FluentValidation for all inputs
+- Vietnamese slug generator
+- Business rules enforcement
+
+**Technical:**
+- Service pattern implementation
+- DTO pattern for clean API contracts
+- Integration với Admin Portal (seller approval)
+
+---
+
+### ✅ Sprint 4: Seller Shop Management & Withdrawal (COMPLETED)
+**Duration:** Tuần 6  
+**Status:** ✅ Complete  
+**APIs:** 5 endpoints  
+**Documentation:** [SELLER_PORTAL_APIs.md](SELLER_PORTAL_APIs.md) | [Sprint Summary](SPRINT_4_SUMMARY.md)
+
+**Features:**
+- Shop management (get, update shop info)
+- Wallet management (view balance, earnings, withdrawn)
+- Withdrawal requests (create, view history)
+- Auto reserve balance on withdrawal
+- Prevent duplicate pending requests
+
+**Technical:**
+- Wallet entity integration
+- Transaction ledger tracking
+- FluentValidation for withdrawal requests
+- Business rules: balance check, pending limit
+
+---
+
+### 🔄 Sprint 3: AI Microservice (SKIPPED - DO LATER)
+**Duration:** TBD  
+**Status:** ⏸️ Postponed  
+
+**Planned Features:**
+- AI Category Suggestion API
+- AI Tag Suggestion API
+- AI Material Suggestion API
+- Product title/description analysis
+- Optional image analysis
+- Suggestion logging for model improvement
+- Integration with backend
+
+**Technology Stack:**
+- Python + FastAPI
+- PhoBERT for Vietnamese NLP
+- TensorFlow/PyTorch for ML models
+- Docker containerization
+
+---
+
+### 📊 Overall Progress
+
+| Module | Progress | APIs | Status |
+|--------|----------|------|--------|
+| **Admin Portal** | 100% | 44/44 | ✅ Complete |
+| **Authentication** | N/A | 0/0 | ✅ Supabase handles |
+| **User Profile** | 100% | 8/8 | ✅ Complete |
+| **Seller Shop & Withdrawal** | 100% | 5/5 | ✅ Complete |
+| **Seller Products & Orders** | 0% | 0/10 | 🔲 Sprint 5 Next |
+| **AI Service** | 0% | 0/4 | ⏸️ Postponed |
+| **Customer Portal** | 0% | 0/20 | 🔲 Planned |
+| **System Services** | 0% | 0/5 | 🔲 Planned |
+
+**Total APIs Implemented:** 57 / ~100 endpoints (57% complete)
+
+---
+
+## 📚 Quick Links
+
+- 📖 [Admin Portal API Documentation](ADMIN_PORTAL_APIs.md)
+- 👤 [User Profile API Documentation](USER_PROFILE_APIs.md)
+- 🏪 [Seller Portal API Documentation](SELLER_PORTAL_APIs.md)
+- 🔐 [Authentication Strategy](AUTHENTICATION_STRATEGY.md)
+- 🤖 [AI Service Integration Guide](AI_SERVICE_INTEGRATION.md)
+- 📝 [Sprint 2 Summary](SPRINT_2_SUMMARY.md)
+- 📝 [Sprint 4 Summary](SPRINT_4_SUMMARY.md)
+
+---
+
+**Project Status:** 🟢 Active Development  
+**Current Sprint:** Sprint 2 (User Profile) ✅ COMPLETED  
+**Next Sprint:** Sprint 3 (AI Microservice) 🤖 READY TO START

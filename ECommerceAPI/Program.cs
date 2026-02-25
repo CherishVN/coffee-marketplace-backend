@@ -1,4 +1,6 @@
 using System.Text;
+using ECommerceAPI.Application.DTOs.User;
+using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Application.Services;
 using ECommerceAPI.Infrastructure.Configuration;
@@ -6,6 +8,8 @@ using ECommerceAPI.Infrastructure.Data;
 using ECommerceAPI.Infrastructure.Repositories;
 using ECommerceAPI.Infrastructure.Services;
 using ECommerceAPI.Middleware;
+using FluentValidation;
+using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -43,9 +47,16 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IDisputeAdminService, DisputeAdminService>();
             builder.Services.AddScoped<IDashboardService, DashboardService>();
             builder.Services.AddScoped<IOrderAdminService, OrderAdminService>();
+            builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+            builder.Services.AddScoped<ISellerService, SellerService>();
 
             // AI Service - HTTP Client
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
+
+            // FluentValidation
+            builder.Services.AddFluentValidationAutoValidation();
+            builder.Services.AddValidatorsFromAssemblyContaining<UpdateProfileDtoValidator>();
+            builder.Services.AddValidatorsFromAssemblyContaining<CreateWithdrawalRequestDtoValidator>();
 
             // Supabase JWT Configuration
             var supabaseUrl = builder.Configuration["Supabase:Url"]!;
