@@ -1,7 +1,10 @@
 using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Domain.Enums;
+using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ECommerceAPI.Application.Services;
@@ -9,10 +12,12 @@ namespace ECommerceAPI.Application.Services;
 public class SellerService : ISellerService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IHubContext<OrderTrackingHub> _hubContext;
 
-    public SellerService(ApplicationDbContext context)
+    public SellerService(ApplicationDbContext context, IHubContext<OrderTrackingHub> hubContext)
     {
         _context = context;
+        _hubContext = hubContext;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -796,15 +801,33 @@ public class SellerService : ISellerService
             };
         }
 
+        var oldStatus = (OrderStatus)order.Status;
         order.Status = dto.Status;
         order.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        await NotifyStatusChanged(order, oldStatus, (OrderStatus)order.Status);
 
         return new ServiceResponse
         {
             Success = true,
             Message = "Cập nhật trạng thái đơn hàng thành công"
         };
+    }
+
+    private async Task NotifyStatusChanged(Order order, OrderStatus oldStatus, OrderStatus newStatus)
+    {
+        var groupName = OrderTrackingHub.GetUserGroupName(order.CustomerId);
+
+        await _hubContext.Clients.Group(groupName).SendAsync("OrderStatusUpdated", new
+        {
+            orderId = order.Id,
+            oldStatus = (short)oldStatus,
+            oldStatusName = oldStatus.ToString(),
+            newStatus = (short)newStatus,
+            newStatusName = newStatus.ToString(),
+            updatedAt = order.UpdatedAt
+        });
     }
 }

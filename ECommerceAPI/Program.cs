@@ -8,6 +8,7 @@ using ECommerceAPI.Infrastructure.Data;
 using ECommerceAPI.Infrastructure.Repositories;
 using ECommerceAPI.Infrastructure.Services;
 using ECommerceAPI.Middleware;
+using ECommerceAPI.Hubs;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -49,6 +50,9 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IOrderAdminService, OrderAdminService>();
             builder.Services.AddScoped<IUserProfileService, UserProfileService>();
             builder.Services.AddScoped<ISellerService, SellerService>();
+            builder.Services.AddScoped<ICustomerOrderService, CustomerOrderService>();
+            builder.Services.AddScoped<IReviewService, ReviewService>();
+            builder.Services.AddScoped<ICustomerDisputeService, CustomerDisputeService>();
 
             // AI Service - HTTP Client
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
@@ -122,6 +126,7 @@ namespace ECommerceAPI
 
             builder.Services.AddAuthorization();
             builder.Services.AddControllers();
+            builder.Services.AddSignalR();
             builder.Services.AddEndpointsApiExplorer();
             
             builder.Services.AddSwaggerGen(options =>
@@ -180,7 +185,9 @@ namespace ECommerceAPI
             app.UseAuthentication();
             app.UseMiddleware<UserSyncMiddleware>(); // Auto-create user on first request
             app.UseAuthorization();
+
             app.MapControllers();
+            app.MapHub<OrderTrackingHub>("/hubs/order-tracking");
             app.Run();
         }
     }

@@ -1,0 +1,271 @@
+using ECommerceAPI.Application.DTOs.Orders;
+using ECommerceAPI.Application.Interfaces;
+using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Domain.Enums;
+using ECommerceAPI.Hubs;
+using ECommerceAPI.Infrastructure.Data;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+
+namespace ECommerceAPI.Application.Services;
+
+public class CustomerOrderService : ICustomerOrderService
+{
+    private readonly ApplicationDbContext _context;
+    private readonly IHubContext<OrderTrackingHub> _hubContext;
+
+    public CustomerOrderService(
+        ApplicationDbContext context,
+        IHubContext<OrderTrackingHub> hubContext)
+    {
+        _context = context;
+        _hubContext = hubContext;
+    }
+
+    public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
+    {
+        var query = _context.Orders
+            .Include(o => o.Shop)
+            .Where(o => o.CustomerId == customerId);
+
+        if (status.HasValue)
+        {
+            query = query.Where(o => o.Status == status.Value);
+        }
+
+        var totalCount = await query.CountAsync();
+
+        var orders = await query
+            .OrderByDescending(o => o.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(o => new CustomerOrderSummaryDto
+            {
+                Id = o.Id,
+                ShopId = o.ShopId,
+                ShopName = o.Shop.Name,
+                TotalAmount = o.Total,
+                Status = o.Status,
+                CreatedAt = o.CreatedAt
+            })
+            .ToListAsync();
+
+        return new CustomerOrderListResponseDto
+        {
+            Success = true,
+            Orders = orders,
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<CustomerOrderDetailResponseDto> GetOrderByIdAsync(Guid customerId, Guid orderId)
+    {
+        var order = await _context.Orders
+            .Include(o => o.Shop)
+            .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Product)
+            .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Variant)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
+
+        if (order == null)
+        {
+            return new CustomerOrderDetailResponseDto
+            {
+                Success = false,
+                Message = "Không tìm thấy đơn hàng"
+            };
+        }
+
+        var detail = new CustomerOrderDetailDto
+        {
+            Id = order.Id,
+            ShopId = order.ShopId,
+            ShopName = order.Shop.Name,
+            TotalAmount = order.Total,
+            Status = order.Status,
+            CreatedAt = order.CreatedAt,
+            ShipFullName = order.ShipFullName,
+            ShipPhone = order.ShipPhone,
+            ShipAddress = order.ShipAddress,
+            Items = order.OrderItems.Select(oi => new CustomerOrderItemDto
+            {
+                Id = oi.Id,
+                ProductId = oi.ProductId,
+                ProductName = oi.Product.Name,
+                VariantName = oi.Variant?.VariantName,
+                Quantity = oi.Quantity,
+                UnitPrice = oi.UnitPrice,
+                TotalPrice = oi.LineTotal
+            }).ToList()
+        };
+
+        return new CustomerOrderDetailResponseDto
+        {
+            Success = true,
+            Order = detail
+        };
+    }
+
+    public async Task<OrderTrackingDto?> GetOrderTrackingAsync(Guid customerId, Guid orderId)
+    {
+        var order = await _context.Orders
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
+
+        if (order == null)
+            return null;
+
+        var statusEnum = (OrderStatus)order.Status;
+
+        var steps = BuildTimeline(statusEnum, order);
+
+        return new OrderTrackingDto
+        {
+            OrderId = order.Id,
+            CurrentStatus = order.Status,
+            CurrentStatusName = statusEnum.ToString(),
+            CreatedAt = order.CreatedAt,
+            UpdatedAt = order.UpdatedAt,
+            Timeline = steps
+        };
+    }
+
+    public async Task<ConfirmOrderResponseDto> ConfirmOrderAsync(Guid customerId, Guid orderId)
+    {
+        var order = await _context.Orders
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
+
+        if (order == null)
+        {
+            return new ConfirmOrderResponseDto
+            {
+                Success = false,
+                Message = "Không tìm thấy đơn hàng"
+            };
+        }
+
+        if ((OrderStatus)order.Status != OrderStatus.Shipping)
+        {
+            return new ConfirmOrderResponseDto
+            {
+                Success = false,
+                Message = "Chỉ có thể xác nhận đơn hàng đang giao (Shipping)"
+            };
+        }
+
+        order.Status = (short)OrderStatus.Completed;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        await NotifyStatusChanged(order, OrderStatus.Shipping, OrderStatus.Completed);
+
+        return new ConfirmOrderResponseDto
+        {
+            Success = true,
+            Message = "Xác nhận đã nhận hàng thành công",
+            OrderId = order.Id,
+            NewStatus = order.Status,
+            NewStatusName = OrderStatus.Completed.ToString(),
+            UpdatedAt = order.UpdatedAt
+        };
+    }
+
+    private static List<OrderStatusStepDto> BuildTimeline(OrderStatus currentStatus, Order order)
+    {
+        // Normal flow steps (theo đúng OrderStatus enum)
+        var normalFlow = new List<OrderStatus>
+        {
+            OrderStatus.PendingPayment,
+            OrderStatus.PendingConfirmation,
+            OrderStatus.Confirmed,
+            OrderStatus.Processing,
+            OrderStatus.Shipping,
+            OrderStatus.Delivered,
+            OrderStatus.Completed,
+        };
+
+        // Terminal / out-of-flow statuses
+        var terminalStatuses = new[]
+        {
+            OrderStatus.Cancelled,
+            OrderStatus.Refunded,
+        };
+
+        var result = new List<OrderStatusStepDto>();
+
+        // Build normal flow steps
+        foreach (var status in normalFlow)
+        {
+            string state;
+
+            if (currentStatus == OrderStatus.Cancelled || currentStatus == OrderStatus.Refunded)
+            {
+                // Order ended abnormally — mark all normal steps as cancelled
+                state = "cancelled";
+            }
+            else if (currentStatus == status)
+            {
+                state = "current";
+            }
+            else if (currentStatus > status)
+            {
+                state = "completed";
+            }
+            else
+            {
+                state = "upcoming";
+            }
+
+            result.Add(new OrderStatusStepDto
+            {
+                Code = status.ToString(),
+                DisplayName = status.ToString(),
+                Value = (short)status,
+                State = state,
+                ReachedAt = state is "completed" or "current" ? order.UpdatedAt : null
+            });
+        }
+
+        // Build terminal steps (Cancelled, Refunded)
+        foreach (var status in terminalStatuses)
+        {
+            string state;
+            if (currentStatus == status)
+                state = "current";
+            else if (currentStatus == OrderStatus.Cancelled || currentStatus == OrderStatus.Refunded)
+                state = "upcoming";
+            else
+                state = "upcoming";
+
+            result.Add(new OrderStatusStepDto
+            {
+                Code = status.ToString(),
+                DisplayName = status.ToString(),
+                Value = (short)status,
+                State = state,
+                ReachedAt = state == "current" ? order.UpdatedAt : null
+            });
+        }
+
+        return result;
+    }
+
+    private async Task NotifyStatusChanged(Order order, OrderStatus oldStatus, OrderStatus newStatus)
+    {
+        var groupName = OrderTrackingHub.GetUserGroupName(order.CustomerId);
+
+        await _hubContext.Clients.Group(groupName).SendAsync("OrderStatusUpdated", new
+        {
+            orderId = order.Id,
+            oldStatus = (short)oldStatus,
+            oldStatusName = oldStatus.ToString(),
+            newStatus = (short)newStatus,
+            newStatusName = newStatus.ToString(),
+            updatedAt = order.UpdatedAt
+        });
+    }
+}
+

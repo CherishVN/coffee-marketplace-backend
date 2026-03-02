@@ -1,7 +1,9 @@
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Enums;
+using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ECommerceAPI.Application.Services;
@@ -10,13 +12,16 @@ public class OrderAdminService : IOrderAdminService
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<OrderAdminService> _logger;
+    private readonly IHubContext<OrderTrackingHub> _hubContext;
 
     public OrderAdminService(
         ApplicationDbContext context,
-        ILogger<OrderAdminService> logger)
+        ILogger<OrderAdminService> logger,
+        IHubContext<OrderTrackingHub> hubContext)
     {
         _context = context;
         _logger = logger;
+        _hubContext = hubContext;
     }
 
     public async Task<AdminOrderListResponseDto> GetAllOrdersAsync(
@@ -203,10 +208,13 @@ public class OrderAdminService : IOrderAdminService
                 };
             }
 
+            var oldStatus = (OrderStatus)order.Status;
             order.Status = dto.NewStatus;
             order.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
+
+            await NotifyStatusChanged(order, oldStatus, (OrderStatus)order.Status);
 
             _logger.LogInformation(
                 "Admin {AdminId} updated order {OrderId} status to {Status}. Reason: {Reason}",
@@ -256,5 +264,20 @@ public class OrderAdminService : IOrderAdminService
                 Message = "Lỗi khi cập nhật trạng thái đơn hàng",
             };
         }
+    }
+
+    private async Task NotifyStatusChanged(Domain.Entities.Order order, OrderStatus oldStatus, OrderStatus newStatus)
+    {
+        var groupName = OrderTrackingHub.GetUserGroupName(order.CustomerId);
+
+        await _hubContext.Clients.Group(groupName).SendAsync("OrderStatusUpdated", new
+        {
+            orderId = order.Id,
+            oldStatus = (short)oldStatus,
+            oldStatusName = oldStatus.ToString(),
+            newStatus = (short)newStatus,
+            newStatusName = newStatus.ToString(),
+            updatedAt = order.UpdatedAt
+        });
     }
 }
