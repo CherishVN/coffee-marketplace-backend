@@ -29,15 +29,12 @@ namespace ECommerceAPI
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-            // Configuration Settings
             builder.Services.Configure<AiServiceSettings>(
                 builder.Configuration.GetSection(AiServiceSettings.SectionName));
 
-            // Repositories
             builder.Services.AddScoped<IUserRepository, UserRepository>();
 
-            // Services
-            builder.Services.AddHttpContextAccessor(); // Required for UserClaimsService
+            builder.Services.AddHttpContextAccessor();
             builder.Services.AddScoped<IUserClaimsService, UserClaimsService>();
             builder.Services.AddScoped<IUserAdminService, UserAdminService>();
             builder.Services.AddScoped<IWithdrawAdminService, WithdrawAdminService>();
@@ -54,7 +51,6 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IReviewService, ReviewService>();
             builder.Services.AddScoped<ICustomerDisputeService, CustomerDisputeService>();
 
-            // AI Service - HTTP Client
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
             // FluentValidation
@@ -81,7 +77,6 @@ namespace ECommerceAPI
                     ValidAudience = "authenticated",
                     ClockSkew = TimeSpan.FromMinutes(5),
                     
-                    // Automatically fetch signing keys from JWKS endpoint
                     IssuerSigningKeyResolver = (token, securityToken, kid, parameters) =>
                     {
                         var httpClient = new HttpClient();
@@ -117,7 +112,7 @@ namespace ECommerceAPI
                         var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
                         if (!string.IsNullOrEmpty(token))
                         {
-                            Console.WriteLine($"📨 Token received (first 50 chars): {token.Substring(0, Math.Min(50, token.Length))}...");
+                            Console.WriteLine($"Token received (first 50 chars): {token.Substring(0, Math.Min(50, token.Length))}...");
                         }
                         return Task.CompletedTask;
                     }
@@ -183,7 +178,7 @@ namespace ECommerceAPI
             app.UseHttpsRedirection();
             app.UseCors("AllowAll");
             app.UseAuthentication();
-            app.UseMiddleware<UserSyncMiddleware>(); // Auto-create user on first request
+            app.UseMiddleware<UserSyncMiddleware>();
             app.UseAuthorization();
 
             app.MapControllers();

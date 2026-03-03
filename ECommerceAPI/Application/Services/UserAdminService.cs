@@ -17,10 +17,12 @@ public class UserAdminService : IUserAdminService
 
     public async Task<UserListResponseDto> GetAllUsersAsync(int page, int pageSize, string? role, short? status)
     {
-        var query = _context.Users.AsQueryable();
+        IQueryable<User> query;
 
         if (!string.IsNullOrEmpty(role))
-            query = query.Where(u => u.Role == role);
+            query = _context.Users.FromSqlInterpolated($"SELECT * FROM users WHERE role = {role}::user_role");
+        else
+            query = _context.Users.AsQueryable();
 
         if (status.HasValue)
             query = query.Where(u => u.Status == status.Value);
