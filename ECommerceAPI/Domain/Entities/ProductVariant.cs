@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -20,6 +20,15 @@ public partial class ProductVariant
     public DateTime CreatedAt { get; set; }
 
     public string? Attributes { get; set; }
+
+    // Shipping dimensions
+    public decimal? Weight { get; set; }
+
+    public decimal? Length { get; set; }
+
+    public decimal? Width { get; set; }
+
+    public decimal? Height { get; set; }
 
     public virtual ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();
 
