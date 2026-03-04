@@ -1299,11 +1299,11 @@ public partial class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<User>(entity =>
         {
-            entity.HasKey(e => e.Id).HasName("profiles_pkey");
+            entity.HasKey(e => e.Id).HasName("users_pkey");
 
             entity.ToTable("users");
 
-            entity.HasIndex(e => e.Status, "idx_profiles_status");
+            entity.HasIndex(e => e.Status, "idx_users_status");
 
             entity.Property(e => e.Id)
                 .ValueGeneratedNever()
