@@ -9,7 +9,6 @@ public class CategoryDto
     public string Name { get; set; } = null!;
     public string Slug { get; set; } = null!;
     public short Level { get; set; }
-    public string LevelName { get; set; } = null!;
     public bool IsActive { get; set; }
     public int ProductCount { get; set; }
     public int SubcategoryCount { get; set; }
