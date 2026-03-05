@@ -633,7 +633,7 @@ public class CategoryAdminService : ICategoryAdminService
             Name = c.Name,
             Slug = c.Slug,
             Level = c.Level,
-            LevelName = c.Level == 1 ? "Main Category" : "Subcategory",
+            LevelName = c.Level.ToString(),
             IsActive = c.IsActive,
             ProductCount = c.Products?.Count ?? 0,
             SubcategoryCount = c.InverseParent?.Count ?? 0,
