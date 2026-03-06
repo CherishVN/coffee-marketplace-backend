@@ -984,6 +984,10 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.ProductId).HasColumnName("product_id");
             entity.Property(e => e.Sku).HasColumnName("sku");
             entity.Property(e => e.VariantName).HasColumnName("variant_name");
+            entity.Property(e => e.Weight).HasColumnName("weight");
+            entity.Property(e => e.Length).HasColumnName("length");
+            entity.Property(e => e.Width).HasColumnName("width");
+            entity.Property(e => e.Height).HasColumnName("height");
 
             entity.HasOne(d => d.Product).WithMany(p => p.ProductVariants)
                 .HasForeignKey(d => d.ProductId)

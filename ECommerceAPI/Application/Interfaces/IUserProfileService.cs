@@ -62,4 +62,5 @@ public class ServiceResponse
 public class ServiceResponse<T> : ServiceResponse
 {
     public T? Data { get; set; }
+    public int TotalCount { get; set; }
 }
