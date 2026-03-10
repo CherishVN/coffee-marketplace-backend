@@ -830,6 +830,9 @@ public partial class ApplicationDbContext : DbContext
                 .HasComputedColumnSql("(setweight(to_tsvector('simple'::regconfig, f_immutable_unaccent(COALESCE(name, ''::text))), 'A'::\"char\") || setweight(to_tsvector('simple'::regconfig, f_immutable_unaccent(COALESCE(description, ''::text))), 'B'::\"char\"))", true)
                 .HasColumnName("search_vector");
             entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.SoldCount)
+                .HasDefaultValue(0)
+                .HasColumnName("sold_count");
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)
                 .HasColumnName("status");
