@@ -32,6 +32,8 @@ public partial class ProductVariant
 
     public virtual ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();
 
+    public virtual ICollection<AiRecommendationItem> AiRecommendationItems { get; set; } = new List<AiRecommendationItem>();
+
     public virtual ICollection<Inventory> Inventories { get; set; } = new List<Inventory>();
 
     public virtual ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();

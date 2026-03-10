@@ -105,6 +105,25 @@ public class SellerApprovalService : ISellerApprovalService
         {
             shop.Owner.Role = "seller";
             shop.Owner.UpdatedAt = DateTime.UtcNow;
+            
+            // Tạo ví cho seller mới (nếu chưa có)
+            var existingWallet = await _context.SellerWallets
+                .FirstOrDefaultAsync(w => w.SellerId == shop.OwnerId);
+                
+            if (existingWallet == null)
+            {
+                var wallet = new SellerWallet
+                {
+                    Id = Guid.NewGuid(),
+                    SellerId = shop.OwnerId,
+                    AvailableBalance = 0,
+                    PendingBalance = 0,
+                    Currency = "VND",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                await _context.SellerWallets.AddAsync(wallet);
+            }
         }
 
         foreach (var doc in shop.ShopDocuments.Where(d => d.Status == 0))
