@@ -22,6 +22,8 @@ public partial class Product
 
     public short Status { get; set; }
 
+    public int SoldCount { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }

@@ -82,6 +82,7 @@ public class ProductStorefrontService : IProductStorefrontService
                         .Select(img => img.ImageUrl)
                         .ToList(),
                     CreatedAt   = p.CreatedAt,
+                    SoldCount   = p.SoldCount,
                 })
                 .ToListAsync();
 
@@ -147,6 +148,7 @@ public class ProductStorefrontService : IProductStorefrontService
                         })
                         .ToList(),
                     CreatedAt = p.CreatedAt,
+                    SoldCount = p.SoldCount,
                 })
                 .FirstOrDefaultAsync();
 
