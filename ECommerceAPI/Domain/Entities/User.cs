@@ -25,7 +25,7 @@ public partial class User
 
     public DateTime UpdatedAt { get; set; }
 
-    public virtual Address? Address { get; set; }
+    public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();
 
     public virtual ICollection<AiChatSession> AiChatSessions { get; set; } = new List<AiChatSession>();
 

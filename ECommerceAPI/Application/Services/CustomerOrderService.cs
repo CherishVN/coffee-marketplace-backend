@@ -26,6 +26,11 @@ public class CustomerOrderService : ICustomerOrderService
     {
         var query = _context.Orders
             .Include(o => o.Shop)
+            .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Product)
+                    .ThenInclude(p => p.ProductImages)
+            .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Variant)
             .Where(o => o.CustomerId == customerId);
 
         if (status.HasValue)
@@ -35,20 +40,32 @@ public class CustomerOrderService : ICustomerOrderService
 
         var totalCount = await query.CountAsync();
 
-        var orders = await query
+        var rawOrders = await query
             .OrderByDescending(o => o.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(o => new CustomerOrderSummaryDto
-            {
-                Id = o.Id,
-                ShopId = o.ShopId,
-                ShopName = o.Shop.Name,
-                TotalAmount = o.Total,
-                Status = o.Status,
-                CreatedAt = o.CreatedAt
-            })
             .ToListAsync();
+
+        var orders = rawOrders.Select(o => new CustomerOrderSummaryDto
+        {
+            Id = o.Id,
+            ShopId = o.ShopId,
+            ShopName = o.Shop.Name,
+            TotalAmount = o.Total,
+            Status = o.Status,
+            CreatedAt = o.CreatedAt,
+            Items = o.OrderItems.Select(oi => new CustomerOrderItemDto
+            {
+                Id = oi.Id,
+                ProductId = oi.ProductId,
+                ProductName = oi.Product.Name,
+                VariantName = oi.Variant?.VariantName,
+                Quantity = oi.Quantity,
+                UnitPrice = oi.UnitPrice,
+                TotalPrice = oi.LineTotal,
+                ThumbnailUrl = oi.Product.ProductImages.FirstOrDefault()?.ImageUrl
+            }).ToList()
+        }).ToList();
 
         return new CustomerOrderListResponseDto
         {

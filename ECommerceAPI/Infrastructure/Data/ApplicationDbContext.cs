@@ -152,8 +152,8 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.UserId).HasColumnName("user_id");
             entity.Property(e => e.Ward).HasColumnName("ward");
 
-            entity.HasOne(d => d.User).WithOne(p => p.Address)
-                .HasForeignKey<Address>(d => d.UserId)
+            entity.HasOne(d => d.User).WithMany(p => p.Addresses)
+                .HasForeignKey(d => d.UserId)
                 .HasConstraintName("addresses_user_id_fkey");
         });
 
@@ -1474,7 +1474,8 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.FullName).HasColumnName("full_name");
             entity.Property(e => e.Phone).HasColumnName("phone");
             entity.Property(e => e.Role)
-                .HasDefaultValueSql("'customer'::text")
+                .HasDefaultValueSql("'customer'::user_role")
+                .HasColumnType("user_role")
                 .HasColumnName("role");
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)
