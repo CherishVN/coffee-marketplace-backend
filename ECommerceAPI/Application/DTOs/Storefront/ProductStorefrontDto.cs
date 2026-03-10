@@ -16,6 +16,7 @@ public class ProductStorefrontDto
     public string? CategorySlug { get; set; }
     public List<string> ImageUrls { get; set; } = new();
     public DateTime CreatedAt { get; set; }
+    public int SoldCount { get; set; }
 }
 
 /// <summary>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using NpgsqlTypes;
 
@@ -21,6 +21,8 @@ public partial class Product
     public string Currency { get; set; } = null!;
 
     public short Status { get; set; }
+
+    public int SoldCount { get; set; }
 
     public DateTime CreatedAt { get; set; }
 
