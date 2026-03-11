@@ -46,6 +46,20 @@ public class SendMessageResponseDto
     public bool CartUpdated { get; set; }
     public Guid? CartId { get; set; }
     public Guid SessionId { get; set; }
+
+    /// <summary>
+    /// Thông tin sản phẩm AI muốn thêm vào giỏ hàng (khi intent = "add_to_cart").
+    /// Frontend dùng thông tin này để gọi Main API: POST /api/cart/items
+    /// sau đó lưu cartId và truyền vào confirm-order.
+    /// </summary>
+    public ProductToAddDto? ProductToAdd { get; set; }
+}
+
+public class ProductToAddDto
+{
+    public Guid? ProductId { get; set; }
+    public Guid? VariantId { get; set; }
+    public int Quantity { get; set; } = 1;
 }
 
 public class ProductSuggestionDto

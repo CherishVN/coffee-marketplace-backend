@@ -18,9 +18,12 @@ public class AiChatController : ControllerBase
         _chatService = chatService;
     }
 
-    private Guid GetUserId() =>
-        Guid.Parse(User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? throw new UnauthorizedAccessException("Không xác định được user"));
+    private Guid GetUserId()
+    {
+        var sub = User.FindFirstValue("sub") ?? User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (sub == null) throw new UnauthorizedAccessException("Không tìm thấy thông tin người dùng");
+        return Guid.Parse(sub);
+    }
 
     /// <summary>Tạo hoặc lấy session chat hiện tại</summary>
     [HttpPost("session")]

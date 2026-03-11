@@ -56,6 +56,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IProductStorefrontService, ProductStorefrontService>();
             builder.Services.AddScoped<ICategoryStorefrontService, CategoryStorefrontService>();
             builder.Services.AddScoped<IFavoriteService, FavoriteService>();
+            builder.Services.AddScoped<ICartService, CartService>();
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
