@@ -12,6 +12,8 @@ public interface IUserProfileService
     Task<ServiceResponse> UpdateAddressAsync(Guid userId, Guid addressId, UpdateAddressDto dto);
     Task<ServiceResponse> DeleteAddressAsync(Guid userId, Guid addressId);
     Task<ServiceResponse> SetDefaultAddressAsync(Guid userId, Guid addressId);
+    Task<ServiceResponse> RequestEmailChangeAsync(Guid userId, string currentEmail, RequestEmailChangeDto dto);
+    Task<ServiceResponse> ConfirmEmailChangeAsync(Guid userId, ConfirmEmailChangeDto dto);
 }
 
 public class UserProfileResponse

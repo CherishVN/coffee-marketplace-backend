@@ -55,10 +55,10 @@ public class ProductStorefrontService : IProductStorefrontService
 
             query = sortBy switch
             {
-                "price_asc"  => query.OrderBy(p => p.BasePrice),
-                "price_desc" => query.OrderByDescending(p => p.BasePrice),
-                "newest"     => query.OrderByDescending(p => p.CreatedAt),
-                _            => query.OrderByDescending(p => p.CreatedAt)
+                "price_asc"  => query.OrderBy(p => p.BasePrice).ThenBy(p => p.Id),
+                "price_desc" => query.OrderByDescending(p => p.BasePrice).ThenBy(p => p.Id),
+                "newest"     => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
+                _            => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
             };
 
             var totalCount = await query.CountAsync();

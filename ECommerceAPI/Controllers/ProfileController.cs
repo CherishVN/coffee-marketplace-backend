@@ -38,9 +38,10 @@ public class ProfileController : ControllerBase
         try
         {
             var profile = await _userProfileService.GetProfileAsync(userId.Value);
-            
-            var email = _userClaimsService.GetEmail();
-            profile.Email = email;
+            if (string.IsNullOrWhiteSpace(profile.Email))
+            {
+                profile.Email = _userClaimsService.GetEmail();
+            }
 
             return Ok(new { success = true, data = profile });
         }
@@ -187,6 +188,38 @@ public class ProfileController : ControllerBase
         }
 
         var result = await _userProfileService.SetDefaultAddressAsync(userId.Value, addressId);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    [HttpPost("profile/request-email-change")]
+    public async Task<IActionResult> RequestEmailChange([FromBody] RequestEmailChangeDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        var currentEmail = _userClaimsService.GetEmail() ?? string.Empty;
+
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _userProfileService.RequestEmailChangeAsync(userId.Value, currentEmail, dto);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+    [HttpPost("profile/confirm-email-change")]
+    public async Task<IActionResult> ConfirmEmailChange([FromBody] ConfirmEmailChangeDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _userProfileService.ConfirmEmailChangeAsync(userId.Value, dto);
 
         if (!result.Success)
             return BadRequest(new { success = false, message = result.Message });

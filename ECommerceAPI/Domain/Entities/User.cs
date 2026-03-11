@@ -11,7 +11,7 @@ public partial class User
 
     public string? Phone { get; set; }
 
-    public string Role { get; set; } = "customer";
+    public short? RoleId { get; set; }
 
     public short Status { get; set; }
 
@@ -25,9 +25,11 @@ public partial class User
 
     public DateTime UpdatedAt { get; set; }
 
-    public virtual Address? Address { get; set; }
+    public virtual Role? Role { get; set; }
 
-    public virtual ICollection<AiChatSession> AiChatSessions { get; set; } = new List<AiChatSession>();
+    public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();
+
+        public virtual ICollection<AiChatSession> AiChatSessions { get; set; } = new List<AiChatSession>();
 
     public virtual ICollection<AiMaterialSuggestion> AiMaterialSuggestions { get; set; } = new List<AiMaterialSuggestion>();
 

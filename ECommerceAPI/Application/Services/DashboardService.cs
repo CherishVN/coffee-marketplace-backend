@@ -32,6 +32,11 @@ public class DashboardService : IDashboardService
             // multiple round-trips AND DbContext concurrency issues.
 
             // 1) User Stats — single query
+            var roleCodes = await _context.Roles
+                .ToDictionaryAsync(r => r.Code, r => r.Id);
+            var customerRoleId = roleCodes.GetValueOrDefault("customer");
+            var sellerRoleId = roleCodes.GetValueOrDefault("seller");
+
             var userStats = await _context.Users
                 .GroupBy(_ => 1)
                 .Select(g => new
@@ -40,8 +45,8 @@ public class DashboardService : IDashboardService
                     Active = g.Count(u => u.Status == (short)UserStatus.Active),
                     Suspended = g.Count(u => u.Status == (short)UserStatus.Suspended),
                     NewThisMonth = g.Count(u => u.CreatedAt >= startOfMonth),
-                    Customers = g.Count(u => u.Role == "customer"),
-                    Sellers = g.Count(u => u.Role == "seller"),
+                    Customers = g.Count(u => u.RoleId == customerRoleId),
+                    Sellers = g.Count(u => u.RoleId == sellerRoleId),
                 })
                 .FirstOrDefaultAsync();
 

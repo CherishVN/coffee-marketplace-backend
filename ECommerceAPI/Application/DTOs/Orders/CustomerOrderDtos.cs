@@ -20,6 +20,7 @@ public class CustomerOrderItemDto
     public int Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal TotalPrice { get; set; }
+    public string? ThumbnailUrl { get; set; }
 }
 
 public class CustomerOrderSummaryDto
@@ -31,6 +32,7 @@ public class CustomerOrderSummaryDto
     public short Status { get; set; }
     public string StatusName => ((OrderStatus)Status).ToString();
     public DateTime CreatedAt { get; set; }
+    public List<CustomerOrderItemDto> Items { get; set; } = new();
 }
 
 public class CustomerOrderDetailDto : CustomerOrderSummaryDto

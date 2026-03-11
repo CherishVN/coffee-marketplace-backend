@@ -52,6 +52,17 @@ public class UpdateAddressDto
     public bool? IsDefault { get; set; }
 }
 
+public class RequestEmailChangeDto
+{
+    public string NewEmail { get; set; } = string.Empty;
+}
+
+public class ConfirmEmailChangeDto
+{
+    public string NewEmail { get; set; } = string.Empty;
+    public string Otp { get; set; } = string.Empty;
+}
+
 // Validators
 public class UpdateProfileDtoValidator : AbstractValidator<UpdateProfileDto>
 {
@@ -87,6 +98,30 @@ public class RegisterSellerDtoValidator : AbstractValidator<RegisterSellerDto>
         RuleFor(x => x.TaxCode)
             .Matches(@"^[0-9]{10}(-[0-9]{3})?$").WithMessage("Mã số thuế không hợp lệ")
             .When(x => !string.IsNullOrEmpty(x.TaxCode));
+    }
+}
+
+public class RequestEmailChangeDtoValidator : AbstractValidator<RequestEmailChangeDto>
+{
+    public RequestEmailChangeDtoValidator()
+    {
+        RuleFor(x => x.NewEmail)
+            .NotEmpty().WithMessage("Email không được để trống")
+            .EmailAddress().WithMessage("Email không hợp lệ");
+    }
+}
+
+public class ConfirmEmailChangeDtoValidator : AbstractValidator<ConfirmEmailChangeDto>
+{
+    public ConfirmEmailChangeDtoValidator()
+    {
+        RuleFor(x => x.NewEmail)
+            .NotEmpty().WithMessage("Email không được để trống")
+            .EmailAddress().WithMessage("Email không hợp lệ");
+
+        RuleFor(x => x.Otp)
+            .NotEmpty().WithMessage("Mã OTP không được để trống")
+            .Matches(@"^\d{6}$").WithMessage("Mã OTP phải là 6 chữ số");
     }
 }
 

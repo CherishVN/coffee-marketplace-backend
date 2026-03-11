@@ -46,12 +46,16 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IDashboardService, DashboardService>();
             builder.Services.AddScoped<IOrderAdminService, OrderAdminService>();
             builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+            builder.Services.AddSingleton<IOtpService, OtpService>();
+            builder.Services.AddScoped<IEmailService, EmailService>();
+            builder.Services.AddHttpClient();
             builder.Services.AddScoped<ISellerService, SellerService>();
             builder.Services.AddScoped<ICustomerOrderService, CustomerOrderService>();
             builder.Services.AddScoped<IReviewService, ReviewService>();
             builder.Services.AddScoped<ICustomerDisputeService, CustomerDisputeService>();
             builder.Services.AddScoped<IProductStorefrontService, ProductStorefrontService>();
             builder.Services.AddScoped<ICategoryStorefrontService, CategoryStorefrontService>();
+            builder.Services.AddScoped<IFavoriteService, FavoriteService>();
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
