@@ -84,13 +84,64 @@ public class AiSellerService : IAiSellerService
         try
         {
             var raw = await _gemini.GenerateAsync(_systemPrompt, userMessage);
-            return ParseJsonResponse<SuggestTagsResponseDto>(raw) ?? new SuggestTagsResponseDto();
+            var result = ParseJsonResponse<SuggestTagsResponseDto>(raw) ?? new SuggestTagsResponseDto();
+
+            // Lưu lịch sử gợi ý nếu seller đã có product (productId được truyền lên)
+            if (request.ProductId.HasValue)
+            {
+                try
+                {
+                    var suggestedJson = JsonSerializer.Serialize(
+                        result.Suggestions.Select(s => new { tagId = s.TagId, tagName = s.TagName, score = s.ConfidenceScore }));
+
+                    var log = new AiTagSuggestion
+                    {
+                        Id = Guid.NewGuid(),
+                        ProductId = request.ProductId.Value,
+                        SellerId = sellerId,
+                        InputTitle = request.Title,
+                        InputDescription = request.Description,
+                        SuggestedCategoryId = request.CategoryId,
+                        SuggestedTags = JsonDocument.Parse(suggestedJson),
+                        ChosenTags = JsonDocument.Parse("[]"),
+                        Action = "pending",
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    _context.AiTagSuggestions.Add(log);
+                    await _context.SaveChangesAsync();
+                    result.LogId = log.Id;
+                }
+                catch (Exception saveEx)
+                {
+                    _logger.LogWarning(saveEx, "Không thể lưu lịch sử gợi ý tag cho product {ProductId}", request.ProductId);
+                }
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Tag suggestion failed for seller {SellerId}", sellerId);
             return new SuggestTagsResponseDto();
         }
+    }
+
+    // ── Lưu phản hồi sau khi seller chọn tags ────────────────────────────────
+    public async Task<bool> SaveTagSuggestionFeedbackAsync(SaveSuggestionFeedbackDto dto, Guid sellerId)
+    {
+        var log = await _context.AiTagSuggestions
+            .FirstOrDefaultAsync(s => s.Id == dto.LogId && s.SellerId == sellerId);
+
+        if (log == null) return false;
+
+        var chosenJson = JsonSerializer.Serialize(dto.ChosenTagIds ?? new List<long>());
+        log.ChosenCategoryId = dto.ChosenCategoryId;
+        log.ChosenTags = JsonDocument.Parse(chosenJson);
+        log.Action = dto.Action;
+
+        await _context.SaveChangesAsync();
+        return true;
     }
 
     // ── Gợi ý Materials ──────────────────────────────────────────────────────
