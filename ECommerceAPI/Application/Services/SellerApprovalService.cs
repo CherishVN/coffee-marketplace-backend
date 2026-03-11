@@ -72,7 +72,7 @@ public class SellerApprovalService : ISellerApprovalService
     public async Task<ShopResponseDto> ApproveShopAsync(Guid shopId, ApproveSellerDto dto, Guid adminId)
     {
         var shop = await _context.Shops
-            .Include(s => s.Owner)
+            .Include(s => s.Owner).ThenInclude(o => o!.Role)
             .Include(s => s.ShopDocuments)
             .FirstOrDefaultAsync(s => s.Id == shopId);
 
@@ -101,9 +101,14 @@ public class SellerApprovalService : ISellerApprovalService
         shop.RejectionReason = null;
         shop.UpdatedAt = DateTime.UtcNow;
 
-        if (shop.Owner != null && shop.Owner.Role == "customer")
+        if (shop.Owner != null && shop.Owner.Role?.Code == "customer")
         {
-            shop.Owner.Role = "seller";
+            var sellerRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "seller");
+            if (sellerRole != null)
+            {
+                shop.Owner.RoleId = sellerRole.Id;
+                shop.Owner.Role = sellerRole;
+            }
             shop.Owner.UpdatedAt = DateTime.UtcNow;
         }
 

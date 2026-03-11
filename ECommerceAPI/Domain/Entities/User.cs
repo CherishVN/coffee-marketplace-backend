@@ -11,7 +11,7 @@ public partial class User
 
     public string? Phone { get; set; }
 
-    public string Role { get; set; } = "customer";
+    public short? RoleId { get; set; }
 
     public short Status { get; set; }
 
@@ -24,6 +24,8 @@ public partial class User
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }
+
+    public virtual Role? Role { get; set; }
 
     public virtual Address? Address { get; set; }
 

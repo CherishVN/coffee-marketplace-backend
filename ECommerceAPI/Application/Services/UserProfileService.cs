@@ -20,6 +20,7 @@ public class UserProfileService : IUserProfileService
     public async Task<UserProfileResponse> GetProfileAsync(Guid userId)
     {
         var user = await _context.Users
+            .Include(u => u.Role)
             .Include(u => u.ShopOwners)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
@@ -35,7 +36,7 @@ public class UserProfileService : IUserProfileService
             Id = user.Id,
             FullName = user.FullName,
             Phone = user.Phone,
-            Role = user.Role,
+            Role = user.Role?.Code ?? string.Empty,
             Status = user.Status,
             CreatedAt = user.CreatedAt,
             Shop = shop != null ? new ShopInfoDto
@@ -82,6 +83,7 @@ public class UserProfileService : IUserProfileService
     public async Task<ServiceResponse> RegisterAsSellerAsync(Guid userId, RegisterSellerDto dto)
     {
         var user = await _context.Users
+            .Include(u => u.Role)
             .Include(u => u.ShopOwners)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
@@ -94,7 +96,7 @@ public class UserProfileService : IUserProfileService
             };
         }
 
-        if (user.Role == "seller" || user.Role == "admin")
+        if (user.Role?.Code == "seller" || user.Role?.Code == "admin")
         {
             return new ServiceResponse
             {

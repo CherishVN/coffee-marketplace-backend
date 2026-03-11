@@ -12,6 +12,8 @@ public partial class ApplicationDbContext : DbContext
     {
     }
 
+    public virtual DbSet<Role> Roles { get; set; }
+
     public virtual DbSet<Address> Addresses { get; set; }
 
     public virtual DbSet<AiMaterialSuggestion> AiMaterialSuggestions { get; set; }
@@ -93,7 +95,6 @@ public partial class ApplicationDbContext : DbContext
             .HasPostgresEnum("realtime", "action", new[] { "INSERT", "UPDATE", "DELETE", "TRUNCATE", "ERROR" })
             .HasPostgresEnum("realtime", "equality_op", new[] { "eq", "neq", "lt", "lte", "gt", "gte", "in" })
             .HasPostgresEnum("storage", "buckettype", new[] { "STANDARD", "ANALYTICS", "VECTOR" })
-            .HasPostgresEnum("user_role", new[] { "customer", "seller", "admin" })
             .HasPostgresExtension("extensions", "pg_stat_statements")
             .HasPostgresExtension("extensions", "pgcrypto")
             .HasPostgresExtension("extensions", "uuid-ossp")
@@ -1300,6 +1301,28 @@ public partial class ApplicationDbContext : DbContext
                 .HasConstraintName("transactions_customer_id_fkey");
         });
 
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("roles_pkey");
+
+            entity.ToTable("roles");
+
+            entity.HasIndex(e => e.Code).IsUnique().HasDatabaseName("roles_code_key");
+
+            entity.Property(e => e.Id)
+                .UseIdentityByDefaultColumn()
+                .HasColumnName("id");
+            entity.Property(e => e.Code)
+                .HasMaxLength(50)
+                .HasColumnName("code");
+            entity.Property(e => e.Name)
+                .HasMaxLength(100)
+                .HasColumnName("name");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+        });
+
         modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("users_pkey");
@@ -1316,9 +1339,11 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("created_at");
             entity.Property(e => e.FullName).HasColumnName("full_name");
             entity.Property(e => e.Phone).HasColumnName("phone");
-            entity.Property(e => e.Role)
-                .HasDefaultValueSql("'customer'::text")
-                .HasColumnName("role");
+            entity.Property(e => e.RoleId).HasColumnName("role_id");
+            entity.HasOne(d => d.Role)
+                .WithMany(p => p.Users)
+                .HasForeignKey(d => d.RoleId)
+                .HasConstraintName("users_role_id_fkey");
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)
                 .HasColumnName("status");

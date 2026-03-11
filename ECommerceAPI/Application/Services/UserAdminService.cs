@@ -17,12 +17,10 @@ public class UserAdminService : IUserAdminService
 
     public async Task<UserListResponseDto> GetAllUsersAsync(int page, int pageSize, string? role, short? status)
     {
-        IQueryable<User> query;
+        IQueryable<User> query = _context.Users.AsQueryable();
 
         if (!string.IsNullOrEmpty(role))
-            query = _context.Users.FromSqlInterpolated($"SELECT * FROM users WHERE role = {role}::user_role");
-        else
-            query = _context.Users.AsQueryable();
+            query = query.Where(u => u.Role != null && u.Role.Code == role);
 
         if (status.HasValue)
             query = query.Where(u => u.Status == status.Value);
@@ -38,7 +36,7 @@ public class UserAdminService : IUserAdminService
                 Id = u.Id,
                 FullName = u.FullName,
                 Phone = u.Phone,
-                Role = u.Role,
+                Role = u.Role != null ? u.Role.Code : string.Empty,
                 Status = u.Status,
                 StatusName = GetStatusName(u.Status),
                 HasOrders = u.Orders.Any(),
@@ -63,6 +61,7 @@ public class UserAdminService : IUserAdminService
     public async Task<UserResponseDto> GetUserByIdAsync(Guid userId)
     {
         var user = await _context.Users
+            .Include(u => u.Role)
             .Include(u => u.Orders)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
@@ -85,6 +84,7 @@ public class UserAdminService : IUserAdminService
     public async Task<UserResponseDto> UpdateUserAsync(Guid userId, UpdateUserDto dto, Guid editorId)
     {
         var user = await _context.Users
+            .Include(u => u.Role)
             .Include(u => u.Orders)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
@@ -121,10 +121,10 @@ public class UserAdminService : IUserAdminService
             user.FullName = dto.FullName;
         }
 
-        if (dto.Role != null && dto.Role != user.Role)
+        if (dto.Role != null && dto.Role != user.Role?.Code)
         {
-            var validRoles = new[] { "customer", "seller", "admin" };
-            if (!validRoles.Contains(dto.Role))
+            var newRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == dto.Role);
+            if (newRole == null)
             {
                 return new UserResponseDto
                 {
@@ -133,8 +133,9 @@ public class UserAdminService : IUserAdminService
                 };
             }
 
-            auditLogs.Add(CreateAuditLog(userId, editorId, "UPDATE", "Role", user.Role, dto.Role));
-            user.Role = dto.Role;
+            auditLogs.Add(CreateAuditLog(userId, editorId, "UPDATE", "Role", user.Role?.Code, dto.Role));
+            user.RoleId = newRole.Id;
+            user.Role = newRole;
         }
 
         user.UpdatedAt = DateTime.UtcNow;
@@ -175,6 +176,7 @@ public class UserAdminService : IUserAdminService
         }
 
         var user = await _context.Users
+            .Include(u => u.Role)
             .Include(u => u.Orders)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
@@ -220,6 +222,7 @@ public class UserAdminService : IUserAdminService
     public async Task<UserResponseDto> UnsuspendUserAsync(Guid userId, Guid adminId)
     {
         var user = await _context.Users
+            .Include(u => u.Role)
             .Include(u => u.Orders)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
@@ -295,7 +298,7 @@ public class UserAdminService : IUserAdminService
             Id = user.Id,
             FullName = user.FullName,
             Phone = user.Phone,
-            Role = user.Role,
+            Role = user.Role?.Code ?? string.Empty,
             Status = user.Status,
             StatusName = GetStatusName(user.Status),
             HasOrders = user.Orders?.Any() ?? false,

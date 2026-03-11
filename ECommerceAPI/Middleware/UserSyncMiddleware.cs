@@ -1,5 +1,7 @@
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace ECommerceAPI.Middleware;
 
@@ -17,7 +19,7 @@ public class UserSyncMiddleware
         _logger = logger;
     }
 
-    public async Task InvokeAsync(HttpContext context, IUserClaimsService userClaimsService, IUserRepository userRepository)
+    public async Task InvokeAsync(HttpContext context, IUserClaimsService userClaimsService, IUserRepository userRepository, ApplicationDbContext dbContext)
     {
         // Only process if user is authenticated
         if (context.User.Identity?.IsAuthenticated == true)
@@ -33,19 +35,22 @@ public class UserSyncMiddleware
                     
                     if (existingUser == null)
                     {
-                        // Auto-create user in local database
+                        // Look up the default "customer" role
+                        var customerRole = await dbContext.Roles.FirstOrDefaultAsync(r => r.Code == "customer");
+
                         var newUser = new User
                         {
                             Id = userClaims.UserId,
                             FullName = userClaims.FullName,
-                            Role = "customer", // Default role
+                            RoleId = customerRole?.Id,
                             Status = 1, // Active
                             CreatedAt = DateTime.UtcNow,
                             UpdatedAt = DateTime.UtcNow
                         };
 
                         await userRepository.CreateAsync(newUser);
-                        _logger.LogInformation("Auto-created user {UserId} with role {Role}", userClaims.UserId, newUser.Role);
+                        _logger.LogInformation("Auto-created user {UserId} with role customer", userClaims.UserId);
+                        newUser.Role = customerRole;
                         existingUser = newUser;
                     }
                     
@@ -60,7 +65,8 @@ public class UserSyncMiddleware
                         }
                         
                         // Add role claim from database
-                        identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, existingUser.Role));
+                        var roleCode = existingUser.Role?.Code ?? "customer";
+                        identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, roleCode));
                     }
                 }
                 catch (Exception ex)
