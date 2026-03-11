@@ -8,7 +8,7 @@ namespace ECommerceAI.Controllers;
 
 [ApiController]
 [Route("api/ai/admin")]
-// [Authorize(Roles = "admin")]
+[Authorize(Roles = "admin")]
 public class AiAdminController : ControllerBase
 {
     private readonly IAiAdminService _adminService;
