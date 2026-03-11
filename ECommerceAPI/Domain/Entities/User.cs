@@ -27,7 +27,9 @@ public partial class User
 
     public virtual Role? Role { get; set; }
 
-    public virtual Address? Address { get; set; }
+    public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();
+
+        public virtual ICollection<AiChatSession> AiChatSessions { get; set; } = new List<AiChatSession>();
 
     public virtual ICollection<AiMaterialSuggestion> AiMaterialSuggestions { get; set; } = new List<AiMaterialSuggestion>();
 
