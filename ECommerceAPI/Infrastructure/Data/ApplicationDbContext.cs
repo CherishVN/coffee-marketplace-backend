@@ -16,7 +16,17 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<Address> Addresses { get; set; }
 
+    public virtual DbSet<AiChatSession> AiChatSessions { get; set; }
+
+    public virtual DbSet<AiChatMessage> AiChatMessages { get; set; }
+
+    public virtual DbSet<AiGeneratedCart> AiGeneratedCarts { get; set; }
+
     public virtual DbSet<AiMaterialSuggestion> AiMaterialSuggestions { get; set; }
+
+    public virtual DbSet<AiProductRecommendation> AiProductRecommendations { get; set; }
+
+    public virtual DbSet<AiRecommendationItem> AiRecommendationItems { get; set; }
 
     public virtual DbSet<AiTagSuggestion> AiTagSuggestions { get; set; }
 
@@ -143,9 +153,152 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.UserId).HasColumnName("user_id");
             entity.Property(e => e.Ward).HasColumnName("ward");
 
-            entity.HasOne(d => d.User).WithOne(p => p.Address)
-                .HasForeignKey<Address>(d => d.UserId)
+            entity.HasOne(d => d.User).WithMany(p => p.Addresses)
+                .HasForeignKey(d => d.UserId)
                 .HasConstraintName("addresses_user_id_fkey");
+        });
+
+        modelBuilder.Entity<AiChatSession>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ai_chat_sessions_pkey");
+
+            entity.ToTable("ai_chat_sessions");
+
+            entity.HasIndex(e => e.UserId, "idx_ai_chat_sessions_user");
+            entity.HasIndex(e => e.Status, "idx_ai_chat_sessions_status");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Status)
+                .HasDefaultValueSql("'active'::text")
+                .HasColumnName("status");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.User).WithMany(p => p.AiChatSessions)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("ai_chat_sessions_user_id_fkey");
+        });
+
+        modelBuilder.Entity<AiChatMessage>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ai_chat_messages_pkey");
+
+            entity.ToTable("ai_chat_messages");
+
+            entity.HasIndex(e => e.SessionId, "idx_ai_chat_messages_session");
+
+            entity.Property(e => e.Id)
+                .UseIdentityAlwaysColumn()
+                .HasColumnName("id");
+            entity.Property(e => e.SessionId).HasColumnName("session_id");
+            entity.Property(e => e.Role).HasColumnName("role");
+            entity.Property(e => e.Content).HasColumnName("content");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Session).WithMany(p => p.AiChatMessages)
+                .HasForeignKey(d => d.SessionId)
+                .HasConstraintName("ai_chat_messages_session_id_fkey");
+        });
+
+        modelBuilder.Entity<AiGeneratedCart>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ai_generated_carts_pkey");
+
+            entity.ToTable("ai_generated_carts");
+
+            entity.HasIndex(e => e.SessionId, "idx_ai_generated_carts_session");
+            entity.HasIndex(e => e.CartId, "idx_ai_generated_carts_cart");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.SessionId).HasColumnName("session_id");
+            entity.Property(e => e.CartId).HasColumnName("cart_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Session).WithMany(p => p.AiGeneratedCarts)
+                .HasForeignKey(d => d.SessionId)
+                .HasConstraintName("ai_generated_carts_session_id_fkey");
+
+            entity.HasOne(d => d.Cart).WithMany(p => p.AiGeneratedCarts)
+                .HasForeignKey(d => d.CartId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("ai_generated_carts_cart_id_fkey");
+        });
+
+        modelBuilder.Entity<AiProductRecommendation>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ai_product_recommendations_pkey");
+
+            entity.ToTable("ai_product_recommendations");
+
+            entity.HasIndex(e => e.SessionId, "idx_ai_product_recommendations_session");
+            entity.HasIndex(e => e.ProductId, "idx_ai_product_recommendations_product");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.SessionId).HasColumnName("session_id");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.Score)
+                .HasPrecision(5, 2)
+                .HasColumnName("score");
+            entity.Property(e => e.Reason).HasColumnName("reason");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Session).WithMany(p => p.AiProductRecommendations)
+                .HasForeignKey(d => d.SessionId)
+                .HasConstraintName("ai_product_recommendations_session_id_fkey");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.AiProductRecommendations)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("ai_product_recommendations_product_id_fkey");
+        });
+
+        modelBuilder.Entity<AiRecommendationItem>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ai_recommendation_items_pkey");
+
+            entity.ToTable("ai_recommendation_items");
+
+            entity.HasIndex(e => e.AiCartId, "idx_ai_recommendation_items_cart");
+            entity.HasIndex(e => e.ProductId, "idx_ai_recommendation_items_product");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.AiCartId).HasColumnName("ai_cart_id");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.VariantId).HasColumnName("variant_id");
+            entity.Property(e => e.Quantity)
+                .HasDefaultValue(1)
+                .HasColumnName("quantity");
+
+            entity.HasOne(d => d.AiCart).WithMany(p => p.AiRecommendationItems)
+                .HasForeignKey(d => d.AiCartId)
+                .HasConstraintName("ai_recommendation_items_ai_cart_id_fkey");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.AiRecommendationItems)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("ai_recommendation_items_product_id_fkey");
+
+            entity.HasOne(d => d.Variant).WithMany(p => p.AiRecommendationItems)
+                .HasForeignKey(d => d.VariantId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("ai_recommendation_items_variant_id_fkey");
         });
 
         modelBuilder.Entity<AiMaterialSuggestion>(entity =>
@@ -988,6 +1141,10 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.ProductId).HasColumnName("product_id");
             entity.Property(e => e.Sku).HasColumnName("sku");
             entity.Property(e => e.VariantName).HasColumnName("variant_name");
+            entity.Property(e => e.Weight).HasColumnName("weight");
+            entity.Property(e => e.Length).HasColumnName("length");
+            entity.Property(e => e.Width).HasColumnName("width");
+            entity.Property(e => e.Height).HasColumnName("height");
 
             entity.HasOne(d => d.Product).WithMany(p => p.ProductVariants)
                 .HasForeignKey(d => d.ProductId)

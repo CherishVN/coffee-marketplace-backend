@@ -234,7 +234,7 @@ public class SellerService : ISellerService
 
     // ==================== PRODUCT MANAGEMENT ====================
 
-    public async Task<ServiceResponse<List<ProductDto>>> GetMyProductsAsync(Guid userId, int page, int pageSize, short? status)
+    public async Task<ServiceResponse<List<ProductDto>>> GetMyProductsAsync(Guid userId, int page, int pageSize, short? status, string? search = null)
     {
         var shop = await _context.Shops
             .FirstOrDefaultAsync(s => s.OwnerId == userId);
@@ -259,6 +259,15 @@ public class SellerService : ISellerService
         {
             query = query.Where(p => p.Status == status.Value);
         }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var q = search.Trim().ToLower();
+            query = query.Where(p => p.Name.ToLower().Contains(q) ||
+                                     (p.Category != null && p.Category.Name.ToLower().Contains(q)));
+        }
+
+        var totalCount = await query.CountAsync();
 
         var products = await query
             .OrderByDescending(p => p.CreatedAt)
@@ -302,7 +311,8 @@ public class SellerService : ISellerService
         return new ServiceResponse<List<ProductDto>>
         {
             Success = true,
-            Data = products
+            Data = products,
+            TotalCount = totalCount
         };
     }
 
@@ -551,6 +561,25 @@ public class SellerService : ISellerService
             product.Status = dto.Status.Value;
 
         product.UpdatedAt = DateTime.UtcNow;
+
+        if (dto.ImageUrls != null)
+        {
+            var existingImages = await _context.ProductImages.Where(i => i.ProductId == product.Id).ToListAsync();
+            _context.ProductImages.RemoveRange(existingImages);
+
+            short order = 1;
+            foreach (var url in dto.ImageUrls)
+            {
+                _context.ProductImages.Add(new ProductImage
+                {
+                    Id = Guid.NewGuid(),
+                    ProductId = product.Id,
+                    ImageUrl = url,
+                    SortOrder = order++,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
 
         await _context.SaveChangesAsync();
 

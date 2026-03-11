@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -10,11 +12,28 @@ public class UserProfileService : IUserProfileService
 {
     private readonly ApplicationDbContext _context;
     private readonly IUserRepository _userRepository;
+    private readonly IEmailService _emailService;
+    private readonly IOtpService _otpService;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<UserProfileService> _logger;
 
-    public UserProfileService(ApplicationDbContext context, IUserRepository userRepository)
+    public UserProfileService(
+        ApplicationDbContext context,
+        IUserRepository userRepository,
+        IEmailService emailService,
+        IOtpService otpService,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        ILogger<UserProfileService> logger)
     {
         _context = context;
         _userRepository = userRepository;
+        _emailService = emailService;
+        _otpService = otpService;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<UserProfileResponse> GetProfileAsync(Guid userId)
@@ -30,10 +49,12 @@ public class UserProfileService : IUserProfileService
         }
 
         var shop = user.ShopOwners.FirstOrDefault();
+        var authEmail = await GetSupabaseAuthEmailAsync(userId);
 
         return new UserProfileResponse
         {
             Id = user.Id,
+            Email = authEmail,
             FullName = user.FullName,
             Phone = user.Phone,
             Role = user.Role?.Code ?? string.Empty,
@@ -198,7 +219,10 @@ Account Name: {dto.BankAccountName}
             foreach (var addr in existingAddresses)
             {
                 addr.IsDefault = false;
+                addr.UpdatedAt = DateTime.UtcNow;
             }
+
+            await _context.SaveChangesAsync();
         }
 
         var address = new Address
@@ -271,7 +295,10 @@ Account Name: {dto.BankAccountName}
             foreach (var addr in otherAddresses)
             {
                 addr.IsDefault = false;
+                addr.UpdatedAt = DateTime.UtcNow;
             }
+
+            await _context.SaveChangesAsync();
         }
 
         if (!string.IsNullOrEmpty(dto.Label))
@@ -355,7 +382,10 @@ Account Name: {dto.BankAccountName}
         foreach (var addr in otherAddresses)
         {
             addr.IsDefault = false;
+            addr.UpdatedAt = DateTime.UtcNow;
         }
+
+        await _context.SaveChangesAsync();
 
         address.IsDefault = true;
         address.UpdatedAt = DateTime.UtcNow;
@@ -367,6 +397,110 @@ Account Name: {dto.BankAccountName}
             Success = true,
             Message = "Đặt địa chỉ mặc định thành công"
         };
+    }
+
+    public async Task<ServiceResponse> RequestEmailChangeAsync(Guid userId, string currentEmail, RequestEmailChangeDto dto)
+    {
+        var newEmail = dto.NewEmail.Trim().ToLowerInvariant();
+
+        if (newEmail == currentEmail.Trim().ToLowerInvariant())
+            return new ServiceResponse { Success = false, Message = "Email mới phải khác email hiện tại" };
+
+        var otp = _otpService.GenerateAndStore(userId, newEmail);
+
+        var html = $"""
+            <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px">
+              <h2 style="color:#ec7f13;margin-bottom:8px">Xác nhận thay đổi Email</h2>
+              <p>Mã OTP xác nhận thay đổi email của bạn là:</p>
+              <div style="font-size:36px;font-weight:bold;letter-spacing:10px;color:#ec7f13;padding:16px 0">{otp}</div>
+              <p style="color:#666;font-size:13px">Mã có hiệu lực trong <strong>10 phút</strong>. Không chia sẻ mã này với bất kỳ ai.</p>
+            </div>
+            """;
+
+        try
+        {
+            await _emailService.SendAsync(newEmail, "Mã OTP thay đổi Email", html);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send OTP email to {Email}", newEmail);
+            return new ServiceResponse { Success = false, Message = $"Không thể gửi email: {ex.Message}" };
+        }
+
+        return new ServiceResponse { Success = true, Message = "Đã gửi mã OTP đến email mới" };
+    }
+
+    public async Task<ServiceResponse> ConfirmEmailChangeAsync(Guid userId, ConfirmEmailChangeDto dto)
+    {
+        var newEmail = dto.NewEmail.Trim().ToLowerInvariant();
+
+        if (!_otpService.Verify(userId, newEmail, dto.Otp))
+            return new ServiceResponse { Success = false, Message = "Mã OTP không đúng hoặc đã hết hạn" };
+
+        // Gọi Supabase Admin API để cập nhật email
+        var supabaseUrl = _configuration["Supabase:Url"]!;
+        var serviceRoleKey = _configuration["Supabase:ServiceRoleKey"]!;
+
+        using var http = _httpClientFactory.CreateClient();
+        http.DefaultRequestHeaders.Add("apikey", serviceRoleKey);
+        http.DefaultRequestHeaders.Add("Authorization", $"Bearer {serviceRoleKey}");
+
+        var body = JsonSerializer.Serialize(new { email = newEmail, email_confirm = true });
+        var response = await http.PutAsync(
+            $"{supabaseUrl}/auth/v1/admin/users/{userId}",
+            new StringContent(body, Encoding.UTF8, "application/json")
+        );
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var err = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Supabase Admin API error ({Status}): {Error}", response.StatusCode, err);
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = $"Không thể cập nhật email. Supabase trả về: {(int)response.StatusCode} - {err}"
+            };
+        }
+
+        return new ServiceResponse { Success = true, Message = "Email đã được cập nhật thành công" };
+    }
+
+    private async Task<string?> GetSupabaseAuthEmailAsync(Guid userId)
+    {
+        var supabaseUrl = _configuration["Supabase:Url"];
+        var serviceRoleKey = _configuration["Supabase:ServiceRoleKey"];
+
+        if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(serviceRoleKey))
+            return null;
+
+        using var http = _httpClientFactory.CreateClient();
+        http.DefaultRequestHeaders.Add("apikey", serviceRoleKey);
+        http.DefaultRequestHeaders.Add("Authorization", $"Bearer {serviceRoleKey}");
+
+        var response = await http.GetAsync($"{supabaseUrl}/auth/v1/admin/users/{userId}");
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Failed to fetch auth user email from Supabase. Status: {Status}", response.StatusCode);
+            return null;
+        }
+
+        var content = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(content);
+
+        if (doc.RootElement.TryGetProperty("email", out var rootEmailElement)
+            && rootEmailElement.ValueKind == JsonValueKind.String)
+        {
+            return rootEmailElement.GetString();
+        }
+
+        if (doc.RootElement.TryGetProperty("user", out var userElement)
+            && userElement.TryGetProperty("email", out var emailElement)
+            && emailElement.ValueKind == JsonValueKind.String)
+        {
+            return emailElement.GetString();
+        }
+
+        return null;
     }
 
     private string GenerateSlug(string name)

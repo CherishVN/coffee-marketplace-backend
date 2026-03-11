@@ -72,7 +72,6 @@ public class AdminProductController : ControllerBase
     }
 
     /// <summary>
-    /// Remove product permanently
     /// </summary>
     [HttpPost("{productId}/remove")]
     public async Task<IActionResult> RemoveProduct(Guid productId, [FromBody] RemoveProductDto dto)

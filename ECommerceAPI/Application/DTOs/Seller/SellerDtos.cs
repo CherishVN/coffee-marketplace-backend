@@ -31,6 +31,7 @@ public class UpdateProductDto
     public string? Description { get; set; }
     public decimal? BasePrice { get; set; }
     public short? Status { get; set; }
+    public List<string>? ImageUrls { get; set; }
 }
 
 public class ProductVariantDto

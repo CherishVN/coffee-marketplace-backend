@@ -124,18 +124,19 @@ public class SellerController : ControllerBase
     public async Task<IActionResult> GetMyProducts(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] short? status = null)
+        [FromQuery] short? status = null,
+        [FromQuery] string? search = null)
     {
         var userId = _userClaimsService.GetUserId();
         if (userId == null)
             return Unauthorized(new { success = false, message = "Token không hợp lệ" });
 
-        var result = await _sellerService.GetMyProductsAsync(userId.Value, page, pageSize, status);
+        var result = await _sellerService.GetMyProductsAsync(userId.Value, page, pageSize, status, search);
 
         if (!result.Success)
             return BadRequest(new { success = false, message = result.Message });
 
-        return Ok(new { success = true, data = result.Data });
+        return Ok(new { success = true, data = result.Data, totalCount = result.TotalCount });
     }
 
     /// <summary>

@@ -32,6 +32,10 @@ public partial class Product
 
     public virtual ICollection<AiMaterialSuggestion> AiMaterialSuggestions { get; set; } = new List<AiMaterialSuggestion>();
 
+    public virtual ICollection<AiProductRecommendation> AiProductRecommendations { get; set; } = new List<AiProductRecommendation>();
+
+    public virtual ICollection<AiRecommendationItem> AiRecommendationItems { get; set; } = new List<AiRecommendationItem>();
+
     public virtual ICollection<AiTagSuggestion> AiTagSuggestions { get; set; } = new List<AiTagSuggestion>();
 
     public virtual ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();

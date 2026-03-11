@@ -15,7 +15,7 @@ public interface ISellerService
     Task<ServiceResponse<WithdrawalRequestDto>> CreateWithdrawalRequestAsync(Guid userId, CreateWithdrawalRequestDto dto);
     
     // Product Management
-    Task<ServiceResponse<List<ProductDto>>> GetMyProductsAsync(Guid userId, int page, int pageSize, short? status);
+    Task<ServiceResponse<List<ProductDto>>> GetMyProductsAsync(Guid userId, int page, int pageSize, short? status, string? search = null);
     Task<ServiceResponse<ProductDto>> GetProductByIdAsync(Guid userId, Guid productId);
     Task<ServiceResponse<ProductDto>> CreateProductAsync(Guid userId, CreateProductDto dto);
     Task<ServiceResponse> UpdateProductAsync(Guid userId, Guid productId, UpdateProductDto dto);
