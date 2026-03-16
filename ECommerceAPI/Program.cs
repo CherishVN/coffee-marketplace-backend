@@ -56,6 +56,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<ICustomerOrderService, CustomerOrderService>();
             builder.Services.AddScoped<IReviewService, ReviewService>();
             builder.Services.AddScoped<ICustomerDisputeService, CustomerDisputeService>();
+            builder.Services.AddScoped<ISellerDisputeService, SellerDisputeService>();
             builder.Services.AddScoped<IProductStorefrontService, ProductStorefrontService>();
             builder.Services.AddScoped<ICategoryStorefrontService, CategoryStorefrontService>();
             builder.Services.AddScoped<IFavoriteService, FavoriteService>();
