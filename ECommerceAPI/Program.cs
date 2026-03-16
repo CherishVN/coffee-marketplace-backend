@@ -27,7 +27,9 @@ namespace ECommerceAPI
 
             // Database
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
-                options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+                options.UseNpgsql(
+                    builder.Configuration.GetConnectionString("DefaultConnection"),
+                    npgsql => npgsql.EnableRetryOnFailure(3)));
 
             builder.Services.Configure<AiServiceSettings>(
                 builder.Configuration.GetSection(AiServiceSettings.SectionName));

@@ -48,7 +48,17 @@ public class AiChatController : ControllerBase
     public async Task<IActionResult> ConfirmOrder([FromBody] ConfirmOrderRequestDto dto)
     {
         var userId = GetUserId();
-        var result = await _chatService.ConfirmOrderAsync(dto.SessionId, userId, dto.CartId, dto.ShippingAddressId);
+        var authHeader = Request.Headers.Authorization.ToString();
+        var accessToken = authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? authHeader["Bearer ".Length..].Trim()
+            : null;
+
+        var result = await _chatService.ConfirmOrderAsync(
+            dto.SessionId,
+            userId,
+            dto.CartId,
+            dto.ShippingAddressId,
+            accessToken);
 
         if (!result.Success)
             return BadRequest(result);

@@ -11,7 +11,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ── Database ─────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<AiDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        npgsql => npgsql.EnableRetryOnFailure(3)));
 
 // ── AI Services ───────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<GeminiClientService>();
@@ -28,7 +30,7 @@ builder.Services.AddHttpClient("GeminiClient", client =>
 // ── HTTP Client để gọi Main API ───────────────────────────────────────────────
 builder.Services.AddHttpClient("MainApi", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["MainApi:BaseUrl"] ?? "http://localhost:5000");
+    client.BaseAddress = new Uri(builder.Configuration["MainApi:BaseUrl"] ?? "http://localhost:5153");
     client.DefaultRequestHeaders.Add("X-Internal-Key", builder.Configuration["InternalAuth:ApiKey"]);
     client.Timeout = TimeSpan.FromSeconds(30);
 });
@@ -101,7 +103,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowMainApi", policy =>
     {
         policy.WithOrigins(
-                builder.Configuration["MainApi:BaseUrl"] ?? "http://localhost:5000",
+                builder.Configuration["MainApi:BaseUrl"] ?? "http://localhost:5153",
                 "http://localhost:3000")   // Frontend
               .AllowAnyMethod()
               .AllowAnyHeader();

@@ -78,7 +78,7 @@ public class AiChatService : IAiChatService
         }
 
         // 3. Nếu là yêu cầu tìm sản phẩm, lấy danh sách products để inject vào context
-        var productsContext = await BuildProductContextAsync(message);
+        var productsContext = await BuildProductContextAsync(message, session.Messages);
         var userMessageWithContext = string.IsNullOrEmpty(productsContext)
             ? message
             : $"{message}\n\n[Danh sách sản phẩm có sẵn trong hệ thống:\n{productsContext}]";
@@ -105,20 +105,65 @@ public class AiChatService : IAiChatService
         // 5. Parse JSON response từ LLM
         var parsed = ParseLlmResponse(rawResponse);
 
-        // 6. Lưu user message + assistant reply vào DB
-        var now = DateTime.UtcNow;
-        _context.AiChatMessages.AddRange(
-            new AiChatMessage { SessionId = sessionId, Role = "user", Content = message, CreatedAt = now },
-            new AiChatMessage { SessionId = sessionId, Role = "assistant", Content = parsed.Reply, CreatedAt = now.AddMilliseconds(1) }
-        );
-
-        // 7. Nếu AI muốn tìm sản phẩm → search và trả về danh sách (kèm filter giá nếu có)
+        // 6. Nếu AI muốn tìm sản phẩm → search và trả về danh sách (kèm filter giá nếu có)
         List<ProductSuggestionDto> products = new();
         if (!string.IsNullOrEmpty(parsed.SearchQuery))
         {
             var maxPrice = ExtractMaxPrice(message);
             products = await SearchProductsAsync(parsed.SearchQuery, maxPrice);
         }
+
+        // Fallback cho trường hợp LLM không trả search_query nhưng user đang hỏi sản phẩm.
+        if (!products.Any() && string.IsNullOrWhiteSpace(parsed.SearchQuery) && IsLikelyProductRequest(message))
+        {
+            var fallbackKeyword = ExtractProductKeyword(message);
+            if (!string.IsNullOrWhiteSpace(fallbackKeyword))
+            {
+                products = await SearchProductsAsync(fallbackKeyword, ExtractMaxPrice(message));
+                if (products.Any()) parsed.SearchQuery = fallbackKeyword;
+            }
+        }
+
+        // Nếu user xin "ảnh mẫu" nhưng LLM không trả search_query ổn định,
+        // fallback theo ngữ cảnh đoạn chat trước để FE vẫn có ảnh sản phẩm.
+        if (!products.Any() && IsImageRequest(message))
+        {
+            var fallbackQueries = BuildFallbackQueries(message, session.Messages);
+            foreach (var query in fallbackQueries)
+            {
+                products = await SearchProductsAsync(query, ExtractMaxPrice(message));
+                if (products.Any())
+                {
+                    parsed.SearchQuery = query;
+                    break;
+                }
+            }
+        }
+
+        if (products.Any() && IsImageRequest(message))
+        {
+            parsed.Reply = "Mình đã lấy các mẫu có ảnh bên dưới, bạn tick sản phẩm muốn mua rồi bấm OK giúp mình nhé.";
+        }
+
+        if (!products.Any() && IsLikelyProductRequest(message))
+        {
+            parsed.Reply =
+                "Mình chưa tìm thấy sản phẩm phù hợp trong kho local brand hiện tại. Bạn thử mô tả rõ hơn (tên sản phẩm, ngành hàng, mức giá, chất liệu/thuộc tính, khu vực hoặc thương hiệu) để mình lọc chính xác hơn nhé.";
+        }
+
+        if (string.IsNullOrWhiteSpace(parsed.Reply))
+        {
+            parsed.Reply = products.Any()
+                ? "Mình đã tìm thấy vài sản phẩm phù hợp cho bạn ở bên dưới."
+                : "Mình đã nhận yêu cầu của bạn. Bạn mô tả thêm một chút để mình hỗ trợ chuẩn hơn nhé.";
+        }
+
+        // 7. Lưu user message + assistant reply cuối cùng vào DB
+        var now = DateTime.UtcNow;
+        _context.AiChatMessages.AddRange(
+            new AiChatMessage { SessionId = sessionId, Role = "user", Content = message, CreatedAt = now },
+            new AiChatMessage { SessionId = sessionId, Role = "assistant", Content = parsed.Reply, CreatedAt = now.AddMilliseconds(1) }
+        );
 
         // 8. Update session timestamp
         session.UpdatedAt = DateTime.UtcNow;
@@ -140,12 +185,18 @@ public class AiChatService : IAiChatService
     }
 
     // ── Xác nhận tạo đơn hàng ───────────────────────────────────────────────
-    public async Task<ConfirmOrderResponseDto> ConfirmOrderAsync(Guid sessionId, Guid userId, Guid cartId, Guid shippingAddressId)
+    public async Task<ConfirmOrderResponseDto> ConfirmOrderAsync(Guid sessionId, Guid userId, Guid cartId, Guid shippingAddressId, string? accessToken)
     {
         // Gọi Main API để tạo đơn hàng
         try
         {
             var httpClient = _httpClientFactory.CreateClient("MainApi");
+            if (!string.IsNullOrWhiteSpace(accessToken))
+            {
+                httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            }
+
             var payload = JsonSerializer.Serialize(new
             {
                 cartId = cartId,
@@ -153,20 +204,30 @@ public class AiChatService : IAiChatService
             });
 
             var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-            var response = await httpClient.PostAsync("/api/orders/checkout", content);
+            var response = await httpClient.PostAsync("/api/cart/checkout", content);
 
             if (response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync();
                 var result = JsonSerializer.Deserialize<JsonElement>(body);
-                var orderId = result.GetProperty("orderId").GetGuid();
+                Guid? orderId = null;
+
+                if (result.TryGetProperty("data", out var dataNode)
+                    && dataNode.TryGetProperty("orderIds", out var orderIdsNode)
+                    && orderIdsNode.ValueKind == JsonValueKind.Array
+                    && orderIdsNode.GetArrayLength() > 0)
+                {
+                    orderId = orderIdsNode[0].GetGuid();
+                }
 
                 // Lưu AI message thông báo đơn hàng đã tạo
                 _context.AiChatMessages.Add(new AiChatMessage
                 {
                     SessionId = sessionId,
                     Role = "assistant",
-                    Content = $"✅ Đơn hàng đã được tạo thành công! Mã đơn hàng: {orderId}",
+                    Content = orderId.HasValue
+                        ? $"✅ Đơn hàng đã được tạo thành công! Mã đơn hàng: {orderId.Value}"
+                        : "✅ Đơn hàng đã được tạo thành công!",
                     CreatedAt = DateTime.UtcNow
                 });
 
@@ -184,14 +245,39 @@ public class AiChatService : IAiChatService
                 {
                     Success = true,
                     OrderId = orderId,
-                    Message = $"✅ Đơn hàng #{orderId} đã được tạo thành công!"
+                    Message = orderId.HasValue
+                        ? $"✅ Đơn hàng #{orderId.Value} đã được tạo thành công!"
+                        : "✅ Đơn hàng đã được tạo thành công!"
                 };
+            }
+
+            var errorBody = await response.Content.ReadAsStringAsync();
+            _logger.LogWarning(
+                "Create order failed. Status: {StatusCode}. Body: {Body}",
+                response.StatusCode,
+                errorBody);
+
+            var fallbackMessage = "Không thể tạo đơn hàng. Vui lòng kiểm tra lại giỏ hàng hoặc địa chỉ giao hàng.";
+            string resolvedMessage = fallbackMessage;
+            try
+            {
+                var errorJson = JsonSerializer.Deserialize<JsonElement>(errorBody);
+                if (errorJson.TryGetProperty("message", out var messageNode) &&
+                    messageNode.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(messageNode.GetString()))
+                {
+                    resolvedMessage = messageNode.GetString()!;
+                }
+            }
+            catch
+            {
+                // keep fallback message
             }
 
             return new ConfirmOrderResponseDto
             {
                 Success = false,
-                Message = "Không thể tạo đơn hàng. Vui lòng thử lại hoặc tạo đơn thủ công."
+                Message = resolvedMessage
             };
         }
         catch (Exception ex)
@@ -218,9 +304,17 @@ public class AiChatService : IAiChatService
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    private async Task<string> BuildProductContextAsync(string userMessage)
+    private async Task<string> BuildProductContextAsync(string userMessage, IEnumerable<AiChatMessage>? history = null)
     {
         var keyword = ExtractProductKeyword(userMessage);
+        if (IsImageRequest(userMessage))
+        {
+            var fallbackKeyword = ExtractLastProductKeywordFromHistory(history);
+            if (!string.IsNullOrWhiteSpace(fallbackKeyword))
+            {
+                keyword = fallbackKeyword;
+            }
+        }
         if (string.IsNullOrEmpty(keyword)) return string.Empty;
 
         var maxPrice = ExtractMaxPrice(userMessage);
@@ -250,6 +344,90 @@ public class AiChatService : IAiChatService
         }));
     }
 
+    private static bool IsImageRequest(string message)
+    {
+        var lower = message.ToLower();
+        return lower.Contains("ảnh") || lower.Contains("hình") || lower.Contains("mẫu");
+    }
+
+    private static bool IsLikelyProductRequest(string message)
+    {
+        var lower = message.ToLower();
+        if (string.IsNullOrWhiteSpace(lower)) return false;
+
+        var shoppingSignals = new[]
+        {
+            "mua", "tìm", "gợi ý", "đề xuất", "cho tôi", "xem", "mẫu", "ảnh",
+            "giá", "bao nhiêu", "thương hiệu", "shop", "sản phẩm", "local brand"
+        };
+        if (shoppingSignals.Any(s => lower.Contains(s))) return true;
+
+        // Fallback đa ngành hàng: nếu câu có ít nhất 2 token "ý nghĩa" thì coi là nhu cầu tìm sản phẩm.
+        var genericStopWords = new HashSet<string>
+        {
+            "tôi", "mình", "anh", "chị", "em", "là", "và", "hoặc", "có", "không", "giúp",
+            "với", "nhé", "ạ", "ơi", "nha", "thì", "đi", "được", "được không"
+        };
+        var tokens = lower
+            .Split(new[] { ' ', ',', '.', '?', '!', ':', ';', '/', '\\', '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => t.Length > 1 && !genericStopWords.Contains(t) && !long.TryParse(t, out _))
+            .ToList();
+
+        return tokens.Count >= 2;
+    }
+
+    private static string ExtractLastProductKeywordFromHistory(IEnumerable<AiChatMessage>? history)
+    {
+        if (history == null) return string.Empty;
+        var genericWords = new HashSet<string>
+        {
+            "ảnh", "hình", "mẫu", "xem", "cho", "vài", "các", "sản phẩm", "đó",
+            "anh", "em", "nào", "đi", "giúp", "mình", "tôi", "sp"
+        };
+
+        foreach (var msg in history
+                     .Where(m => m.Role == "user")
+                     .OrderByDescending(m => m.CreatedAt))
+        {
+            var keyword = ExtractProductKeyword(msg.Content ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(keyword)) continue;
+            if (!genericWords.Contains(keyword.Trim().ToLower()))
+            {
+                return keyword;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static List<string> BuildFallbackQueries(string message, IEnumerable<AiChatMessage>? history)
+    {
+        var queries = new List<string>();
+
+        var currentKeyword = ExtractProductKeyword(message);
+        if (!string.IsNullOrWhiteSpace(currentKeyword))
+            queries.Add(currentKeyword);
+
+        if (history != null)
+        {
+            foreach (var msg in history
+                         .Where(m => m.Role == "user")
+                         .OrderByDescending(m => m.CreatedAt)
+                         .Take(8))
+            {
+                var keyword = ExtractProductKeyword(msg.Content ?? string.Empty);
+                if (!string.IsNullOrWhiteSpace(keyword))
+                    queries.Add(keyword);
+            }
+        }
+
+        return queries
+            .Select(q => q.Trim())
+            .Where(q => q.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>
     /// Trích xuất từ khóa sản phẩm từ message, bỏ qua số và từ liên quan đến giá.
     /// Ví dụ: "tôi muốn mua 1 áo thun dưới 180 nghìn" → "áo thun"
@@ -262,6 +440,8 @@ public class AiChatService : IAiChatService
             "tôi", "cần", "muốn", "mua", "tìm", "cho", "và", "hoặc", "có", "không",
             "ạ", "nhé", "thôi", "dưới", "trên", "khoảng", "tầm", "giá", "nghìn",
             "ngàn", "trăm", "triệu", "đồng", "vnđ", "vnd", "đ",
+            "anh", "em", "các", "cái", "mẫu", "ảnh", "hình", "xem", "đó", "nào",
+            "giúp", "với", "đi", "sản", "phẩm", "sp",
             // Tính từ mô tả không phải tên sản phẩm
             "đẹp", "xấu", "tốt", "rẻ", "mắc", "hot", "mới", "cũ", "ngon", "chất",
             "đỉnh", "xịn", "sang", "trẻ", "hợp", "thời", "thượng", "lưu"
@@ -309,13 +489,32 @@ public class AiChatService : IAiChatService
 
     private async Task<List<ProductSuggestionDto>> SearchProductsAsync(string query, decimal? maxPrice = null)
     {
+        var normalizedTokens = NormalizeSearchTokens(query);
+
         var dbQuery = _context.Products
             .Include(p => p.Variants.Where(v => v.IsActive))
             .Include(p => p.Images)
             .Include(p => p.Category)
-            .Where(p => p.Status == 1 &&
-                        (p.Name.ToLower().Contains(query.ToLower()) ||
-                         (p.Description != null && p.Description.ToLower().Contains(query.ToLower()))));
+            .Where(p => p.Status == 1);
+
+        if (normalizedTokens.Count > 0)
+        {
+            // Match theo từng token có nghĩa để tránh miss khi query có từ mô tả như "đẹp", "2026", ...
+            foreach (var token in normalizedTokens)
+            {
+                var t = token;
+                dbQuery = dbQuery.Where(p =>
+                    p.Name.ToLower().Contains(t) ||
+                    (p.Description != null && p.Description.ToLower().Contains(t)));
+            }
+        }
+        else
+        {
+            var lowerQuery = query.ToLower().Trim();
+            dbQuery = dbQuery.Where(p =>
+                p.Name.ToLower().Contains(lowerQuery) ||
+                (p.Description != null && p.Description.ToLower().Contains(lowerQuery)));
+        }
 
         if (maxPrice.HasValue)
             dbQuery = dbQuery.Where(p =>
@@ -338,6 +537,26 @@ public class AiChatService : IAiChatService
                 Price = v.Price
             }).ToList()
         }).ToList();
+    }
+
+    private static List<string> NormalizeSearchTokens(string query)
+    {
+        var stopWords = new HashSet<string>
+        {
+            "đẹp", "xinh", "hot", "trend", "trendy", "new", "mới", "cao", "cấp",
+            "xịn", "siêu", "best", "top", "chất", "đỉnh", "sịn", "phiên", "bản",
+            "mẫu", "này", "kia", "đó", "vài", "các", "cho", "tôi", "mình", "anh",
+            "chị", "em", "muốn", "cần", "mua", "tìm"
+        };
+
+        return query
+            .ToLower()
+            .Split(new[] { ' ', ',', '.', '?', '!', ':', ';', '/', '\\', '-', '_', '(', ')', '[', ']', '"' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(token => token.Length >= 2)
+            .Where(token => !stopWords.Contains(token))
+            .Where(token => !long.TryParse(token, out _)) // loại năm/số như 2026
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static LlmParsedResponse ParseLlmResponse(string raw)

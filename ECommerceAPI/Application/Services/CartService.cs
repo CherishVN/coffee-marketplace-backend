@@ -304,8 +304,7 @@ public class CartService : ICartService
             totalAmount += total;
         }
 
-        // 5. Đánh dấu giỏ hàng đã checkout
-        cart.Status = 1;
+        _context.CartItems.RemoveRange(cart.CartItems);
         cart.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
