@@ -29,7 +29,32 @@ public class CartService : ICartService
 
         if (cart == null) return null;
 
-        return MapToCartDto(cart);
+        var result = MapToCartDto(cart);
+
+        var inventories = await _context.Inventories
+            .Where(i => cart.CartItems.Select(ci => ci.ProductId).Contains(i.ProductId))
+            .Select(i => new
+            {
+                i.ProductId,
+                i.VariantId,
+                Available = Math.Max(0, i.Quantity - i.ReservedQuantity)
+            })
+            .ToListAsync();
+
+        var inventoryMap = inventories.ToDictionary(
+            x => $"{x.ProductId}:{x.VariantId}",
+            x => x.Available
+        );
+
+        foreach (var item in result.Items)
+        {
+            var key = $"{item.ProductId}:{item.VariantId}";
+            item.StockAvailable = inventoryMap.TryGetValue(key, out var available)
+                ? available
+                : 0;
+        }
+
+        return result;
     }
 
     // ── Thêm vào giỏ ─────────────────────────────────────────────────────────

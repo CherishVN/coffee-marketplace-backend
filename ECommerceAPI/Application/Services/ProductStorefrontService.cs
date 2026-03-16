@@ -115,7 +115,8 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.Category)
                 .Include(p => p.ProductImages)
                 .Include(p => p.ProductReviews)
-                .Include(p => p.ProductVariants)
+                .Include(p => p.ProductVariants).ThenInclude(v => v.Inventories)
+                .Include(p => p.Inventories)
                 .Where(p => p.Id == productId && p.Status == (short)ProductStatus.Active)
                 .Select(p => new ProductStorefrontDetailDto
                 {
@@ -141,12 +142,16 @@ public class ProductStorefrontService : IProductStorefrontService
                         .Where(v => v.IsActive)
                         .Select(v => new ProductVariantStorefrontDto
                         {
-                            Id          = v.Id,
-                            VariantName = v.VariantName,
-                            Price       = v.Price,
-                            IsActive    = v.IsActive,
+                            Id            = v.Id,
+                            VariantName   = v.VariantName,
+                            Price         = v.Price,
+                            IsActive      = v.IsActive,
+                            StockQuantity = v.Inventories
+                                .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
                         })
                         .ToList(),
+                    TotalStock = p.Inventories
+                        .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
                     CreatedAt = p.CreatedAt,
                     SoldCount = p.SoldCount,
                 })

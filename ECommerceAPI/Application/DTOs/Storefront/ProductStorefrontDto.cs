@@ -28,6 +28,7 @@ public class ProductStorefrontDetailDto : ProductStorefrontDto
     public double AverageRating { get; set; }
     public int ReviewCount { get; set; }
     public List<ProductVariantStorefrontDto> Variants { get; set; } = new();
+    public int TotalStock { get; set; }
 }
 
 public class ProductVariantStorefrontDto
@@ -36,6 +37,7 @@ public class ProductVariantStorefrontDto
     public string VariantName { get; set; } = string.Empty;
     public decimal? Price { get; set; }
     public bool IsActive { get; set; }
+    public int StockQuantity { get; set; }
 }
 
 public class ProductStorefrontListResponseDto
