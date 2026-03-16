@@ -33,6 +33,64 @@ public class ProductReviewListResponseDto
     public int PageSize { get; set; }
 }
 
+public class CreateShopReviewDto
+{
+    public Guid ShopId { get; set; }
+    public Guid OrderId { get; set; }
+    public short Rating { get; set; }
+    public string? Title { get; set; }
+    public string? Content { get; set; }
+}
+
+public class ShopReviewDto
+{
+    public Guid Id { get; set; }
+    public Guid ShopId { get; set; }
+    public Guid UserId { get; set; }
+    public string? UserName { get; set; }
+    public short Rating { get; set; }
+    public string? Title { get; set; }
+    public string? Content { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class ShopReviewListResponseDto
+{
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public List<ShopReviewDto> Reviews { get; set; } = new();
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+    public double AverageRating { get; set; }
+}
+
+public class CreateShopReviewDtoValidator : AbstractValidator<CreateShopReviewDto>
+{
+    public CreateShopReviewDtoValidator()
+    {
+        RuleFor(x => x.ShopId)
+            .NotEmpty().WithMessage("ShopId không được để trống");
+
+        RuleFor(x => x.OrderId)
+            .NotEmpty().WithMessage("OrderId không được để trống");
+
+        RuleFor(x => x.Rating)
+            .InclusiveBetween((short)1, (short)5)
+            .WithMessage("Rating phải từ 1 đến 5 sao");
+
+        RuleFor(x => x.Title)
+            .MaximumLength(100)
+            .WithMessage("Tiêu đề không được vượt quá 100 ký tự")
+            .When(x => !string.IsNullOrWhiteSpace(x.Title));
+
+        RuleFor(x => x.Content)
+            .MaximumLength(500)
+            .WithMessage("Nội dung không được vượt quá 500 ký tự")
+            .When(x => !string.IsNullOrWhiteSpace(x.Content));
+    }
+}
+
 public class CreateProductReviewDtoValidator : AbstractValidator<CreateProductReviewDto>
 {
     public CreateProductReviewDtoValidator()
