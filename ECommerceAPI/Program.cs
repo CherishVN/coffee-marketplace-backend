@@ -32,6 +32,9 @@ namespace ECommerceAPI
             builder.Services.Configure<AiServiceSettings>(
                 builder.Configuration.GetSection(AiServiceSettings.SectionName));
 
+            builder.Services.Configure<VNPaySettings>(
+                builder.Configuration.GetSection(VNPaySettings.SectionName));
+
             builder.Services.AddScoped<IUserRepository, UserRepository>();
 
             builder.Services.AddHttpContextAccessor();
@@ -57,6 +60,8 @@ namespace ECommerceAPI
             builder.Services.AddScoped<ICategoryStorefrontService, CategoryStorefrontService>();
             builder.Services.AddScoped<IFavoriteService, FavoriteService>();
             builder.Services.AddScoped<ICartService, CartService>();
+            builder.Services.AddScoped<IPaymentService, PaymentService>();
+            builder.Services.AddMemoryCache();
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
