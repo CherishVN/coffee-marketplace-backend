@@ -479,7 +479,7 @@ public class SellerService : ISellerService
                 Id = Guid.NewGuid(),
                 ProductId = product.Id,
                 VariantId = null,
-                Quantity = 0,
+                Quantity = dto.Quantity,
                 ReservedQuantity = 0,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -616,8 +616,8 @@ public class SellerService : ISellerService
             };
         }
 
-        // Soft delete - set status to deleted
-        product.Status = 3; // Deleted
+    
+        product.Status = (short)ProductStatus.Hidden;
         product.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -625,7 +625,7 @@ public class SellerService : ISellerService
         return new ServiceResponse
         {
             Success = true,
-            Message = "Xóa sản phẩm thành công"
+            Message = "Ẩn sản phẩm thành công"
         };
     }
 

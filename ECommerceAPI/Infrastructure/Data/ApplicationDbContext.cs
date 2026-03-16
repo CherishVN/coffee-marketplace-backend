@@ -56,7 +56,7 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<OrderItem> OrderItems { get; set; }
 
-    public virtual DbSet<Payment> Payments { get; set; }
+    public virtual DbSet<ECommerceAPI.Domain.Entities.Payment> Payments { get; set; }
 
     public virtual DbSet<Product> Products { get; set; }
 
@@ -908,7 +908,7 @@ public partial class ApplicationDbContext : DbContext
                 .HasConstraintName("order_items_variant_id_fkey");
         });
 
-        modelBuilder.Entity<Payment>(entity =>
+        modelBuilder.Entity<ECommerceAPI.Domain.Entities.Payment>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("payments_pkey");
 

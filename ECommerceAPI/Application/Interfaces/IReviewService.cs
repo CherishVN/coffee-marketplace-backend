@@ -11,5 +11,13 @@ public interface IReviewService
         int page,
         int pageSize,
         string? sortBy = null);
+
+    Task<ServiceResponse<ShopReviewDto>> CreateShopReviewAsync(Guid userId, CreateShopReviewDto dto);
+
+    Task<ShopReviewListResponseDto> GetShopReviewsAsync(
+        Guid shopId,
+        int page,
+        int pageSize,
+        string? sortBy = null);
 }
 

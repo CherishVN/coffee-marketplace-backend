@@ -18,6 +18,7 @@ public class CreateProductDto
     public string? Description { get; set; }
     public decimal BasePrice { get; set; }
     public string Currency { get; set; } = "VND";
+    public int Quantity { get; set; } = 0; // Dùng khi không có variants
     public List<ProductVariantDto>? Variants { get; set; }
     public List<string>? ImageUrls { get; set; }
     public List<long>? TagIds { get; set; }
