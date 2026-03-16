@@ -256,26 +256,28 @@ public class AiChatService : IAiChatService
     /// </summary>
     private static string ExtractProductKeyword(string message)
     {
+        // Từ dừng chung + tính từ mô tả không phải tên sản phẩm + năm/số năm
         var stopWords = new HashSet<string>
         {
             "tôi", "cần", "muốn", "mua", "tìm", "cho", "và", "hoặc", "có", "không",
             "ạ", "nhé", "thôi", "dưới", "trên", "khoảng", "tầm", "giá", "nghìn",
-            "ngàn", "trăm", "triệu", "đồng", "vnđ", "vnd", "đ"
+            "ngàn", "trăm", "triệu", "đồng", "vnđ", "vnd", "đ",
+            // Tính từ mô tả không phải tên sản phẩm
+            "đẹp", "xấu", "tốt", "rẻ", "mắc", "hot", "mới", "cũ", "ngon", "chất",
+            "đỉnh", "xịn", "sang", "trẻ", "hợp", "thời", "thượng", "lưu"
         };
 
         var words = message.ToLower()
             .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(w => !stopWords.Contains(w) && w.Length > 1 && !long.TryParse(w, out _))
+            .Where(w =>
+                !stopWords.Contains(w) &&
+                w.Length > 1 &&
+                !long.TryParse(w, out _) &&
+                !(w.Length == 4 && w.StartsWith("20"))) // lọc năm như 2024, 2025, 2026
             .ToArray();
 
-        // Ưu tiên các cụm từ 2 từ liền nhau (ví dụ "áo thun", "áo sơ mi")
-        if (words.Length >= 2)
-        {
-            var twoWordPhrase = $"{words[0]} {words[1]}";
-            return twoWordPhrase;
-        }
-
-        return words.FirstOrDefault() ?? string.Empty;
+        // Ghép tất cả từ còn lại thành cụm từ tìm kiếm (không giới hạn 2 từ)
+        return string.Join(" ", words);
     }
 
     /// <summary>
