@@ -40,6 +40,7 @@ public class SellerService : ISellerService
             Data = new ShopDto
             {
                 Id = shop.Id,
+                ShopCode = shop.ShopCode,
                 Name = shop.Name,
                 Slug = shop.Slug,
                 Description = shop.Description,

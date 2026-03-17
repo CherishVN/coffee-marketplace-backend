@@ -61,6 +61,7 @@ public class SellerUpdateOrderStatusDto
 public class ShopDto
 {
     public Guid Id { get; set; }
+    public string ShopCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Slug { get; set; } = string.Empty;
     public string? Description { get; set; }

@@ -241,6 +241,7 @@ public class SellerApprovalService : ISellerApprovalService
         return new ShopVerificationDto
         {
             Id = s.Id,
+            ShopCode = s.ShopCode,
             OwnerId = s.OwnerId,
             OwnerName = s.Owner?.FullName,
             Name = s.Name,

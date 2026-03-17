@@ -142,9 +142,15 @@ public class UserProfileService : IUserProfileService
             slug = $"{slug}-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
         }
 
+        var seqValue = await _context.Database
+            .SqlQueryRaw<long>("SELECT nextval('shops_code_seq')")
+            .FirstAsync();
+        var shopCode = $"SH-{DateTime.UtcNow:yyyyMM}-{seqValue:D5}";
+
         var shop = new Shop
         {
             Id = Guid.NewGuid(),
+            ShopCode = shopCode,
             OwnerId = userId,
             Name = dto.ShopName,
             Slug = slug,

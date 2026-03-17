@@ -3,6 +3,7 @@ namespace ECommerceAPI.Application.DTOs.Admin;
 public class ShopVerificationDto
 {
     public Guid Id { get; set; }
+    public string ShopCode { get; set; } = string.Empty;
     public Guid OwnerId { get; set; }
     public string? OwnerName { get; set; }
     public string? OwnerEmail { get; set; }
