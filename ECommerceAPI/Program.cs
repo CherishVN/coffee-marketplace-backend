@@ -64,6 +64,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IFavoriteService, FavoriteService>();
             builder.Services.AddScoped<ICartService, CartService>();
             builder.Services.AddScoped<IPaymentService, PaymentService>();
+            builder.Services.AddScoped<IConversationService, ConversationService>();
             builder.Services.AddMemoryCache();
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
