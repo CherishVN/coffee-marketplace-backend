@@ -74,6 +74,7 @@ public class ShopDto
 public class ProductDto
 {
     public Guid Id { get; set; }
+    public string ProductCode { get; set; } = string.Empty;
     public Guid ShopId { get; set; }
     public long? CategoryId { get; set; }
     public string? CategoryName { get; set; }

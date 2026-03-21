@@ -8,6 +8,8 @@ public partial class Product
 {
     public Guid Id { get; set; }
 
+    public string ProductCode { get; set; } = null!;
+
     public Guid ShopId { get; set; }
 
     public long? CategoryId { get; set; }

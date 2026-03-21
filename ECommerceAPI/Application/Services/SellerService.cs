@@ -277,6 +277,7 @@ public class SellerService : ISellerService
             .Select(p => new ProductDto
             {
                 Id = p.Id,
+                ProductCode = p.ProductCode,
                 ShopId = p.ShopId,
                 CategoryId = p.CategoryId,
                 CategoryName = p.Category != null ? p.Category.Name : null,
@@ -353,6 +354,7 @@ public class SellerService : ISellerService
             Data = new ProductDto
             {
                 Id = product.Id,
+                ProductCode = product.ProductCode,
                 ShopId = product.ShopId,
                 CategoryId = product.CategoryId,
                 CategoryName = product.Category?.Name,
@@ -407,9 +409,15 @@ public class SellerService : ISellerService
             };
         }
 
+        var seqValue = await _context.Database
+            .SqlQueryRaw<long>("SELECT nextval('products_code_seq') AS \"Value\"")
+            .FirstAsync();
+        var productCode = $"PRD{seqValue:D5}";
+
         var product = new Product
         {
             Id = Guid.NewGuid(),
+            ProductCode = productCode,
             ShopId = shop.Id,
             CategoryId = dto.CategoryId,
             Name = dto.Name,

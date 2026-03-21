@@ -3,6 +3,7 @@ namespace ECommerceAPI.Application.DTOs.Admin;
 public class ProductModerationDto
 {
     public Guid Id { get; set; }
+    public string ProductCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public Guid ShopId { get; set; }
     public string ShopName { get; set; } = string.Empty;

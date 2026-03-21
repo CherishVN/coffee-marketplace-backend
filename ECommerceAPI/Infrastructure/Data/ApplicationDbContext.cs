@@ -968,6 +968,7 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Id)
                 .HasDefaultValueSql("gen_random_uuid()")
                 .HasColumnName("id");
+            entity.Property(e => e.ProductCode).HasColumnName("product_code");
             entity.Property(e => e.BasePrice)
                 .HasPrecision(12, 2)
                 .HasColumnName("base_price");

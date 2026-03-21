@@ -58,6 +58,7 @@ public class ProductModerationService : IProductModerationService
                 .Select(p => new ProductModerationDto
                 {
                     Id = p.Id,
+                    ProductCode = p.ProductCode,
                     Name = p.Name,
                     ShopId = p.ShopId,
                     ShopName = p.Shop.Name,
@@ -107,6 +108,7 @@ public class ProductModerationService : IProductModerationService
                 .Select(p => new ProductModerationDto
                 {
                     Id = p.Id,
+                    ProductCode = p.ProductCode,
                     Name = p.Name,
                     ShopId = p.ShopId,
                     ShopName = p.Shop.Name,
