@@ -2,6 +2,7 @@ using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace ECommerceAPI.Middleware;
 
@@ -38,9 +39,15 @@ public class UserSyncMiddleware
                         // Look up the default "customer" role
                         var customerRole = await dbContext.Roles.FirstOrDefaultAsync(r => r.Code == "customer");
 
+                        var seqValue = await dbContext.Database
+                            .SqlQueryRaw<long>("SELECT nextval('users_code_seq') AS \"Value\"")
+                            .FirstAsync();
+                        var userCode = $"USR{seqValue:D4}";
+
                         var newUser = new User
                         {
                             Id = userClaims.UserId,
+                            UserCode = userCode,
                             FullName = userClaims.FullName,
                             RoleId = customerRole?.Id,
                             Status = 1, // Active

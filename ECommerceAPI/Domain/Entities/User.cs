@@ -7,6 +7,8 @@ public partial class User
 {
     public Guid Id { get; set; }
 
+    public string UserCode { get; set; } = null!;
+
     public string? FullName { get; set; }
 
     public string? Phone { get; set; }

@@ -34,6 +34,7 @@ public class UserAdminService : IUserAdminService
             .Select(u => new AdminUserDto
             {
                 Id = u.Id,
+                UserCode = u.UserCode,
                 FullName = u.FullName,
                 Phone = u.Phone,
                 Role = u.Role != null ? u.Role.Code : string.Empty,
@@ -296,6 +297,7 @@ public class UserAdminService : IUserAdminService
         return new AdminUserDto
         {
             Id = user.Id,
+            UserCode = user.UserCode,
             FullName = user.FullName,
             Phone = user.Phone,
             Role = user.Role?.Code ?? string.Empty,
