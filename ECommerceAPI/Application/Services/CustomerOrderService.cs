@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Orders;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -13,13 +14,16 @@ public class CustomerOrderService : ICustomerOrderService
 {
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
+    private readonly INotificationService _notifications;
 
     public CustomerOrderService(
         ApplicationDbContext context,
-        IHubContext<OrderTrackingHub> hubContext)
+        IHubContext<OrderTrackingHub> hubContext,
+        INotificationService notifications)
     {
         _context = context;
         _hubContext = hubContext;
+        _notifications = notifications;
     }
 
     public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
@@ -178,6 +182,16 @@ public class CustomerOrderService : ICustomerOrderService
         await _context.SaveChangesAsync();
 
         await NotifyStatusChanged(order, OrderStatus.Shipping, OrderStatus.Completed);
+
+        var code = NotificationFormatting.ShortEntityId(order.Id);
+        await _notifications.PublishAsync(
+            order.CustomerId,
+            nameof(NotificationType.Order),
+            "Đơn hàng đã hoàn thành",
+            $"Bạn đã xác nhận nhận hàng cho đơn #{code}.",
+            "Order",
+            order.Id,
+            queueEmail: true);
 
         return new ConfirmOrderResponseDto
         {

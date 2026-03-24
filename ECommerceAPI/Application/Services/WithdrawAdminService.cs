@@ -1,6 +1,7 @@
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -9,10 +10,12 @@ namespace ECommerceAPI.Application.Services;
 public class WithdrawAdminService : IWithdrawAdminService
 {
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService _notifications;
 
-    public WithdrawAdminService(ApplicationDbContext context)
+    public WithdrawAdminService(ApplicationDbContext context, INotificationService notifications)
     {
         _context = context;
+        _notifications = notifications;
     }
 
     public async Task<WithdrawListResponseDto> GetAllRequestsAsync(int page, int pageSize, short? status)
@@ -119,6 +122,15 @@ public class WithdrawAdminService : IWithdrawAdminService
 
         await _context.SaveChangesAsync();
 
+        await _notifications.PublishAsync(
+            request.SellerId,
+            nameof(NotificationType.Payment),
+            "Rút tiền đã được duyệt",
+            $"Yêu cầu rút {request.Amount:N0} {request.Currency} đã được duyệt. Số dư ví khả dụng đã được cập nhật.",
+            "WithdrawalRequest",
+            request.Id,
+            queueEmail: true);
+
         var updatedRequest = await _context.SellerWithdrawalRequests
             .Include(r => r.Seller)
             .Include(r => r.ReviewedByNavigation)
@@ -185,6 +197,15 @@ public class WithdrawAdminService : IWithdrawAdminService
         await _context.UserAuditLogs.AddAsync(auditLog);
 
         await _context.SaveChangesAsync();
+
+        await _notifications.PublishAsync(
+            request.SellerId,
+            nameof(NotificationType.Payment),
+            "Yêu cầu rút tiền bị từ chối",
+            $"Yêu cầu rút {request.Amount:N0} {request.Currency} đã bị từ chối. Lý do: {dto.Reason}",
+            "WithdrawalRequest",
+            request.Id,
+            queueEmail: true);
 
         var updatedRequest = await _context.SellerWithdrawalRequests
             .Include(r => r.Seller)

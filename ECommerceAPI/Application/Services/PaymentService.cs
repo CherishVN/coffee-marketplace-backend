@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Payments;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -16,22 +20,28 @@ public class PaymentService : IPaymentService
 {
     private readonly ApplicationDbContext _context;
     private readonly VNPaySettings _vnPaySettings;
+    private readonly MoMoSettings _moMoSettings;
     private readonly ILogger<PaymentService> _logger;
-    private readonly IEmailService _emailService;
+    private readonly INotificationService _notifications;
     private readonly IMemoryCache _memoryCache;
+    private readonly HttpClient _httpClient;
 
     public PaymentService(
         ApplicationDbContext context,
         IOptions<VNPaySettings> vnPaySettings,
+        IOptions<MoMoSettings> moMoSettings,
         ILogger<PaymentService> logger,
-        IEmailService emailService,
-        IMemoryCache memoryCache)
+        INotificationService notifications,
+        IMemoryCache memoryCache,
+        IHttpClientFactory httpClientFactory)
     {
         _context = context;
         _vnPaySettings = vnPaySettings.Value;
+        _moMoSettings = moMoSettings.Value;
         _logger = logger;
-        _emailService = emailService;
+        _notifications = notifications;
         _memoryCache = memoryCache;
+        _httpClient = httpClientFactory.CreateClient();
     }
 
     // ── 1. Tạo VNPay Payment URL ─────────────────────────────────────────────
@@ -200,8 +210,15 @@ public class PaymentService : IPaymentService
 
             await _context.SaveChangesAsync();
 
-            // Email: User entity không có Email field (quản lý bởi Supabase Auth)
-            // Có thể mở rộng sau nếu cần
+            var oid = NotificationFormatting.ShortEntityId(order.Id);
+            await _notifications.PublishAsync(
+                order.CustomerId,
+                nameof(NotificationType.Payment),
+                "Thanh toán thành công",
+                $"Đơn #{oid} đã thanh toán thành công. Số tiền: {amount:N0} VND.",
+                "Order",
+                order.Id,
+                queueEmail: true);
 
             _logger.LogInformation("[VNPay Return] Payment SUCCESS for OrderId: {OrderId}", order.Id);
 
@@ -240,6 +257,16 @@ public class PaymentService : IPaymentService
 
             await _context.SaveChangesAsync();
 
+            var oidFail = NotificationFormatting.ShortEntityId(order.Id);
+            await _notifications.PublishAsync(
+                order.CustomerId,
+                nameof(NotificationType.Payment),
+                "Thanh toán không thành công",
+                $"Đơn #{oidFail} đã bị hủy do thanh toán thất bại (mã: {responseCode}).",
+                "Order",
+                order.Id,
+                queueEmail: true);
+
             _logger.LogWarning("[VNPay Return] Payment FAILED for OrderId: {OrderId}, Code: {Code}", order.Id, responseCode);
 
             return new VNPayReturnDto
@@ -254,32 +281,222 @@ public class PaymentService : IPaymentService
         }
     }
 
-    // ── Email xác nhận ───────────────────────────────────────────────────────
-    private async Task SendConfirmationEmailAsync(string email, string fullName, Order order, decimal totalAmount)
+    // ── 3. Tạo MoMo Payment URL ──────────────────────────────────────────────
+    public async Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId)
     {
-        var itemsHtml = string.Join("", order.OrderItems.Select(item =>
-            $"<tr><td>{item.ProductName}</td><td style='text-align:center'>{item.Quantity}</td><td style='text-align:right'>{item.LineTotal:N0} VNĐ</td></tr>"
-        ));
+        var order = await _context.Orders
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
 
-        string body = $@"
-        <html><body style='font-family:Arial,sans-serif;max-width:600px;margin:auto'>
-            <h2 style='color:#2c7be5'>✅ Thanh toán thành công!</h2>
-            <p>Xin chào <b>{fullName}</b>,</p>
-            <p>Đơn hàng <b>#{order.Id.ToString()[..8].ToUpper()}</b> của bạn đã được xác nhận.</p>
-            <table border='1' cellpadding='8' cellspacing='0' width='100%' style='border-collapse:collapse'>
-                <thead style='background:#f8f9fa'>
-                    <tr><th>Sản phẩm</th><th>Số lượng</th><th>Thành tiền</th></tr>
-                </thead>
-                <tbody>{itemsHtml}</tbody>
-            </table>
-            <p style='text-align:right;font-size:16px'>
-                <b>Phí vận chuyển:</b> {order.ShippingFee:N0} VNĐ<br/>
-                <b>Tổng cộng:</b> <span style='color:#e63757'>{totalAmount:N0} VNĐ</span>
-            </p>
-            <p>Cảm ơn bạn đã mua hàng tại E-Commerce Platform!</p>
-        </body></html>";
+        if (order == null)
+            return new CreatePaymentResponseDto { Success = false, Message = "Đơn hàng không tồn tại" };
 
-        await _emailService.SendAsync(email, $"✅ Xác nhận đơn hàng #{order.Id.ToString()[..8].ToUpper()}", body);
-        _logger.LogInformation("[VNPay] Confirmation email sent to {Email}", email);
+        if ((OrderStatus)order.Status != OrderStatus.PendingPayment)
+            return new CreatePaymentResponseDto { Success = false, Message = "Đơn hàng không ở trạng thái chờ thanh toán" };
+
+        var existingPaid = await _context.Payments
+            .AnyAsync(p => p.OrderId == orderId && p.Status == (short)PaymentStatus.Paid);
+
+        if (existingPaid)
+            return new CreatePaymentResponseDto { Success = false, Message = "Đơn hàng đã được thanh toán" };
+
+        var payment = new Payment
+        {
+            Id = Guid.NewGuid(),
+            OrderId = orderId,
+            Provider = "MOMO",
+            Amount = order.Total,
+            Currency = "VND",
+            Status = (short)PaymentStatus.Pending,
+            CreatedAt = DateTime.UtcNow
+        };
+        _context.Payments.Add(payment);
+        await _context.SaveChangesAsync();
+
+        var requestId = payment.Id.ToString();
+        var momoOrderId = payment.Id.ToString();
+        var orderInfo = $"Thanh toan don hang {orderId}";
+        var amount = ((long)order.Total).ToString();
+        var extraData = string.Empty;
+
+        var rawSignature = $"accessKey={_moMoSettings.AccessKey}" +
+                           $"&amount={amount}" +
+                           $"&extraData={extraData}" +
+                           $"&ipnUrl={_moMoSettings.NotifyUrl}" +
+                           $"&orderId={momoOrderId}" +
+                           $"&orderInfo={orderInfo}" +
+                           $"&partnerCode={_moMoSettings.PartnerCode}" +
+                           $"&redirectUrl={_moMoSettings.ReturnUrl}" +
+                           $"&requestId={requestId}" +
+                           $"&requestType={_moMoSettings.RequestType}";
+
+        var signature = HmacSHA256(_moMoSettings.SecretKey, rawSignature);
+
+        var requestBody = new
+        {
+            partnerCode = _moMoSettings.PartnerCode,
+            partnerName = "EComViet",
+            storeId = "EComVietStore",
+            requestId,
+            amount,
+            orderId = momoOrderId,
+            orderInfo,
+            redirectUrl = _moMoSettings.ReturnUrl,
+            ipnUrl = _moMoSettings.NotifyUrl,
+            lang = "vi",
+            extraData,
+            requestType = _moMoSettings.RequestType,
+            signature
+        };
+
+        var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+        var response = await _httpClient.PostAsync(_moMoSettings.ApiUrl, content);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        _logger.LogInformation("[MoMo] Response: {Body}", responseBody);
+
+        using var doc = JsonDocument.Parse(responseBody);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("resultCode", out var resultCodeProp) && resultCodeProp.GetInt32() == 0)
+        {
+            var payUrl = root.GetProperty("payUrl").GetString();
+            _logger.LogInformation("[MoMo] Created payUrl for OrderId: {OrderId}, PaymentId: {PaymentId}", orderId, payment.Id);
+            return new CreatePaymentResponseDto
+            {
+                Success = true,
+                PaymentUrl = payUrl,
+                PaymentId = payment.Id,
+                Message = "Tạo URL thanh toán MoMo thành công"
+            };
+        }
+
+        var errorMsg = root.TryGetProperty("message", out var msg) ? msg.GetString() : "Lỗi tạo thanh toán MoMo";
+        return new CreatePaymentResponseDto { Success = false, Message = errorMsg };
     }
+
+    // ── 4. Xử lý MoMo IPN Callback ───────────────────────────────────────────
+    public async Task<MoMoReturnDto> ProcessMoMoIpnAsync(MoMoIpnRequest request)
+    {
+        _logger.LogInformation("[MoMo IPN] Received: OrderId={OrderId}, ResultCode={Code}", request.OrderId, request.ResultCode);
+
+        var rawSignature = $"accessKey={_moMoSettings.AccessKey}" +
+                           $"&amount={request.Amount}" +
+                           $"&extraData={request.ExtraData}" +
+                           $"&message={request.Message}" +
+                           $"&orderId={request.OrderId}" +
+                           $"&orderInfo={request.OrderInfo}" +
+                           $"&orderType={request.OrderType}" +
+                           $"&partnerCode={request.PartnerCode}" +
+                           $"&payType={request.PayType}" +
+                           $"&requestId={request.RequestId}" +
+                           $"&responseTime={request.ResponseTime}" +
+                           $"&resultCode={request.ResultCode}" +
+                           $"&transId={request.TransId}";
+
+        var expectedSignature = HmacSHA256(_moMoSettings.SecretKey, rawSignature);
+        if (expectedSignature != request.Signature)
+        {
+            _logger.LogWarning("[MoMo IPN] Invalid signature!");
+            return new MoMoReturnDto { Success = false, Message = "Chữ ký không hợp lệ", ResultCode = -1 };
+        }
+
+        if (!Guid.TryParse(request.OrderId, out var paymentId))
+            return new MoMoReturnDto { Success = false, Message = "OrderId không hợp lệ", ResultCode = -1 };
+
+        var payment = await _context.Payments
+            .Include(p => p.Order)
+                .ThenInclude(o => o.OrderItems)
+            .FirstOrDefaultAsync(p => p.Id == paymentId);
+
+        if (payment == null)
+            return new MoMoReturnDto { Success = false, Message = "Không tìm thấy thanh toán", ResultCode = -1 };
+
+        if (payment.Status == (short)PaymentStatus.Paid)
+            return new MoMoReturnDto { Success = true, Message = "Đã xử lý trước đó", OrderId = payment.OrderId, PaymentId = payment.Id, Amount = payment.Amount };
+
+        var order = payment.Order;
+
+        if (request.ResultCode == 0)
+        {
+            payment.Status = (short)PaymentStatus.Paid;
+            payment.PaidAt = DateTime.UtcNow;
+            payment.ProviderRef = request.TransId.ToString();
+
+            order.Status = (short)OrderStatus.Confirmed;
+            order.UpdatedAt = DateTime.UtcNow;
+
+            foreach (var item in order.OrderItems)
+            {
+                var inv = await _context.Inventories
+                    .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
+                if (inv != null)
+                {
+                    inv.Quantity -= item.Quantity;
+                    inv.ReservedQuantity -= item.Quantity;
+                    if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
+                    inv.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            var momoOk = NotificationFormatting.ShortEntityId(order.Id);
+            await _notifications.PublishAsync(
+                order.CustomerId,
+                nameof(NotificationType.Payment),
+                "Thanh toán thành công",
+                $"Đơn #{momoOk} đã thanh toán MoMo thành công. Số tiền: {payment.Amount:N0} VND.",
+                "Order",
+                order.Id,
+                queueEmail: true);
+
+            _logger.LogInformation("[MoMo IPN] Payment SUCCESS for OrderId: {OrderId}", order.Id);
+
+            return new MoMoReturnDto { Success = true, Message = "Thanh toán thành công", ResultCode = 0, OrderId = order.Id, PaymentId = payment.Id, Amount = payment.Amount };
+        }
+        else
+        {
+            payment.Status = (short)PaymentStatus.Failed;
+            payment.PaidAt = DateTime.UtcNow;
+
+            order.Status = (short)OrderStatus.Cancelled;
+            order.UpdatedAt = DateTime.UtcNow;
+
+            foreach (var item in order.OrderItems)
+            {
+                var inv = await _context.Inventories
+                    .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
+                if (inv != null)
+                {
+                    inv.ReservedQuantity -= item.Quantity;
+                    if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
+                    inv.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            var momoFail = NotificationFormatting.ShortEntityId(order.Id);
+            await _notifications.PublishAsync(
+                order.CustomerId,
+                nameof(NotificationType.Payment),
+                "Thanh toán MoMo không thành công",
+                $"Đơn #{momoFail} đã bị hủy do thanh toán thất bại (mã: {request.ResultCode}).",
+                "Order",
+                order.Id,
+                queueEmail: true);
+
+            _logger.LogWarning("[MoMo IPN] Payment FAILED for OrderId: {OrderId}, Code: {Code}", order.Id, request.ResultCode);
+
+            return new MoMoReturnDto { Success = false, Message = request.Message, ResultCode = request.ResultCode, OrderId = order.Id, PaymentId = payment.Id, Amount = payment.Amount };
+        }
+    }
+
+    private static string HmacSHA256(string key, string data)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
+        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
+        return BitConverter.ToString(hash).Replace("-", "").ToLower();
+    }
+
 }

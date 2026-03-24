@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Enums;
@@ -13,15 +14,18 @@ public class OrderAdminService : IOrderAdminService
     private readonly ApplicationDbContext _context;
     private readonly ILogger<OrderAdminService> _logger;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
+    private readonly INotificationService _notifications;
 
     public OrderAdminService(
         ApplicationDbContext context,
         ILogger<OrderAdminService> logger,
-        IHubContext<OrderTrackingHub> hubContext)
+        IHubContext<OrderTrackingHub> hubContext,
+        INotificationService notifications)
     {
         _context = context;
         _logger = logger;
         _hubContext = hubContext;
+        _notifications = notifications;
     }
 
     public async Task<AdminOrderListResponseDto> GetAllOrdersAsync(
@@ -215,6 +219,18 @@ public class OrderAdminService : IOrderAdminService
             await _context.SaveChangesAsync();
 
             await NotifyStatusChanged(order, oldStatus, (OrderStatus)order.Status);
+
+            var newStatus = (OrderStatus)order.Status;
+            var code = NotificationFormatting.ShortEntityId(order.Id);
+            var reasonPart = string.IsNullOrWhiteSpace(dto.Reason) ? "" : $" Ghi chú: {dto.Reason}";
+            await _notifications.PublishAsync(
+                order.CustomerId,
+                nameof(NotificationType.Order),
+                "Cập nhật đơn hàng (Admin)",
+                $"Đơn #{code} được cập nhật trạng thái: {newStatus}.{reasonPart}",
+                "Order",
+                order.Id,
+                queueEmail: true);
 
             _logger.LogInformation(
                 "Admin {AdminId} updated order {OrderId} status to {Status}. Reason: {Reason}",

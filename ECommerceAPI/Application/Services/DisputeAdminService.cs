@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Enums;
@@ -10,13 +11,16 @@ public class DisputeAdminService : IDisputeAdminService
 {
     private readonly ApplicationDbContext _context;
     private readonly ILogger<DisputeAdminService> _logger;
+    private readonly INotificationService _notifications;
 
     public DisputeAdminService(
         ApplicationDbContext context,
-        ILogger<DisputeAdminService> logger)
+        ILogger<DisputeAdminService> logger,
+        INotificationService notifications)
     {
         _context = context;
         _logger = logger;
+        _notifications = notifications;
     }
 
     public async Task<DisputeListResponseDto> GetAllDisputesAsync(
@@ -168,6 +172,7 @@ public class DisputeAdminService : IDisputeAdminService
         {
             var dispute = await _context.Disputes
                 .Include(d => d.Order)
+                .Include(d => d.Shop)
                 .FirstOrDefaultAsync(d => d.Id == disputeId);
 
             if (dispute == null)
@@ -209,6 +214,25 @@ public class DisputeAdminService : IDisputeAdminService
                 "Dispute approved and refunded: {DisputeId} by admin: {AdminId}. Amount: {Amount}", 
                 disputeId, adminId, dispute.ApprovedAmount);
 
+            var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+            await _notifications.PublishAsync(
+                dispute.CustomerId,
+                nameof(NotificationType.Dispute),
+                "Hoàn tiền khiếu nại",
+                $"Khiếu nại cho đơn #{orderRef} đã được chấp nhận hoàn tiền. Số tiền: {dispute.ApprovedAmount:N0} VND.",
+                "Dispute",
+                dispute.Id,
+                queueEmail: true);
+
+            await _notifications.PublishAsync(
+                dispute.Shop.OwnerId,
+                nameof(NotificationType.Dispute),
+                "Khiếu nại — hoàn tiền",
+                $"Admin đã phê duyệt hoàn tiền cho khiếu nại đơn #{orderRef}.",
+                "Dispute",
+                dispute.Id,
+                queueEmail: true);
+
             return new DisputeResponseDto
             {
                 Success = true,
@@ -234,7 +258,9 @@ public class DisputeAdminService : IDisputeAdminService
     {
         try
         {
-            var dispute = await _context.Disputes.FindAsync(disputeId);
+            var dispute = await _context.Disputes
+                .Include(d => d.Shop)
+                .FirstOrDefaultAsync(d => d.Id == disputeId);
 
             if (dispute == null)
             {
@@ -267,6 +293,26 @@ public class DisputeAdminService : IDisputeAdminService
             _logger.LogInformation(
                 "Dispute rejected: {DisputeId} by admin: {AdminId}", 
                 disputeId, adminId);
+
+            var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+            var resolution = string.IsNullOrWhiteSpace(dto.Resolution) ? "" : $" Lý do: {dto.Resolution}";
+            await _notifications.PublishAsync(
+                dispute.CustomerId,
+                nameof(NotificationType.Dispute),
+                "Khiếu nại bị từ chối",
+                $"Khiếu nại cho đơn #{orderRef} đã bị từ chối.{resolution}",
+                "Dispute",
+                dispute.Id,
+                queueEmail: true);
+
+            await _notifications.PublishAsync(
+                dispute.Shop.OwnerId,
+                nameof(NotificationType.Dispute),
+                "Khiếu nại — quyết định admin",
+                $"Admin đã từ chối khiếu nại cho đơn #{orderRef}.{resolution}",
+                "Dispute",
+                dispute.Id,
+                queueEmail: true);
 
             return new DisputeResponseDto
             {

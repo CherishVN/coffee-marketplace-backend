@@ -2,6 +2,7 @@ using ECommerceAPI.Application.DTOs.Payments;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace ECommerceAPI.Controllers;
 
@@ -64,5 +65,56 @@ public class PaymentsController : ControllerBase
             return Redirect($"{frontendUrl}/payment/success?orderId={result.OrderId}&amount={result.Amount}");
         else
             return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}");
+    }
+
+    /// <summary>
+    /// Tạo URL thanh toán MoMo cho một đơn hàng
+    /// </summary>
+    [HttpPost("momo/create")]
+    [Authorize]
+    public async Task<IActionResult> CreateMoMoPayment([FromBody] CreatePaymentDto dto)
+    {
+        var customerId = _userClaims.GetUserId();
+        if (customerId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _paymentService.CreateMoMoPaymentAsync(dto.OrderId, customerId.Value);
+
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// MoMo IPN callback - MoMo gọi về sau khi thanh toán
+    /// </summary>
+    [HttpPost("momo/ipn")]
+    [AllowAnonymous]
+    public async Task<IActionResult> MoMoIpn([FromBody] MoMoIpnRequest request)
+    {
+        _logger.LogInformation("[MoMo IPN] Received callback: {Body}", JsonSerializer.Serialize(request));
+
+        var result = await _paymentService.ProcessMoMoIpnAsync(request);
+
+        return Ok(new { resultCode = result.Success ? 0 : -1, message = result.Message });
+    }
+
+    /// <summary>
+    /// MoMo redirect về sau khi thanh toán (Return URL - trả JSON để test BE)
+    /// </summary>
+    [HttpGet("momo/return")]
+    [AllowAnonymous]
+    public IActionResult MoMoReturn([FromQuery] string orderId, [FromQuery] int resultCode, [FromQuery] string? message)
+    {
+        _logger.LogInformation("[MoMo Return] OrderId={OrderId}, ResultCode={Code}", orderId, resultCode);
+
+        return Ok(new
+        {
+            success = resultCode == 0,
+            orderId,
+            resultCode,
+            message = resultCode == 0 ? "Thanh toán thành công" : (message ?? "Thanh toán thất bại")
+        });
     }
 }

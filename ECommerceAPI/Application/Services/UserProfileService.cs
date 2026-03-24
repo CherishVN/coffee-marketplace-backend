@@ -12,6 +12,7 @@ public class UserProfileService : IUserProfileService
 {
     private readonly ApplicationDbContext _context;
     private readonly IUserRepository _userRepository;
+    private readonly IUserAuthEmailResolver _authEmailResolver;
     private readonly IEmailService _emailService;
     private readonly IOtpService _otpService;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -21,6 +22,7 @@ public class UserProfileService : IUserProfileService
     public UserProfileService(
         ApplicationDbContext context,
         IUserRepository userRepository,
+        IUserAuthEmailResolver authEmailResolver,
         IEmailService emailService,
         IOtpService otpService,
         IHttpClientFactory httpClientFactory,
@@ -29,6 +31,7 @@ public class UserProfileService : IUserProfileService
     {
         _context = context;
         _userRepository = userRepository;
+        _authEmailResolver = authEmailResolver;
         _emailService = emailService;
         _otpService = otpService;
         _httpClientFactory = httpClientFactory;
@@ -49,7 +52,7 @@ public class UserProfileService : IUserProfileService
         }
 
         var shop = user.ShopOwners.FirstOrDefault();
-        var authEmail = await GetSupabaseAuthEmailAsync(userId);
+        var authEmail = await _authEmailResolver.GetEmailByUserIdAsync(userId);
 
         return new UserProfileResponse
         {
@@ -469,44 +472,6 @@ Account Name: {dto.BankAccountName}
         }
 
         return new ServiceResponse { Success = true, Message = "Email đã được cập nhật thành công" };
-    }
-
-    private async Task<string?> GetSupabaseAuthEmailAsync(Guid userId)
-    {
-        var supabaseUrl = _configuration["Supabase:Url"];
-        var serviceRoleKey = _configuration["Supabase:ServiceRoleKey"];
-
-        if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(serviceRoleKey))
-            return null;
-
-        using var http = _httpClientFactory.CreateClient();
-        http.DefaultRequestHeaders.Add("apikey", serviceRoleKey);
-        http.DefaultRequestHeaders.Add("Authorization", $"Bearer {serviceRoleKey}");
-
-        var response = await http.GetAsync($"{supabaseUrl}/auth/v1/admin/users/{userId}");
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogWarning("Failed to fetch auth user email from Supabase. Status: {Status}", response.StatusCode);
-            return null;
-        }
-
-        var content = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(content);
-
-        if (doc.RootElement.TryGetProperty("email", out var rootEmailElement)
-            && rootEmailElement.ValueKind == JsonValueKind.String)
-        {
-            return rootEmailElement.GetString();
-        }
-
-        if (doc.RootElement.TryGetProperty("user", out var userElement)
-            && userElement.TryGetProperty("email", out var emailElement)
-            && emailElement.ValueKind == JsonValueKind.String)
-        {
-            return emailElement.GetString();
-        }
-
-        return null;
     }
 
     private string GenerateSlug(string name)

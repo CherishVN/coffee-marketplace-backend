@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Disputes;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -11,6 +12,7 @@ namespace ECommerceAPI.Application.Services;
 public class CustomerDisputeService : ICustomerDisputeService
 {
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService _notifications;
     private const int DisputeWindowDays = 7;
 
     // Terminal statuses where evidence can no longer be updated
@@ -22,9 +24,10 @@ public class CustomerDisputeService : ICustomerDisputeService
         DisputeStatus.Cancelled
     ];
 
-    public CustomerDisputeService(ApplicationDbContext context)
+    public CustomerDisputeService(ApplicationDbContext context, INotificationService notifications)
     {
         _context = context;
+        _notifications = notifications;
     }
 
     public async Task<CustomerDisputeResponseDto> CreateDisputeAsync(Guid customerId, CreateDisputeDto dto)
@@ -88,6 +91,16 @@ public class CustomerDisputeService : ICustomerDisputeService
 
         _context.Disputes.Add(dispute);
         await _context.SaveChangesAsync();
+
+        var orderRef = NotificationFormatting.ShortEntityId(order.Id);
+        await _notifications.PublishAsync(
+            order.Shop.OwnerId,
+            nameof(NotificationType.Dispute),
+            "Khiếu nại mới",
+            $"Khách hàng đã tạo khiếu nại cho đơn #{orderRef}: {dto.Title}",
+            "Dispute",
+            dispute.Id,
+            queueEmail: true);
 
         return new CustomerDisputeResponseDto
         {
@@ -194,6 +207,16 @@ public class CustomerDisputeService : ICustomerDisputeService
         dispute.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        var ordRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+        await _notifications.PublishAsync(
+            dispute.Shop.OwnerId,
+            nameof(NotificationType.Dispute),
+            "Khiếu nại đã hủy",
+            $"Khách hàng đã hủy khiếu nại liên quan đơn #{ordRef}.",
+            "Dispute",
+            dispute.Id,
+            queueEmail: true);
 
         return new CustomerDisputeResponseDto
         {

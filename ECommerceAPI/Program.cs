@@ -4,7 +4,9 @@ using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Application.Services;
 using ECommerceAPI.Infrastructure.Configuration;
+using ECommerceAPI.Infrastructure.Background;
 using ECommerceAPI.Infrastructure.Data;
+using ECommerceAPI.Infrastructure.Notifications;
 using ECommerceAPI.Infrastructure.Repositories;
 using ECommerceAPI.Infrastructure.Services;
 using ECommerceAPI.Middleware;
@@ -37,6 +39,9 @@ namespace ECommerceAPI
             builder.Services.Configure<VNPaySettings>(
                 builder.Configuration.GetSection(VNPaySettings.SectionName));
 
+            builder.Services.Configure<MoMoSettings>(
+                builder.Configuration.GetSection(MoMoSettings.SectionName));
+
             builder.Services.AddScoped<IUserRepository, UserRepository>();
 
             builder.Services.AddHttpContextAccessor();
@@ -53,6 +58,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IUserProfileService, UserProfileService>();
             builder.Services.AddSingleton<IOtpService, OtpService>();
             builder.Services.AddScoped<IEmailService, EmailService>();
+            builder.Services.AddScoped<IUserAuthEmailResolver, SupabaseAuthEmailResolver>();
             builder.Services.AddHttpClient();
             builder.Services.AddScoped<ISellerService, SellerService>();
             builder.Services.AddScoped<ICustomerOrderService, CustomerOrderService>();
@@ -66,6 +72,9 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IPaymentService, PaymentService>();
             builder.Services.AddScoped<IConversationService, ConversationService>();
             builder.Services.AddScoped<IShopStorefrontService, ShopStorefrontService>();
+            builder.Services.AddScoped<INotificationService, NotificationService>();
+            builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
+            builder.Services.AddHostedService<NotificationEmailBackgroundService>();
             builder.Services.AddMemoryCache();
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
