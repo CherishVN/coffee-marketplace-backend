@@ -48,4 +48,13 @@ public class ProductController : ControllerBase
             return NotFound(result);
         return Ok(result);
     }
+
+    [HttpGet("{slug}")]
+    public async Task<IActionResult> GetProductBySlug(string slug)
+    {
+        var result = await _productStorefrontService.GetProductBySlugAsync(slug);
+        if (!result.Success)
+            return NotFound(result);
+        return Ok(result);
+    }
 }

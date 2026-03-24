@@ -14,4 +14,5 @@ public interface IProductStorefrontService
         string? sortBy = null);
 
     Task<ProductStorefrontDetailResponseDto> GetProductByIdAsync(Guid productId);
+    Task<ProductStorefrontDetailResponseDto> GetProductBySlugAsync(string slug);
 }

@@ -6,9 +6,11 @@ namespace ECommerceAPI.Application.DTOs.Storefront;
 public class ProductStorefrontDto
 {
     public Guid Id { get; set; }
+    public string Slug { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public Guid ShopId { get; set; }
     public string ShopName { get; set; } = string.Empty;
+    public string ShopSlug { get; set; } = string.Empty;
     public decimal BasePrice { get; set; }
     public string Currency { get; set; } = "VND";
     public long? CategoryId { get; set; }
@@ -35,6 +37,7 @@ public class ProductVariantStorefrontDto
 {
     public Guid Id { get; set; }
     public string VariantName { get; set; } = string.Empty;
+    public string? Attributes { get; set; }
     public decimal? Price { get; set; }
     public bool IsActive { get; set; }
     public int StockQuantity { get; set; }

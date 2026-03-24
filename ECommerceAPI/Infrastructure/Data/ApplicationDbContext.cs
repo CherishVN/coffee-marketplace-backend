@@ -80,6 +80,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<ShopDocument> ShopDocuments { get; set; }
 
+    public virtual DbSet<ShopFollow> ShopFollows { get; set; }
+
     public virtual DbSet<ShopReview> ShopReviews { get; set; }
 
     public virtual DbSet<Tag> Tags { get; set; }
@@ -963,6 +965,8 @@ public partial class ApplicationDbContext : DbContext
 
             entity.HasIndex(e => e.Status, "idx_products_status");
 
+            entity.HasIndex(e => e.Slug, "products_slug_key").IsUnique();
+
             entity.HasIndex(e => e.SearchVector, "products_search_idx").HasMethod("gin");
 
             entity.Property(e => e.Id)
@@ -981,6 +985,7 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("currency");
             entity.Property(e => e.Description).HasColumnName("description");
             entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Slug).HasColumnName("slug");
             entity.Property(e => e.SearchVector)
                 .HasComputedColumnSql("(setweight(to_tsvector('simple'::regconfig, f_immutable_unaccent(COALESCE(name, ''::text))), 'A'::\"char\") || setweight(to_tsvector('simple'::regconfig, f_immutable_unaccent(COALESCE(description, ''::text))), 'B'::\"char\"))", true)
                 .HasColumnName("search_vector");
@@ -1311,6 +1316,7 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("verification_status");
             entity.Property(e => e.VerifiedAt).HasColumnName("verified_at");
             entity.Property(e => e.VerifiedBy).HasColumnName("verified_by");
+            entity.Property(e => e.CoverUrl).HasColumnName("cover_url");
 
             entity.HasOne(d => d.Owner).WithMany(p => p.ShopOwners)
                 .HasForeignKey(d => d.OwnerId)
@@ -1320,6 +1326,30 @@ public partial class ApplicationDbContext : DbContext
                 .HasForeignKey(d => d.VerifiedBy)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("shops_verified_by_fkey");
+        });
+
+        modelBuilder.Entity<ShopFollow>(entity =>
+        {
+            entity.HasKey(e => new { e.UserId, e.ShopId }).HasName("shop_follows_pkey");
+
+            entity.ToTable("shop_follows");
+
+            entity.HasIndex(e => e.ShopId, "idx_shop_follows_shop");
+            entity.HasIndex(e => e.UserId, "idx_shop_follows_user");
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.User).WithMany(p => p.ShopFollows)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("shop_follows_user_id_fkey");
+
+            entity.HasOne(d => d.Shop).WithMany(p => p.ShopFollows)
+                .HasForeignKey(d => d.ShopId)
+                .HasConstraintName("shop_follows_shop_id_fkey");
         });
 
         modelBuilder.Entity<ShopDocument>(entity =>

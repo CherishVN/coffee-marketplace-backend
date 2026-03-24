@@ -68,21 +68,23 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Take(pageSize)
                 .Select(p => new ProductStorefrontDto
                 {
-                    Id          = p.Id,
-                    Name        = p.Name,
-                    ShopId      = p.ShopId,
-                    ShopName    = p.Shop.Name,
-                    BasePrice   = p.BasePrice,
-                    Currency    = p.Currency,
+                    Id           = p.Id,
+                    Slug         = p.Slug,
+                    Name         = p.Name,
+                    ShopId       = p.ShopId,
+                    ShopName     = p.Shop.Name,
+                    ShopSlug     = p.Shop.Slug,
+                    BasePrice    = p.BasePrice,
+                    Currency     = p.Currency,
                     CategoryId   = p.CategoryId,
                     CategoryName = p.Category != null ? p.Category.Name : null,
                     CategorySlug = p.Category != null ? p.Category.Slug : null,
-                    ImageUrls   = p.ProductImages
+                    ImageUrls    = p.ProductImages
                         .OrderBy(img => img.SortOrder)
                         .Select(img => img.ImageUrl)
                         .ToList(),
-                    CreatedAt   = p.CreatedAt,
-                    SoldCount   = p.SoldCount,
+                    CreatedAt    = p.CreatedAt,
+                    SoldCount    = p.SoldCount,
                 })
                 .ToListAsync();
 
@@ -121,10 +123,12 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Select(p => new ProductStorefrontDetailDto
                 {
                     Id           = p.Id,
+                    Slug         = p.Slug,
                     Name         = p.Name,
                     Description  = p.Description,
                     ShopId       = p.ShopId,
                     ShopName     = p.Shop.Name,
+                    ShopSlug     = p.Shop.Slug,
                     BasePrice    = p.BasePrice,
                     Currency     = p.Currency,
                     CategoryId   = p.CategoryId,
@@ -144,6 +148,7 @@ public class ProductStorefrontService : IProductStorefrontService
                         {
                             Id            = v.Id,
                             VariantName   = v.VariantName,
+                            Attributes    = v.Attributes,
                             Price         = v.Price,
                             IsActive      = v.IsActive,
                             StockQuantity = v.Inventories
@@ -169,6 +174,80 @@ public class ProductStorefrontService : IProductStorefrontService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching storefront product {ProductId}", productId);
+            return new ProductStorefrontDetailResponseDto
+            {
+                Success = false,
+                Message = "Có lỗi xảy ra khi lấy thông tin sản phẩm"
+            };
+        }
+    }
+
+    public async Task<ProductStorefrontDetailResponseDto> GetProductBySlugAsync(string slug)
+    {
+        try
+        {
+            var product = await _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Include(p => p.ProductReviews)
+                .Include(p => p.ProductVariants).ThenInclude(v => v.Inventories)
+                .Include(p => p.Inventories)
+                .Where(p => p.Slug == slug && p.Status == (short)ProductStatus.Active)
+                .Select(p => new ProductStorefrontDetailDto
+                {
+                    Id           = p.Id,
+                    Slug         = p.Slug,
+                    Name         = p.Name,
+                    Description  = p.Description,
+                    ShopId       = p.ShopId,
+                    ShopName     = p.Shop.Name,
+                    ShopSlug     = p.Shop.Slug,
+                    BasePrice    = p.BasePrice,
+                    Currency     = p.Currency,
+                    CategoryId   = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    AverageRating = p.ProductReviews.Any()
+                        ? Math.Round(p.ProductReviews.Average(r => (double)r.Rating), 1)
+                        : 0,
+                    ReviewCount  = p.ProductReviews.Count,
+                    ImageUrls    = p.ProductImages
+                        .OrderBy(img => img.SortOrder)
+                        .Select(img => img.ImageUrl)
+                        .ToList(),
+                    Variants = p.ProductVariants
+                        .Where(v => v.IsActive)
+                        .Select(v => new ProductVariantStorefrontDto
+                        {
+                            Id            = v.Id,
+                            VariantName   = v.VariantName,
+                            Attributes    = v.Attributes,
+                            Price         = v.Price,
+                            IsActive      = v.IsActive,
+                            StockQuantity = v.Inventories
+                                .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                        })
+                        .ToList(),
+                    TotalStock = p.Inventories
+                        .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                    CreatedAt = p.CreatedAt,
+                    SoldCount = p.SoldCount,
+                })
+                .FirstOrDefaultAsync();
+
+            if (product is null)
+                return new ProductStorefrontDetailResponseDto
+                {
+                    Success = false,
+                    Message = "Không tìm thấy sản phẩm"
+                };
+
+            return new ProductStorefrontDetailResponseDto { Success = true, Product = product };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching storefront product by slug {Slug}", slug);
             return new ProductStorefrontDetailResponseDto
             {
                 Success = false,

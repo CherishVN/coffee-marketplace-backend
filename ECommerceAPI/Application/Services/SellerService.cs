@@ -6,6 +6,9 @@ using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ECommerceAPI.Application.Services;
 
@@ -278,6 +281,7 @@ public class SellerService : ISellerService
             {
                 Id = p.Id,
                 ProductCode = p.ProductCode,
+                Slug = p.Slug,
                 ShopId = p.ShopId,
                 CategoryId = p.CategoryId,
                 CategoryName = p.Category != null ? p.Category.Name : null,
@@ -355,6 +359,7 @@ public class SellerService : ISellerService
             {
                 Id = product.Id,
                 ProductCode = product.ProductCode,
+                Slug = product.Slug,
                 ShopId = product.ShopId,
                 CategoryId = product.CategoryId,
                 CategoryName = product.Category?.Name,
@@ -413,11 +418,13 @@ public class SellerService : ISellerService
             .SqlQueryRaw<long>("SELECT nextval('products_code_seq') AS \"Value\"")
             .FirstAsync();
         var productCode = $"PRD{seqValue:D5}";
+        var slug = await GenerateUniqueProductSlugAsync(dto.Name);
 
         var product = new Product
         {
             Id = Guid.NewGuid(),
             ProductCode = productCode,
+            Slug = slug,
             ShopId = shop.Id,
             CategoryId = dto.CategoryId,
             Name = dto.Name,
@@ -557,8 +564,15 @@ public class SellerService : ISellerService
         if (dto.CategoryId.HasValue)
             product.CategoryId = dto.CategoryId;
 
-        if (!string.IsNullOrEmpty(dto.Name))
-            product.Name = dto.Name;
+        if (!string.IsNullOrWhiteSpace(dto.Name))
+        {
+            var nextName = dto.Name.Trim();
+            if (!string.Equals(nextName, product.Name, StringComparison.Ordinal))
+            {
+                product.Name = nextName;
+                product.Slug = await GenerateUniqueProductSlugAsync(nextName, product.Id);
+            }
+        }
 
         if (dto.Description != null)
             product.Description = dto.Description;
@@ -867,5 +881,42 @@ public class SellerService : ISellerService
             newStatusName = newStatus.ToString(),
             updatedAt = order.UpdatedAt
         });
+    }
+
+    private async Task<string> GenerateUniqueProductSlugAsync(string productName, Guid? excludeProductId = null)
+    {
+        var baseSlug = GenerateSlug(productName);
+        var slug = baseSlug;
+        var suffix = 1;
+
+        while (await _context.Products.AnyAsync(p => p.Slug == slug && (!excludeProductId.HasValue || p.Id != excludeProductId.Value)))
+        {
+            slug = $"{baseSlug}-{suffix++}";
+        }
+
+        return slug;
+    }
+
+    private static string GenerateSlug(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "product";
+
+        var normalized = value.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+
+        foreach (var c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                builder.Append(c);
+        }
+
+        var withoutDiacritics = builder.ToString().Normalize(NormalizationForm.FormC);
+        var slug = Regex.Replace(withoutDiacritics, @"[^a-z0-9\s-]", "");
+        slug = Regex.Replace(slug, @"\s+", "-");
+        slug = Regex.Replace(slug, @"-+", "-");
+        slug = slug.Trim('-');
+
+        return string.IsNullOrWhiteSpace(slug) ? "product" : slug;
     }
 }
