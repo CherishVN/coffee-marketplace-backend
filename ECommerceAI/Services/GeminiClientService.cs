@@ -121,6 +121,63 @@ public class GeminiClientService
         return "⚠️ Gemini không khả dụng sau 3 lần thử.";
     }
 
+    /// <summary>
+    /// Gọi Gemini với ảnh (multimodal). Tải ảnh từ URL về, encode base64, gửi cùng text prompt.
+    /// </summary>
+    public async Task<string> GenerateWithImagesAsync(string systemPrompt, string userMessage, List<string> imageUrls)
+    {
+        var parts = new List<object>();
+
+        // Tải và encode từng ảnh
+        foreach (var url in imageUrls.Take(3))
+        {
+            try
+            {
+                var (base64Data, mimeType) = await DownloadImageAsBase64Async(url);
+                parts.Add(new
+                {
+                    inline_data = new { mime_type = mimeType, data = base64Data }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Không thể tải ảnh từ URL: {Url}", url);
+            }
+        }
+
+        if (parts.Count == 0)
+            return "⚠️ Không thể tải bất kỳ ảnh nào từ các URL đã cung cấp.";
+
+        // Thêm text prompt sau ảnh
+        parts.Add(new { text = userMessage });
+
+        var body = new
+        {
+            system_instruction = new { parts = new[] { new { text = systemPrompt } } },
+            contents = new[] { new { role = "user", parts } }
+        };
+
+        return await CallApiAsync(body);
+    }
+
+    /// <summary>Tải ảnh từ URL và trả về (base64, mimeType).</summary>
+    private async Task<(string Base64, string MimeType)> DownloadImageAsBase64Async(string url)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var bytes = await _http.GetByteArrayAsync(url, cts.Token);
+
+        // Xác định MIME type từ URL hoặc mặc định jpeg
+        var mime = url.ToLower() switch
+        {
+            var u when u.Contains(".png") => "image/png",
+            var u when u.Contains(".webp") => "image/webp",
+            var u when u.Contains(".gif") => "image/gif",
+            _ => "image/jpeg"
+        };
+
+        return (Convert.ToBase64String(bytes), mime);
+    }
+
     /// <summary>Liệt kê tất cả models khả dụng với API key hiện tại.</summary>
     public async Task<string> ListModelsAsync()
     {

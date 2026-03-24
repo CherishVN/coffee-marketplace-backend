@@ -63,4 +63,30 @@ public class AiSellerController : ControllerBase
 
         return Ok(new { message = "Đã lưu phản hồi thành công" });
     }
+
+    /// <summary>
+    /// Phân tích ảnh sản phẩm bằng Gemini Vision.
+    /// Trả về: đánh giá chất lượng ảnh, gợi ý category/tags/materials, đề xuất cải thiện.
+    /// </summary>
+    [HttpPost("analyze-image")]
+    public async Task<IActionResult> AnalyzeImage([FromBody] AnalyzeImageRequestDto dto)
+    {
+        if (dto.ImageUrls == null || dto.ImageUrls.Count == 0)
+            return BadRequest(new { message = "Vui lòng cung cấp ít nhất 1 URL ảnh." });
+
+        if (dto.ImageUrls.Count > 3)
+            return BadRequest(new { message = "Tối đa 3 ảnh mỗi lần phân tích." });
+
+        var invalidUrls = dto.ImageUrls.Where(u => !Uri.TryCreate(u, UriKind.Absolute, out _)).ToList();
+        if (invalidUrls.Any())
+            return BadRequest(new { message = "Một số URL ảnh không hợp lệ.", invalidUrls });
+
+        var sellerId = GetUserId();
+        var result = await _sellerService.AnalyzeImageAsync(dto, sellerId);
+
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        return Ok(result);
+    }
 }

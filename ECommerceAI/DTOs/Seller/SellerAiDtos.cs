@@ -69,6 +69,46 @@ public class MaterialSuggestionItem
     public decimal ConfidenceScore { get; set; }
 }
 
+// ── Image Analysis ────────────────────────────────────────────────────────────
+
+public class AnalyzeImageRequestDto
+{
+    /// <summary>Danh sách URL ảnh sản phẩm (tối đa 3 ảnh)</summary>
+    public List<string> ImageUrls { get; set; } = new();
+
+    /// <summary>Tên sản phẩm (tuỳ chọn, giúp AI phân tích chính xác hơn)</summary>
+    public string? ProductTitle { get; set; }
+
+    /// <summary>Mô tả sản phẩm (tuỳ chọn)</summary>
+    public string? ProductDescription { get; set; }
+}
+
+public class AnalyzeImageResponseDto
+{
+    public ImageQualityDto Quality { get; set; } = new();
+    public List<CategorySuggestionItem> SuggestedCategories { get; set; } = new();
+    public List<TagSuggestionItem> SuggestedTags { get; set; } = new();
+    public List<MaterialSuggestionItem> SuggestedMaterials { get; set; } = new();
+    public List<string> Improvements { get; set; } = new();
+    public string Summary { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+public class ImageQualityDto
+{
+    /// <summary>Điểm chất lượng ảnh từ 1-10</summary>
+    public int Score { get; set; }
+
+    /// <summary>Đánh giá: excellent | good | fair | poor</summary>
+    public string Rating { get; set; } = string.Empty;
+
+    public bool HasGoodLighting { get; set; }
+    public bool HasCleanBackground { get; set; }
+    public bool IsProductCentered { get; set; }
+    public bool HasHighResolution { get; set; }
+}
+
 // ── Save Feedback ─────────────────────────────────────────────────────────────
 
 public class SaveSuggestionFeedbackDto
