@@ -226,8 +226,8 @@ public class AiChatService : IAiChatService
                     SessionId = sessionId,
                     Role = "assistant",
                     Content = orderId.HasValue
-                        ? $"✅ Đơn hàng đã được tạo thành công! Mã đơn hàng: {orderId.Value}"
-                        : "✅ Đơn hàng đã được tạo thành công!",
+                        ? $" Đơn hàng đã được tạo thành công! Mã đơn hàng: {orderId.Value}"
+                        : " Đơn hàng đã được tạo thành công!",
                     CreatedAt = DateTime.UtcNow
                 });
 

@@ -11,8 +11,13 @@ public interface IProductStorefrontService
         string? search = null,
         decimal? minPrice = null,
         decimal? maxPrice = null,
-        string? sortBy = null);
+        string? sortBy = null,
+        List<long>? tagIds = null,
+        List<Guid>? materialIds = null);
 
     Task<ProductStorefrontDetailResponseDto> GetProductByIdAsync(Guid productId);
     Task<ProductStorefrontDetailResponseDto> GetProductBySlugAsync(string slug);
+
+    /// <summary>Lấy sản phẩm gợi ý: trending (nhiều lượt bán) + mới nhất</summary>
+    Task<ProductStorefrontListResponseDto> GetSuggestionsAsync(int limit = 10);
 }
