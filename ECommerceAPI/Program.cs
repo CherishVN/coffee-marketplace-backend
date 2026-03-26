@@ -71,6 +71,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<ICartService, CartService>();
             builder.Services.AddScoped<IPaymentService, PaymentService>();
             builder.Services.AddScoped<IConversationService, ConversationService>();
+            builder.Services.AddScoped<IMaterialAdminService, MaterialAdminService>();
             builder.Services.AddScoped<IShopStorefrontService, ShopStorefrontService>();
             builder.Services.AddScoped<INotificationService, NotificationService>();
             builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
