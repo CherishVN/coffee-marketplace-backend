@@ -26,7 +26,9 @@ public class ProductStorefrontService : IProductStorefrontService
         string? search = null,
         decimal? minPrice = null,
         decimal? maxPrice = null,
-        string? sortBy = null)
+        string? sortBy = null,
+        List<long>? tagIds = null,
+        List<Guid>? materialIds = null)
     {
         try
         {
@@ -53,12 +55,19 @@ public class ProductStorefrontService : IProductStorefrontService
             if (maxPrice.HasValue)
                 query = query.Where(p => p.BasePrice <= maxPrice.Value);
 
+            if (tagIds != null && tagIds.Count > 0)
+                query = query.Where(p => p.ProductTags.Any(pt => tagIds.Contains(pt.TagId)));
+
+            if (materialIds != null && materialIds.Count > 0)
+                query = query.Where(p => p.ProductMaterials.Any(pm => materialIds.Contains(pm.MaterialId)));
+
             query = sortBy switch
             {
-                "price_asc"  => query.OrderBy(p => p.BasePrice).ThenBy(p => p.Id),
-                "price_desc" => query.OrderByDescending(p => p.BasePrice).ThenBy(p => p.Id),
-                "newest"     => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
-                _            => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
+                "price_asc"   => query.OrderBy(p => p.BasePrice).ThenBy(p => p.Id),
+                "price_desc"  => query.OrderByDescending(p => p.BasePrice).ThenBy(p => p.Id),
+                "newest"      => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
+                "best_seller" => query.OrderByDescending(p => p.SoldCount).ThenBy(p => p.Id),
+                _             => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
             };
 
             var totalCount = await query.CountAsync();
@@ -179,6 +188,69 @@ public class ProductStorefrontService : IProductStorefrontService
                 Success = false,
                 Message = "Có lỗi xảy ra khi lấy thông tin sản phẩm"
             };
+        }
+    }
+
+    public async Task<ProductStorefrontListResponseDto> GetSuggestionsAsync(int limit = 10)
+    {
+        try
+        {
+            // Top bán chạy + mới nhất, trộn để đa dạng
+            var trending = await _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Where(p => p.Status == (short)ProductStatus.Active && p.SoldCount > 0)
+                .OrderByDescending(p => p.SoldCount)
+                .Take(limit / 2)
+                .Select(p => new ProductStorefrontDto
+                {
+                    Id = p.Id, Slug = p.Slug, Name = p.Name,
+                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug,
+                    BasePrice = p.BasePrice, Currency = p.Currency,
+                    CategoryId = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    ImageUrls = p.ProductImages.OrderBy(img => img.SortOrder).Select(img => img.ImageUrl).ToList(),
+                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount
+                })
+                .ToListAsync();
+
+            var newest = await _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Where(p => p.Status == (short)ProductStatus.Active && trending.Select(t => t.Id).All(id => id != p.Id))
+                .OrderByDescending(p => p.CreatedAt)
+                .Take(limit - trending.Count)
+                .Select(p => new ProductStorefrontDto
+                {
+                    Id = p.Id, Slug = p.Slug, Name = p.Name,
+                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug,
+                    BasePrice = p.BasePrice, Currency = p.Currency,
+                    CategoryId = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    ImageUrls = p.ProductImages.OrderBy(img => img.SortOrder).Select(img => img.ImageUrl).ToList(),
+                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount
+                })
+                .ToListAsync();
+
+            var combined = trending.Concat(newest).ToList();
+
+            return new ProductStorefrontListResponseDto
+            {
+                Success = true,
+                Products = combined,
+                TotalCount = combined.Count,
+                Page = 1,
+                PageSize = limit
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching product suggestions");
+            return new ProductStorefrontListResponseDto { Success = false, Message = "Có lỗi xảy ra khi lấy gợi ý sản phẩm" };
         }
     }
 

@@ -20,7 +20,10 @@ public class ProductController : ControllerBase
 
     /// <summary>
     /// Get paginated list of active products.
-    /// Supports filtering by category, price range, keyword search and sorting.
+    /// Supports filtering by category, price range, keyword search, tags, materials and sorting.
+    /// sortBy: newest (default) | price_asc | price_desc | best_seller
+    /// tagIds: comma-separated tag IDs, e.g. ?tagIds=1&tagIds=2
+    /// materialIds: comma-separated material UUIDs
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetProducts(
@@ -30,10 +33,21 @@ public class ProductController : ControllerBase
         [FromQuery] string? search = null,
         [FromQuery] decimal? minPrice = null,
         [FromQuery] decimal? maxPrice = null,
-        [FromQuery] string? sortBy = null)
+        [FromQuery] string? sortBy = null,
+        [FromQuery] List<long>? tagIds = null,
+        [FromQuery] List<Guid>? materialIds = null)
     {
         var result = await _productStorefrontService.GetProductsAsync(
-            page, pageSize, categoryId, search, minPrice, maxPrice, sortBy);
+            page, pageSize, categoryId, search, minPrice, maxPrice, sortBy, tagIds, materialIds);
+        return Ok(result);
+    }
+
+    /// <summary>Lấy sản phẩm gợi ý: bán chạy + mới nhất</summary>
+    [HttpGet("suggestions")]
+    public async Task<IActionResult> GetSuggestions([FromQuery] int limit = 10)
+    {
+        if (limit < 1 || limit > 50) limit = 10;
+        var result = await _productStorefrontService.GetSuggestionsAsync(limit);
         return Ok(result);
     }
 
