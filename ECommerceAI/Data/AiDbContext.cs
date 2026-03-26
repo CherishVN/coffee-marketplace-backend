@@ -24,6 +24,11 @@ public class AiDbContext : DbContext
     public DbSet<Category> Categories { get; set; }
     public DbSet<Tag> Tags { get; set; }
     public DbSet<Material> Materials { get; set; }
+    public DbSet<Shop> Shops { get; set; }
+    public DbSet<Order> Orders { get; set; }
+    public DbSet<OrderItem> OrderItems { get; set; }
+    public DbSet<AppUser> Users { get; set; }
+    public DbSet<Dispute> Disputes { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -211,6 +216,78 @@ public class AiDbContext : DbContext
             e.Property(x => x.Name).HasColumnName("name");
             e.Property(x => x.Slug).HasColumnName("slug");
             e.Property(x => x.IsActive).HasColumnName("is_active");
+        });
+
+        // ── Read-only: Shop ───────────────────────────────────────────────
+        modelBuilder.Entity<Shop>(e =>
+        {
+            e.ToTable("shops");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.OwnerId).HasColumnName("owner_id");
+            e.Property(x => x.Name).HasColumnName("name");
+            e.Property(x => x.Status).HasColumnName("status");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+        });
+
+        // ── Read-only: Order ──────────────────────────────────────────────
+        modelBuilder.Entity<Order>(e =>
+        {
+            e.ToTable("orders");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.CustomerId).HasColumnName("customer_id");
+            e.Property(x => x.ShopId).HasColumnName("shop_id");
+            e.Property(x => x.Status).HasColumnName("status");
+            e.Property(x => x.Subtotal).HasColumnName("subtotal").HasPrecision(12, 2);
+            e.Property(x => x.ShippingFee).HasColumnName("shipping_fee").HasPrecision(12, 2);
+            e.Property(x => x.Total).HasColumnName("total").HasPrecision(12, 2);
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+
+            e.HasMany(x => x.OrderItems).WithOne()
+                .HasForeignKey(i => i.OrderId);
+        });
+
+        // ── Read-only: OrderItem ──────────────────────────────────────────
+        modelBuilder.Entity<OrderItem>(e =>
+        {
+            e.ToTable("order_items");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.OrderId).HasColumnName("order_id");
+            e.Property(x => x.ProductId).HasColumnName("product_id");
+            e.Property(x => x.ProductName).HasColumnName("product_name");
+            e.Property(x => x.UnitPrice).HasColumnName("unit_price").HasPrecision(12, 2);
+            e.Property(x => x.Quantity).HasColumnName("quantity");
+            e.Property(x => x.LineTotal).HasColumnName("line_total").HasPrecision(12, 2);
+        });
+
+        // ── Read-only: AppUser ────────────────────────────────────────────
+        modelBuilder.Entity<AppUser>(e =>
+        {
+            e.ToTable("users");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.Email).HasColumnName("email");
+            e.Property(x => x.Status).HasColumnName("status");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+        });
+
+        // ── Read-only: Dispute ────────────────────────────────────────────
+        modelBuilder.Entity<Dispute>(e =>
+        {
+            e.ToTable("disputes");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.OrderId).HasColumnName("order_id");
+            e.Property(x => x.CustomerId).HasColumnName("customer_id");
+            e.Property(x => x.ShopId).HasColumnName("shop_id");
+            e.Property(x => x.Status).HasColumnName("status");
+            e.Property(x => x.Type).HasColumnName("type");
+            e.Property(x => x.RequestedAmount).HasColumnName("requested_amount").HasPrecision(12, 2);
+            e.Property(x => x.ApprovedAmount).HasColumnName("approved_amount").HasPrecision(12, 2);
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
         });
     }
 }
