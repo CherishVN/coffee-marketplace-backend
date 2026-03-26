@@ -284,6 +284,31 @@ public class CustomerOrderService : ICustomerOrderService
         return result;
     }
 
+    public async Task<ServiceResponse> CancelPendingOrderAsync(Guid customerId, Guid orderId)
+    {
+        var order = await _context.Orders
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
+
+        if (order == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy đơn hàng" };
+
+        if (order.Status != (short)OrderStatus.PendingPayment)
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = "Chỉ có thể huỷ đơn hàng đang chờ thanh toán"
+            };
+
+        order.Status = (short)OrderStatus.Cancelled;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        await NotifyStatusChanged(order, OrderStatus.PendingPayment, OrderStatus.Cancelled);
+
+        return new ServiceResponse { Success = true, Message = "Đơn hàng đã được huỷ" };
+    }
+
     private async Task NotifyStatusChanged(Order order, OrderStatus oldStatus, OrderStatus newStatus)
     {
         var groupName = OrderTrackingHub.GetUserGroupName(order.CustomerId);

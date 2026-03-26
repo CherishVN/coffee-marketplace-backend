@@ -76,5 +76,23 @@ public class CustomerOrdersController : ControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>
+    /// Huỷ đơn hàng đang chờ thanh toán (dùng khi khởi tạo payment thất bại).
+    /// Chỉ được phép khi đơn ở trạng thái PendingPayment (0).
+    /// </summary>
+    [HttpPost("{orderId}/cancel-pending")]
+    public async Task<IActionResult> CancelPendingOrder(Guid orderId)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _customerOrderService.CancelPendingOrderAsync(userId.Value, orderId);
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
 }
 

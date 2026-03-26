@@ -8,5 +8,8 @@ public interface ICustomerOrderService
     Task<CustomerOrderDetailResponseDto> GetOrderByIdAsync(Guid customerId, Guid orderId);
     Task<OrderTrackingDto?> GetOrderTrackingAsync(Guid customerId, Guid orderId);
     Task<ConfirmOrderResponseDto> ConfirmOrderAsync(Guid customerId, Guid orderId);
+
+  
+    Task<ServiceResponse> CancelPendingOrderAsync(Guid customerId, Guid orderId);
 }
 
