@@ -8,6 +8,7 @@ namespace ECommerceAI.Middleware;
 /// Enriches the JWT claims with the actual user role from the database.
 /// The Supabase JWT only carries role="authenticated"; this middleware
 /// replaces it with the real role (admin / seller / customer).
+/// Uses raw SQL to avoid EF Core table-sharing conflicts with AppUser.
 /// </summary>
 public class UserRoleSyncMiddleware
 {
@@ -31,16 +32,17 @@ public class UserRoleSyncMiddleware
             {
                 try
                 {
-                    var user = await dbContext.UsersReadOnly
-                        .Include(u => u.Role)
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(u => u.Id == userId);
+                    var roleCode = await dbContext.Database
+                        .SqlQueryRaw<string>(
+                            "SELECT r.code AS \"Value\" FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = {0} ORDER BY r.code LIMIT 1",
+                            userId)
+                        .FirstOrDefaultAsync();
 
-                    if (user?.Role != null && context.User.Identity is ClaimsIdentity identity)
+                    if (roleCode != null && context.User.Identity is ClaimsIdentity identity)
                     {
                         var existing = identity.FindFirst(ClaimTypes.Role);
                         if (existing != null) identity.RemoveClaim(existing);
-                        identity.AddClaim(new Claim(ClaimTypes.Role, user.Role.Code));
+                        identity.AddClaim(new Claim(ClaimTypes.Role, roleCode));
                     }
                 }
                 catch (Exception ex)

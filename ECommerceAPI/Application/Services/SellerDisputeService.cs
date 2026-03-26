@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Disputes;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Enums;
@@ -10,6 +11,7 @@ namespace ECommerceAPI.Application.Services;
 public class SellerDisputeService : ISellerDisputeService
 {
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService _notifications;
 
     private static readonly DisputeStatus[] FinalStatuses =
     [
@@ -19,9 +21,10 @@ public class SellerDisputeService : ISellerDisputeService
         DisputeStatus.Cancelled
     ];
 
-    public SellerDisputeService(ApplicationDbContext context)
+    public SellerDisputeService(ApplicationDbContext context, INotificationService notifications)
     {
         _context = context;
+        _notifications = notifications;
     }
 
     public async Task<SellerDisputeListResponseDto> GetShopDisputesAsync(
@@ -126,6 +129,16 @@ public class SellerDisputeService : ISellerDisputeService
         }
 
         await _context.SaveChangesAsync();
+
+        var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+        await _notifications.PublishAsync(
+            dispute.CustomerId,
+            nameof(NotificationType.Dispute),
+            "Shop đã phản hồi khiếu nại",
+            $"Shop đã phản hồi khiếu nại của bạn liên quan đơn #{orderRef}.",
+            "Dispute",
+            dispute.Id,
+            queueEmail: true);
 
         return new SellerDisputeResponseDto
         {

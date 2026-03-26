@@ -13,4 +13,10 @@ public interface IAiSellerService
     /// Chỉ hoạt động khi suggest-tags đã được gọi kèm productId (logId có giá trị).
     /// </summary>
     Task<bool> SaveTagSuggestionFeedbackAsync(SaveSuggestionFeedbackDto dto, Guid sellerId);
+
+    /// <summary>
+    /// Phân tích ảnh sản phẩm bằng Gemini Vision:
+    /// đánh giá chất lượng ảnh, gợi ý category/tags/materials, đề xuất cải thiện.
+    /// </summary>
+    Task<AnalyzeImageResponseDto> AnalyzeImageAsync(AnalyzeImageRequestDto request, Guid sellerId);
 }

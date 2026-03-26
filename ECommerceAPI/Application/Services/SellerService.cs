@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -16,11 +17,16 @@ public class SellerService : ISellerService
 {
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
+    private readonly INotificationService _notifications;
 
-    public SellerService(ApplicationDbContext context, IHubContext<OrderTrackingHub> hubContext)
+    public SellerService(
+        ApplicationDbContext context,
+        IHubContext<OrderTrackingHub> hubContext,
+        INotificationService notifications)
     {
         _context = context;
         _hubContext = hubContext;
+        _notifications = notifications;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -860,6 +866,17 @@ public class SellerService : ISellerService
         await _context.SaveChangesAsync();
 
         await NotifyStatusChanged(order, oldStatus, (OrderStatus)order.Status);
+
+        var newStatus = (OrderStatus)order.Status;
+        var code = NotificationFormatting.ShortEntityId(order.Id);
+        await _notifications.PublishAsync(
+            order.CustomerId,
+            nameof(NotificationType.Order),
+            "Cập nhật trạng thái đơn hàng",
+            $"Đơn #{code} chuyển từ {oldStatus} sang {newStatus}.",
+            "Order",
+            order.Id,
+            queueEmail: true);
 
         return new ServiceResponse
         {

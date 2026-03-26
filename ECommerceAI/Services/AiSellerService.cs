@@ -178,6 +178,111 @@ public class AiSellerService : IAiSellerService
         }
     }
 
+    // ── Phân tích ảnh sản phẩm (Gemini Vision) ───────────────────────────────
+    public async Task<AnalyzeImageResponseDto> AnalyzeImageAsync(AnalyzeImageRequestDto request, Guid sellerId)
+    {
+        if (request.ImageUrls == null || request.ImageUrls.Count == 0)
+            return new AnalyzeImageResponseDto { Success = false, ErrorMessage = "Vui lòng cung cấp ít nhất 1 URL ảnh." };
+
+        if (request.ImageUrls.Count > 3)
+            request.ImageUrls = request.ImageUrls.Take(3).ToList();
+
+        // Lấy danh sách categories, tags, materials từ DB để AI gợi ý chính xác hơn
+        var categories = await _context.Categories
+            .Where(c => c.IsActive)
+            .OrderBy(c => c.Level).ThenBy(c => c.Name)
+            .Select(c => new { c.Id, c.Name, c.Level })
+            .ToListAsync();
+
+        var tags = await _context.Tags
+            .OrderBy(t => t.Name)
+            .Select(t => new { t.Id, t.Name })
+            .ToListAsync();
+
+        var materials = await _context.Materials
+            .Where(m => m.IsActive)
+            .OrderBy(m => m.Name)
+            .Select(m => new { m.Id, m.Name })
+            .ToListAsync();
+
+        var categoryList = string.Join(", ", categories.Select(c => $"{c.Name}(ID:{c.Id})"));
+        var tagList = string.Join(", ", tags.Select(t => $"{t.Name}(ID:{t.Id})"));
+        var materialList = string.Join(", ", materials.Select(m => $"{m.Name}(ID:{m.Id})"));
+
+        var promptPath = Path.Combine(AppContext.BaseDirectory, "Prompts", "ImageAnalysisPrompt.txt");
+        var imagePrompt = File.Exists(promptPath) ? File.ReadAllText(promptPath) : _systemPrompt;
+
+        var jsonExample = """
+            {
+              "quality": {
+                "score": 8,
+                "rating": "good",
+                "hasGoodLighting": true,
+                "hasCleanBackground": true,
+                "isProductCentered": true,
+                "hasHighResolution": true
+              },
+              "suggestedCategories": [
+                {"categoryId": 12, "categoryName": "Áo sơ mi", "categoryPath": "Thời trang > Nam > Áo sơ mi", "confidenceScore": 0.95}
+              ],
+              "suggestedTags": [
+                {"tagId": 5, "tagName": "cotton", "confidenceScore": 0.90}
+              ],
+              "suggestedMaterials": [
+                {"materialId": "uuid-here", "materialName": "Cotton", "confidenceScore": 0.88}
+              ],
+              "improvements": [
+                "Nên chụp trên nền trắng để sản phẩm nổi bật hơn",
+                "Thêm ảnh chi tiết vải/texture"
+              ],
+              "summary": "Sản phẩm áo sơ mi nam chất lượng ảnh tốt, màu trắng, chất liệu cotton."
+            }
+            """;
+
+        var userMessage = $"""
+            Phân tích ảnh sản phẩm thương mại điện tử này và trả về kết quả phân tích.
+            
+            {(string.IsNullOrWhiteSpace(request.ProductTitle) ? "" : $"Tên sản phẩm: {request.ProductTitle}")}
+            {(string.IsNullOrWhiteSpace(request.ProductDescription) ? "" : $"Mô tả: {request.ProductDescription}")}
+            
+            Danh sách categories có trong hệ thống: {categoryList}
+            Danh sách tags có trong hệ thống: {tagList}
+            Danh sách materials có trong hệ thống: {materialList}
+            
+            Hãy trả về JSON theo format sau (không thêm markdown, chỉ JSON thuần):
+            {jsonExample}
+            
+            Lưu ý:
+            - quality.score: 1-10 (1=rất kém, 10=hoàn hảo)
+            - quality.rating: "excellent"(9-10), "good"(7-8), "fair"(5-6), "poor"(1-4)
+            - suggestedCategories: top 3 categories phù hợp nhất, dùng đúng ID từ danh sách
+            - suggestedTags: tối đa 8 tags phù hợp, dùng đúng ID từ danh sách
+            - suggestedMaterials: tối đa 3 materials, dùng đúng ID từ danh sách
+            - improvements: 2-4 gợi ý cải thiện ảnh bằng tiếng Việt
+            - summary: tóm tắt ngắn về sản phẩm trong ảnh bằng tiếng Việt
+            """;
+
+        try
+        {
+            var raw = await _gemini.GenerateWithImagesAsync(imagePrompt, userMessage, request.ImageUrls);
+
+            if (raw.StartsWith("⚠️"))
+                return new AnalyzeImageResponseDto { Success = false, ErrorMessage = raw };
+
+            var result = ParseJsonResponse<AnalyzeImageResponseDto>(raw);
+            if (result == null)
+                return new AnalyzeImageResponseDto { Success = false, ErrorMessage = "Không thể xử lý phản hồi từ AI. Vui lòng thử lại." };
+
+            result.Success = true;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Image analysis failed for seller {SellerId}", sellerId);
+            return new AnalyzeImageResponseDto { Success = false, ErrorMessage = "Đã xảy ra lỗi khi phân tích ảnh." };
+        }
+    }
+
     private static T? ParseJsonResponse<T>(string raw)
     {
         try

@@ -218,7 +218,84 @@ public class AiAdminService : IAiAdminService
                     .Take(10)
                     .ToListAsync()
             },
-            _ => new { Message = $"Report type '{reportType}' - data fetched from main DB" }
+            "sellers" => new
+            {
+                TotalShops = await _context.Shops.CountAsync(),
+                ActiveShops = await _context.Shops.CountAsync(s => s.Status == 1),
+                NewShops = await _context.Shops.CountAsync(s => s.CreatedAt >= from && s.CreatedAt <= to),
+                TopSellersByRevenue = await _context.Orders
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status >= 3) // Delivered/Completed
+                    .GroupBy(o => o.ShopId)
+                    .Select(g => new { ShopId = g.Key, Revenue = g.Sum(o => o.Total), OrderCount = g.Count() })
+                    .OrderByDescending(x => x.Revenue)
+                    .Take(10)
+                    .ToListAsync(),
+                CancellationRate = await _context.Orders.CountAsync(o => o.CreatedAt >= from && o.CreatedAt <= to) is int total && total > 0
+                    ? Math.Round((double)await _context.Orders.CountAsync(o => o.Status == 5 && o.CreatedAt >= from && o.CreatedAt <= to) / total * 100, 1)
+                    : 0.0
+            },
+            "orders" => new
+            {
+                TotalOrders = await _context.Orders.CountAsync(o => o.CreatedAt >= from && o.CreatedAt <= to),
+                TotalRevenue = await _context.Orders
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status >= 3)
+                    .SumAsync(o => (decimal?)o.Total) ?? 0,
+                ByStatus = await _context.Orders
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to)
+                    .GroupBy(o => o.Status)
+                    .Select(g => new { Status = g.Key, Count = g.Count() })
+                    .ToListAsync(),
+                TopProducts = await _context.OrderItems
+                    .Where(oi => oi.Order.CreatedAt >= from && oi.Order.CreatedAt <= to)
+                    .GroupBy(oi => oi.ProductName)
+                    .Select(g => new { Product = g.Key, Quantity = g.Sum(x => x.Quantity), Revenue = g.Sum(x => x.LineTotal) })
+                    .OrderByDescending(x => x.Revenue)
+                    .Take(10)
+                    .ToListAsync(),
+                AvgOrderValue = await _context.Orders
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to)
+                    .AverageAsync(o => (decimal?)o.Total) ?? 0
+            },
+            "customers" => new
+            {
+                TotalCustomers = await _context.Users.CountAsync(),
+                NewCustomers = await _context.Users.CountAsync(u => u.CreatedAt >= from && u.CreatedAt <= to),
+                ActiveCustomers = await _context.Orders
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to)
+                    .Select(o => o.CustomerId)
+                    .Distinct()
+                    .CountAsync(),
+                TopBuyers = await _context.Orders
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to)
+                    .GroupBy(o => o.CustomerId)
+                    .Select(g => new { CustomerId = g.Key, OrderCount = g.Count(), TotalSpent = g.Sum(o => o.Total) })
+                    .OrderByDescending(x => x.TotalSpent)
+                    .Take(10)
+                    .ToListAsync()
+            },
+            "disputes" => new
+            {
+                TotalDisputes = await _context.Disputes.CountAsync(d => d.CreatedAt >= from && d.CreatedAt <= to),
+                ByStatus = await _context.Disputes
+                    .Where(d => d.CreatedAt >= from && d.CreatedAt <= to)
+                    .GroupBy(d => d.Status)
+                    .Select(g => new { Status = g.Key, Count = g.Count() })
+                    .ToListAsync(),
+                TotalRequestedAmount = await _context.Disputes
+                    .Where(d => d.CreatedAt >= from && d.CreatedAt <= to)
+                    .SumAsync(d => (decimal?)d.RequestedAmount) ?? 0,
+                TotalApprovedAmount = await _context.Disputes
+                    .Where(d => d.CreatedAt >= from && d.CreatedAt <= to)
+                    .SumAsync(d => (decimal?)d.ApprovedAmount) ?? 0,
+                TopShopsByDisputes = await _context.Disputes
+                    .Where(d => d.CreatedAt >= from && d.CreatedAt <= to)
+                    .GroupBy(d => d.ShopId)
+                    .Select(g => new { ShopId = g.Key, DisputeCount = g.Count() })
+                    .OrderByDescending(x => x.DisputeCount)
+                    .Take(10)
+                    .ToListAsync()
+            },
+            _ => new { Message = $"Report type '{reportType}' không được hỗ trợ. Dùng: products, sellers, orders, customers, disputes" }
         };
     }
 
