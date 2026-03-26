@@ -24,6 +24,8 @@ public class AiDbContext : DbContext
     public DbSet<Category> Categories { get; set; }
     public DbSet<Tag> Tags { get; set; }
     public DbSet<Material> Materials { get; set; }
+    public DbSet<UserReadOnly> UsersReadOnly { get; set; }
+    public DbSet<RoleReadOnly> RolesReadOnly { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -211,6 +213,25 @@ public class AiDbContext : DbContext
             e.Property(x => x.Name).HasColumnName("name");
             e.Property(x => x.Slug).HasColumnName("slug");
             e.Property(x => x.IsActive).HasColumnName("is_active");
+        });
+
+        modelBuilder.Entity<UserReadOnly>(e =>
+        {
+            e.ToTable("users");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id").ValueGeneratedNever();
+            e.Property(x => x.RoleId).HasColumnName("role_id");
+            e.HasOne(x => x.Role).WithMany()
+                .HasForeignKey(x => x.RoleId)
+                .HasConstraintName("users_role_id_fkey");
+        });
+
+        modelBuilder.Entity<RoleReadOnly>(e =>
+        {
+            e.ToTable("roles");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.Code).HasColumnName("code");
         });
     }
 }

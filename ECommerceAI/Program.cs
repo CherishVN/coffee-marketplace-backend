@@ -121,6 +121,7 @@ if (app.Environment.IsDevelopment())
 app.UseMiddleware<InternalApiKeyMiddleware>();
 app.UseCors("AllowMainApi");
 app.UseAuthentication();
+app.UseMiddleware<UserRoleSyncMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 
