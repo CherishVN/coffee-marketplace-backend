@@ -29,10 +29,19 @@ public class AiAdminService : IAiAdminService
 
         var statsJson = System.Text.Json.JsonSerializer.Serialize(stats);
         var prompt = $"""
-            Báo cáo {request.ReportType} ({request.FromDate:dd/MM} - {request.ToDate:dd/MM/yyyy}).
-            Dữ liệu: {statsJson}
-            {(request.AdditionalContext != null ? $"Yêu cầu: {request.AdditionalContext}" : "")}
-            Đưa ra tóm tắt ngắn (3-4 câu) và 2-3 khuyến nghị bằng tiếng Việt.
+            Dưới đây là dữ liệu thực tế từ hệ thống cho báo cáo loại "{request.ReportType}" trong khoảng thời gian {request.FromDate:dd/MM/yyyy} đến {request.ToDate:dd/MM/yyyy}.
+            
+            DỮ LIỆU (JSON):
+            {statsJson}
+            
+            {(request.AdditionalContext != null ? $"Yêu cầu bổ sung: {request.AdditionalContext}" : "")}
+            
+            Hãy phân tích dữ liệu trên và đưa ra:
+            1. Tóm tắt tình hình (3-4 câu)
+            2. Điểm nổi bật hoặc đáng chú ý
+            3. 2-3 khuyến nghị cụ thể
+            
+            Lưu ý: Đây là toàn bộ dữ liệu có sẵn. Nếu một số chỉ số bằng 0, hãy nhận xét thực tế đó thay vì hỏi thêm dữ liệu.
             """;
 
         var insights = await _gemini.GenerateAsync(_systemPrompt, prompt);
@@ -206,6 +215,25 @@ public class AiAdminService : IAiAdminService
     {
         return reportType.ToLower() switch
         {
+            "sales" => new
+            {
+                TotalOrders = await _context.Orders.CountAsync(o => o.CreatedAt >= from && o.CreatedAt <= to),
+                TotalRevenue = await _context.Orders
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status >= 3)
+                    .SumAsync(o => (decimal?)o.Total) ?? 0,
+                PendingOrders = await _context.Orders.CountAsync(o => o.Status == 0 && o.CreatedAt >= from && o.CreatedAt <= to),
+                CompletedOrders = await _context.Orders.CountAsync(o => o.Status >= 3 && o.CreatedAt >= from && o.CreatedAt <= to),
+                CancelledOrders = await _context.Orders.CountAsync(o => o.Status == 5 && o.CreatedAt >= from && o.CreatedAt <= to),
+                TopProducts = await _context.OrderItems
+                    .Where(oi => oi.Order.CreatedAt >= from && oi.Order.CreatedAt <= to)
+                    .GroupBy(oi => oi.ProductName)
+                    .Select(g => new { Product = g.Key, Quantity = g.Sum(x => x.Quantity), Revenue = g.Sum(x => x.LineTotal) })
+                    .OrderByDescending(x => x.Revenue)
+                    .Take(10)
+                    .ToListAsync(),
+                TotalShops = await _context.Shops.CountAsync(),
+                ActiveShops = await _context.Shops.CountAsync(s => s.Status == 1)
+            },
             "products" => new
             {
                 TotalProducts = await _context.Products.CountAsync(p => p.CreatedAt >= from && p.CreatedAt <= to),
