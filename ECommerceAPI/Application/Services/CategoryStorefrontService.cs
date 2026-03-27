@@ -49,6 +49,7 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                     Slug = c.Slug,
                     Level = c.Level,
                     ProductCount = c.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                    Image = c.Image
                 })
                 .ToListAsync();
 
@@ -89,6 +90,7 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                     Slug = c.Slug,
                     Level = c.Level,
                     ProductCount = c.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                    Image = c.Image
                 })
                 .ToListAsync();
 
@@ -122,6 +124,7 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                     Slug = c.Slug,
                     Level = c.Level,
                     ProductCount = c.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                    Image = c.Image,
                     Subcategories = c.InverseParent
                         .Where(sub => sub.IsActive)
                         .Select(sub => new CategoryStorefrontDto
@@ -133,6 +136,7 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                             Slug = sub.Slug,
                             Level = sub.Level,
                             ProductCount = sub.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                            Image = sub.Image
                         })
                         .OrderBy(sub => sub.Name)
                         .ToList(),

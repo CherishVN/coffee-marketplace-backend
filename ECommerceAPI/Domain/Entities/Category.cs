@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ECommerceAPI.Domain.Entities;
 
@@ -14,6 +15,9 @@ public partial class Category
     public string Name { get; set; } = null!;
 
     public string Slug { get; set; } = null!;
+
+    [Column("image")]
+    public string? Image { get; set; }
 
     public short Level { get; set; }
 

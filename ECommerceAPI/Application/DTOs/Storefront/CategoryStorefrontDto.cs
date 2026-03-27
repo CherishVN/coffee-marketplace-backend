@@ -9,6 +9,7 @@ public class CategoryStorefrontDto
     public string Slug { get; set; } = null!;
     public short Level { get; set; }
     public int ProductCount { get; set; }
+    public string? Image { get; set; }
     public List<CategoryStorefrontDto> Subcategories { get; set; } = new();
 }
 
