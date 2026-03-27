@@ -848,6 +848,7 @@ public class SellerService : ISellerService
         }
 
         var order = await _context.Orders
+            .Include(o => o.OrderItems)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.ShopId == shop.Id);
 
         if (order == null)
@@ -860,8 +861,17 @@ public class SellerService : ISellerService
         }
 
         var oldStatus = (OrderStatus)order.Status;
+        var newOrderStatus = (OrderStatus)dto.Status;
         order.Status = dto.Status;
         order.UpdatedAt = DateTime.UtcNow;
+
+        // Cộng SoldCount khi đơn lần đầu đạt Completed(6) — khách xác nhận nhận hàng
+        var alreadyFulfilled = oldStatus == OrderStatus.Completed;
+        var nowFulfilled = newOrderStatus == OrderStatus.Completed;
+        if (nowFulfilled && !alreadyFulfilled)
+        {
+            await IncrementSoldCountAsync(order.OrderItems);
+        }
 
         await _context.SaveChangesAsync();
 
@@ -883,6 +893,16 @@ public class SellerService : ISellerService
             Success = true,
             Message = "Cập nhật trạng thái đơn hàng thành công"
         };
+    }
+
+    private async Task IncrementSoldCountAsync(IEnumerable<OrderItem> items)
+    {
+        foreach (var item in items)
+        {
+            await _context.Products
+                .Where(p => p.Id == item.ProductId)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity));
+        }
     }
 
     private async Task NotifyStatusChanged(Order order, OrderStatus oldStatus, OrderStatus newStatus)

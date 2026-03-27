@@ -213,8 +213,22 @@ public class OrderAdminService : IOrderAdminService
             }
 
             var oldStatus = (OrderStatus)order.Status;
+            var newOrderStatus = (OrderStatus)dto.NewStatus;
             order.Status = dto.NewStatus;
             order.UpdatedAt = DateTime.UtcNow;
+
+            // Cộng SoldCount khi đơn lần đầu đạt Completed(6) — khách xác nhận nhận hàng
+            var alreadyFulfilled = oldStatus == OrderStatus.Completed;
+            var nowFulfilled = newOrderStatus == OrderStatus.Completed;
+            if (nowFulfilled && !alreadyFulfilled)
+            {
+                foreach (var item in order.OrderItems)
+                {
+                    await _context.Products
+                        .Where(p => p.Id == item.ProductId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity));
+                }
+            }
 
             await _context.SaveChangesAsync();
 

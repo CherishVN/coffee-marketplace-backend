@@ -156,6 +156,7 @@ public class CustomerOrderService : ICustomerOrderService
     public async Task<ConfirmOrderResponseDto> ConfirmOrderAsync(Guid customerId, Guid orderId)
     {
         var order = await _context.Orders
+            .Include(o => o.OrderItems)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
 
         if (order == null)
@@ -178,6 +179,14 @@ public class CustomerOrderService : ICustomerOrderService
 
         order.Status = (short)OrderStatus.Completed;
         order.UpdatedAt = DateTime.UtcNow;
+
+        // Shipping → Completed: cộng SoldCount (chưa qua Delivered nên chưa được cộng trước đó)
+        foreach (var item in order.OrderItems)
+        {
+            await _context.Products
+                .Where(p => p.Id == item.ProductId)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity));
+        }
 
         await _context.SaveChangesAsync();
 

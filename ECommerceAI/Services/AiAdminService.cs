@@ -213,19 +213,26 @@ public class AiAdminService : IAiAdminService
 
     private async Task<object> QueryStatsAsync(string reportType, DateTime from, DateTime to)
     {
+        // OrderStatus: 0=PendingPayment, 1=PendingConfirmation, 2=Confirmed,
+        //              3=Processing, 4=Shipping, 5=Delivered, 6=Completed, 7=Cancelled, 8=Refunded
+        // Doanh thu thực = chỉ Completed(6) — khách đã xác nhận nhận hàng
+        // Delivered(5) = seller xác nhận giao, chưa tính doanh thu
+        // Cancelled = 7
         return reportType.ToLower() switch
         {
             "sales" => new
             {
                 TotalOrders = await _context.Orders.CountAsync(o => o.CreatedAt >= from && o.CreatedAt <= to),
                 TotalRevenue = await _context.Orders
-                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status >= 3)
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status == 6)
                     .SumAsync(o => (decimal?)o.Total) ?? 0,
-                PendingOrders = await _context.Orders.CountAsync(o => o.Status == 0 && o.CreatedAt >= from && o.CreatedAt <= to),
-                CompletedOrders = await _context.Orders.CountAsync(o => o.Status >= 3 && o.CreatedAt >= from && o.CreatedAt <= to),
-                CancelledOrders = await _context.Orders.CountAsync(o => o.Status == 5 && o.CreatedAt >= from && o.CreatedAt <= to),
+                PendingOrders = await _context.Orders.CountAsync(o => (o.Status == 0 || o.Status == 1) && o.CreatedAt >= from && o.CreatedAt <= to),
+                ProcessingOrders = await _context.Orders.CountAsync(o => (o.Status == 2 || o.Status == 3 || o.Status == 4) && o.CreatedAt >= from && o.CreatedAt <= to),
+                DeliveredOrders = await _context.Orders.CountAsync(o => o.Status == 5 && o.CreatedAt >= from && o.CreatedAt <= to),
+                CompletedOrders = await _context.Orders.CountAsync(o => o.Status == 6 && o.CreatedAt >= from && o.CreatedAt <= to),
+                CancelledOrders = await _context.Orders.CountAsync(o => o.Status == 7 && o.CreatedAt >= from && o.CreatedAt <= to),
                 TopProducts = await _context.OrderItems
-                    .Where(oi => oi.Order.CreatedAt >= from && oi.Order.CreatedAt <= to)
+                    .Where(oi => oi.Order.CreatedAt >= from && oi.Order.CreatedAt <= to && oi.Order.Status == 6)
                     .GroupBy(oi => oi.ProductName)
                     .Select(g => new { Product = g.Key, Quantity = g.Sum(x => x.Quantity), Revenue = g.Sum(x => x.LineTotal) })
                     .OrderByDescending(x => x.Revenue)
@@ -252,22 +259,27 @@ public class AiAdminService : IAiAdminService
                 ActiveShops = await _context.Shops.CountAsync(s => s.Status == 1),
                 NewShops = await _context.Shops.CountAsync(s => s.CreatedAt >= from && s.CreatedAt <= to),
                 TopSellersByRevenue = await _context.Orders
-                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status >= 3) // Delivered/Completed
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status == 6)
                     .GroupBy(o => o.ShopId)
                     .Select(g => new { ShopId = g.Key, Revenue = g.Sum(o => o.Total), OrderCount = g.Count() })
                     .OrderByDescending(x => x.Revenue)
                     .Take(10)
                     .ToListAsync(),
                 CancellationRate = await _context.Orders.CountAsync(o => o.CreatedAt >= from && o.CreatedAt <= to) is int total && total > 0
-                    ? Math.Round((double)await _context.Orders.CountAsync(o => o.Status == 5 && o.CreatedAt >= from && o.CreatedAt <= to) / total * 100, 1)
+                    ? Math.Round((double)await _context.Orders.CountAsync(o => o.Status == 7 && o.CreatedAt >= from && o.CreatedAt <= to) / total * 100, 1)
                     : 0.0
             },
             "orders" => new
             {
                 TotalOrders = await _context.Orders.CountAsync(o => o.CreatedAt >= from && o.CreatedAt <= to),
                 TotalRevenue = await _context.Orders
-                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status >= 3)
+                    .Where(o => o.CreatedAt >= from && o.CreatedAt <= to && o.Status == 6)
                     .SumAsync(o => (decimal?)o.Total) ?? 0,
+                PendingOrders = await _context.Orders.CountAsync(o => (o.Status == 0 || o.Status == 1) && o.CreatedAt >= from && o.CreatedAt <= to),
+                ProcessingOrders = await _context.Orders.CountAsync(o => (o.Status == 2 || o.Status == 3 || o.Status == 4) && o.CreatedAt >= from && o.CreatedAt <= to),
+                DeliveredOrders = await _context.Orders.CountAsync(o => o.Status == 5 && o.CreatedAt >= from && o.CreatedAt <= to),
+                CompletedOrders = await _context.Orders.CountAsync(o => o.Status == 6 && o.CreatedAt >= from && o.CreatedAt <= to),
+                CancelledOrders = await _context.Orders.CountAsync(o => o.Status == 7 && o.CreatedAt >= from && o.CreatedAt <= to),
                 ByStatus = await _context.Orders
                     .Where(o => o.CreatedAt >= from && o.CreatedAt <= to)
                     .GroupBy(o => o.Status)

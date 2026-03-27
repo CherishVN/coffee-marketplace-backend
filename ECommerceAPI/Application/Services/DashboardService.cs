@@ -98,7 +98,7 @@ public class DashboardService : IDashboardService
 
             // 5) Revenue Stats — single query
             var revenueStats = await _context.Orders
-                .Where(o => o.Status == (short)OrderStatus.Completed || o.Status == (short)OrderStatus.Delivered)
+                .Where(o => o.Status == (short)OrderStatus.Completed)
                 .GroupBy(_ => 1)
                 .Select(g => new
                 {
@@ -293,8 +293,12 @@ public class DashboardService : IDashboardService
                 .Select(p => new
                 {
                     Product = p,
-                    TotalSold = p.OrderItems.Sum(oi => oi.Quantity),
-                    Revenue = p.OrderItems.Sum(oi => oi.LineTotal)
+                    TotalSold = p.OrderItems
+                        .Where(oi => oi.Order.Status == (short)OrderStatus.Completed)
+                        .Sum(oi => (int?)oi.Quantity) ?? 0,
+                    Revenue = p.OrderItems
+                        .Where(oi => oi.Order.Status == (short)OrderStatus.Completed)
+                        .Sum(oi => (decimal?)oi.LineTotal) ?? 0
                 })
                 .OrderByDescending(x => x.TotalSold)
                 .Take(limit)
