@@ -182,19 +182,27 @@ public class AiAdminService : IAiAdminService
             Tổng quan:
             {System.Text.Json.JsonSerializer.Serialize(overview, new System.Text.Json.JsonSerializerOptions { WriteIndented = true })}
             
-            Hãy highlight:
-            1. Điểm cần chú ý (alerts)
-            2. Điểm tích cực
-            3. Hành động cần làm ngay
+            Hãy trả lời theo đúng 3 section sau (dùng tiêu đề chính xác):
+            
+            CẢNH BÁO:
+            - [liệt kê các điểm cần chú ý, rủi ro, vấn đề cần xử lý]
+            
+            TÍCH CỰC:
+            - [liệt kê các điểm tốt, thành tích, tín hiệu khả quan]
+            
+            HÀNH ĐỘNG:
+            - [liệt kê các việc cần làm ngay]
+            
+            Mỗi section ít nhất 2-3 gạch đầu dòng, viết bằng tiếng Việt.
             """;
 
         var aiSummary = await _gemini.GenerateAsync(_systemPrompt, prompt);
 
         return new DashboardInsightsResponseDto
         {
-            KeyAlerts = ExtractSection(aiSummary, "cần chú ý", "alert"),
-            PositiveHighlights = ExtractSection(aiSummary, "tích cực", "positive"),
-            ActionItems = ExtractRecommendations(aiSummary),
+            KeyAlerts = ExtractSection(aiSummary, "CẢNH BÁO"),
+            PositiveHighlights = ExtractSection(aiSummary, "TÍCH CỰC"),
+            ActionItems = ExtractSection(aiSummary, "HÀNH ĐỘNG"),
             AiSummary = aiSummary,
             GeneratedAt = DateTime.UtcNow
         };
@@ -501,9 +509,40 @@ public class AiAdminService : IAiAdminService
         return lines.Any() ? lines : ExtractKeyFindings(text);
     }
 
-    private static List<string> ExtractSection(string text, string keyword, string fallback)
+    private static List<string> ExtractSection(string text, string sectionHeader)
     {
-        return ExtractKeyFindings(text);
+        // Tìm section bắt đầu từ "## HEADER:" đến section tiếp theo hoặc hết chuỗi
+        var lines = text.Split('\n');
+        var result = new List<string>();
+        bool inSection = false;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+
+            // Kiểm tra tiêu đề section (## CẢNH BÁO: hoặc **CẢNH BÁO:** v.v.)
+            if (line.Contains(sectionHeader, StringComparison.OrdinalIgnoreCase))
+            {
+                inSection = true;
+                continue;
+            }
+
+            // Nếu gặp tiêu đề section khác thì dừng
+            if (inSection && (line.StartsWith("##") || line.StartsWith("**") && line.EndsWith(":**")))
+            {
+                break;
+            }
+
+            if (inSection && (line.StartsWith("-") || line.StartsWith("•") || line.StartsWith("*")))
+            {
+                var content = line.TrimStart('-', '•', '*', ' ').Trim();
+                if (content.Length > 5)
+                    result.Add(content);
+            }
+        }
+
+        // Fallback: dùng ExtractKeyFindings nếu không tìm được section
+        return result.Any() ? result.Take(5).ToList() : ExtractKeyFindings(text);
     }
 
     private class DisputeStats
