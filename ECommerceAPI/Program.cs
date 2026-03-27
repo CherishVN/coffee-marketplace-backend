@@ -25,6 +25,9 @@ namespace ECommerceAPI
     {
         public static void Main(string[] args)
         {
+            // Npgsql: treat DateTime Kind=Unspecified as UTC
+            AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
             var builder = WebApplication.CreateBuilder(args);
 
             // Database
