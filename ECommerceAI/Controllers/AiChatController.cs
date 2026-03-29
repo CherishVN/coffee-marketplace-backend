@@ -34,6 +34,15 @@ public class AiChatController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Tạo session mới (archive session active cũ)</summary>
+    [HttpPost("session/new")]
+    public async Task<IActionResult> CreateNewSession()
+    {
+        var userId = GetUserId();
+        var result = await _chatService.CreateNewSessionAsync(userId);
+        return Ok(result);
+    }
+
     /// <summary>Gửi tin nhắn và nhận phản hồi từ AI</summary>
     [HttpPost("send")]
     public async Task<IActionResult> SendMessage([FromBody] SendMessageRequestDto dto)

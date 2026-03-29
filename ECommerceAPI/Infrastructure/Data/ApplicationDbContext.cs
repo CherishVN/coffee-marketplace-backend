@@ -18,6 +18,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<AiChatSession> AiChatSessions { get; set; }
 
+    public virtual DbSet<AiChatSessionPreference> AiChatSessionPreferences { get; set; }
+
     public virtual DbSet<AiChatMessage> AiChatMessages { get; set; }
 
     public virtual DbSet<AiGeneratedCart> AiGeneratedCarts { get; set; }
@@ -186,6 +188,34 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.User).WithMany(p => p.AiChatSessions)
                 .HasForeignKey(d => d.UserId)
                 .HasConstraintName("ai_chat_sessions_user_id_fkey");
+        });
+
+        modelBuilder.Entity<AiChatSessionPreference>(entity =>
+        {
+            entity.HasKey(e => e.SessionId).HasName("ai_chat_session_preferences_pkey");
+
+            entity.ToTable("ai_chat_session_preferences");
+
+            entity.HasIndex(e => e.IsMuted, "idx_ai_chat_session_preferences_muted");
+            entity.HasIndex(e => e.IsDeleted, "idx_ai_chat_session_preferences_deleted");
+
+            entity.Property(e => e.SessionId).HasColumnName("session_id");
+            entity.Property(e => e.IsMuted)
+                .HasDefaultValue(false)
+                .HasColumnName("is_muted");
+            entity.Property(e => e.IsDeleted)
+                .HasDefaultValue(false)
+                .HasColumnName("is_deleted");
+            entity.Property(e => e.LastReadMessageId).HasColumnName("last_read_message_id");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Session)
+                .WithOne(p => p.Preference)
+                .HasForeignKey<AiChatSessionPreference>(d => d.SessionId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("ai_chat_session_preferences_session_id_fkey");
         });
 
         modelBuilder.Entity<AiChatMessage>(entity =>

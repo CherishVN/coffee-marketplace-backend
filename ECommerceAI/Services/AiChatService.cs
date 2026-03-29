@@ -57,6 +57,35 @@ public class AiChatService : IAiChatService
         return MapToSessionDto(session);
     }
 
+    // ── Tạo session mới (luôn tạo mới, archive session cũ nếu có) ────────────
+    public async Task<SessionResponseDto> CreateNewSessionAsync(Guid userId)
+    {
+        // Đánh dấu tất cả session active cũ là "archived"
+        var oldSessions = await _context.AiChatSessions
+            .Where(s => s.UserId == userId && s.Status == "active")
+            .ToListAsync();
+
+        foreach (var old in oldSessions)
+        {
+            old.Status = "archived";
+            old.UpdatedAt = DateTime.UtcNow;
+        }
+
+        var newSession = new AiChatSession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Status = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _context.AiChatSessions.Add(newSession);
+        await _context.SaveChangesAsync();
+
+        return MapToSessionDto(newSession);
+    }
+
     // ── Gửi tin nhắn và nhận phản hồi AI ────────────────────────────────────
     public async Task<SendMessageResponseDto> SendMessageAsync(Guid sessionId, Guid userId, string message)
     {

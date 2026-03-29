@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ECommerceAI.Data;
 using ECommerceAI.Data.Entities;
 using ECommerceAI.DTOs.Seller;
@@ -9,19 +10,33 @@ namespace ECommerceAI.Services;
 
 public class AiSellerService : IAiSellerService
 {
+    private const string DefaultSystemPrompt = "Bạn là AI hỗ trợ seller.";
+    private const string ActionPending = "pending";
+    private const int MaxPromptCategories = 150;
+    private const int MaxPromptTags = 200;
+    private const int MaxPromptMaterials = 150;
+
+    private static readonly JsonSerializerOptions _jsonReadOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        Converters = { new SafeNullableGuidConverter() }
+    };
+
+    private static readonly Lazy<string> _sellerPrompt = new(() => LoadPromptFromFile("SellerSuggestPrompt.txt", DefaultSystemPrompt));
+    private static readonly Lazy<string> _imagePrompt = new(() => LoadPromptFromFile("ImageAnalysisPrompt.txt", DefaultSystemPrompt));
+    private static readonly object _analyzeImageSchema = BuildAnalyzeImageSchema();
+
     private readonly AiDbContext _context;
     private readonly GeminiClientService _gemini;
     private readonly ILogger<AiSellerService> _logger;
-    private readonly string _systemPrompt;
 
     public AiSellerService(AiDbContext context, GeminiClientService gemini, ILogger<AiSellerService> logger)
     {
         _context = context;
         _gemini = gemini;
         _logger = logger;
-
-        var promptPath = Path.Combine(AppContext.BaseDirectory, "Prompts", "SellerSuggestPrompt.txt");
-        _systemPrompt = File.Exists(promptPath) ? File.ReadAllText(promptPath) : "Bạn là AI hỗ trợ seller.";
     }
 
     // ── Gợi ý Category ───────────────────────────────────────────────────────
@@ -31,6 +46,7 @@ public class AiSellerService : IAiSellerService
         var categories = await _context.Categories
             .Where(c => c.IsActive)
             .OrderBy(c => c.Level).ThenBy(c => c.Name)
+            .Take(MaxPromptCategories)
             .ToListAsync();
 
         var categoryList = string.Join("\n", categories.Select(c =>
@@ -52,8 +68,8 @@ public class AiSellerService : IAiSellerService
 
         try
         {
-            var raw = await _gemini.GenerateAsync(_systemPrompt, userMessage);
-            var result = ParseJsonResponse<SuggestCategoryResponseDto>(raw) ?? new SuggestCategoryResponseDto();
+            var raw = await _gemini.GenerateAsync(_sellerPrompt.Value, userMessage);
+            var result = ParseJsonResponse<SuggestCategoryResponseDto>(raw, "SuggestCategory") ?? new SuggestCategoryResponseDto();
             return result;
         }
         catch (Exception ex)
@@ -83,8 +99,8 @@ public class AiSellerService : IAiSellerService
 
         try
         {
-            var raw = await _gemini.GenerateAsync(_systemPrompt, userMessage);
-            var result = ParseJsonResponse<SuggestTagsResponseDto>(raw) ?? new SuggestTagsResponseDto();
+            var raw = await _gemini.GenerateAsync(_sellerPrompt.Value, userMessage);
+            var result = ParseJsonResponse<SuggestTagsResponseDto>(raw, "SuggestTags") ?? new SuggestTagsResponseDto();
 
             // Lưu lịch sử gợi ý nếu seller đã có product (productId được truyền lên)
             if (request.ProductId.HasValue)
@@ -104,7 +120,7 @@ public class AiSellerService : IAiSellerService
                         SuggestedCategoryId = request.CategoryId,
                         SuggestedTags = JsonDocument.Parse(suggestedJson),
                         ChosenTags = JsonDocument.Parse("[]"),
-                        Action = "pending",
+                        Action = ActionPending,
                         CreatedAt = DateTime.UtcNow
                     };
 
@@ -168,8 +184,8 @@ public class AiSellerService : IAiSellerService
 
         try
         {
-            var raw = await _gemini.GenerateAsync(_systemPrompt, userMessage);
-            return ParseJsonResponse<SuggestMaterialsResponseDto>(raw) ?? new SuggestMaterialsResponseDto();
+            var raw = await _gemini.GenerateAsync(_sellerPrompt.Value, userMessage);
+            return ParseJsonResponse<SuggestMaterialsResponseDto>(raw, "SuggestMaterials") ?? new SuggestMaterialsResponseDto();
         }
         catch (Exception ex)
         {
@@ -191,17 +207,20 @@ public class AiSellerService : IAiSellerService
         var categories = await _context.Categories
             .Where(c => c.IsActive)
             .OrderBy(c => c.Level).ThenBy(c => c.Name)
+            .Take(MaxPromptCategories)
             .Select(c => new { c.Id, c.Name, c.Level })
             .ToListAsync();
 
         var tags = await _context.Tags
             .OrderBy(t => t.Name)
+            .Take(MaxPromptTags)
             .Select(t => new { t.Id, t.Name })
             .ToListAsync();
 
         var materials = await _context.Materials
             .Where(m => m.IsActive)
             .OrderBy(m => m.Name)
+            .Take(MaxPromptMaterials)
             .Select(m => new { m.Id, m.Name })
             .ToListAsync();
 
@@ -209,8 +228,7 @@ public class AiSellerService : IAiSellerService
         var tagList = string.Join(", ", tags.Select(t => $"{t.Name}(ID:{t.Id})"));
         var materialList = string.Join(", ", materials.Select(m => $"{m.Name}(ID:{m.Id})"));
 
-        var promptPath = Path.Combine(AppContext.BaseDirectory, "Prompts", "ImageAnalysisPrompt.txt");
-        var imagePrompt = File.Exists(promptPath) ? File.ReadAllText(promptPath) : _systemPrompt;
+        var imagePrompt = _imagePrompt.Value;
 
         var jsonExample = """
             {
@@ -264,15 +282,23 @@ public class AiSellerService : IAiSellerService
 
         try
         {
-            var raw = await _gemini.GenerateWithImagesAsync(imagePrompt, userMessage, request.ImageUrls);
+            var raw = await _gemini.GenerateWithImagesJsonAsync(
+                imagePrompt,
+                userMessage,
+                request.ImageUrls,
+                _analyzeImageSchema);
 
             if (raw.StartsWith("⚠️"))
                 return new AnalyzeImageResponseDto { Success = false, ErrorMessage = raw };
 
-            var result = ParseJsonResponse<AnalyzeImageResponseDto>(raw);
+            var result = ParseJsonResponse<AnalyzeImageResponseDto>(raw, "AnalyzeImage");
             if (result == null)
+            {
+                _logger.LogWarning("AnalyzeImage parse failed. Raw snippet: {Raw}", raw.Length > 400 ? raw[..400] : raw);
                 return new AnalyzeImageResponseDto { Success = false, ErrorMessage = "Không thể xử lý phản hồi từ AI. Vui lòng thử lại." };
+            }
 
+            result = NormalizeAnalyzeImageResult(result);
             result.Success = true;
             return result;
         }
@@ -283,17 +309,231 @@ public class AiSellerService : IAiSellerService
         }
     }
 
-    private static T? ParseJsonResponse<T>(string raw)
+    private T? ParseJsonResponse<T>(string raw, string operation)
     {
         try
         {
-            var json = raw.Trim().TrimStart('`').TrimEnd('`');
-            if (json.StartsWith("json")) json = json[4..].Trim();
-            return JsonSerializer.Deserialize<T>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var json = NormalizeModelJson(raw);
+            return JsonSerializer.Deserialize<T>(json, _jsonReadOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "{Operation} JSON parse failed. Raw snippet: {Raw}", operation, raw.Length > 400 ? raw[..400] : raw);
+            return default;
+        }
+    }
+
+    private static string NormalizeModelJson(string raw)
+    {
+        var text = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(text)) return text;
+
+        // Strip fenced markdown blocks if present.
+        if (text.StartsWith("```"))
+        {
+            var firstNewLine = text.IndexOf('\n');
+            if (firstNewLine >= 0)
+            {
+                text = text[(firstNewLine + 1)..];
+            }
+
+            var fenceEnd = text.LastIndexOf("```");
+            if (fenceEnd >= 0)
+            {
+                text = text[..fenceEnd];
+            }
+        }
+
+        text = text.Trim();
+        if (text.StartsWith("json", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[4..].Trim();
+        }
+
+        // Extract the first JSON object when model wraps JSON with prose.
+        var firstBrace = text.IndexOf('{');
+        var lastBrace = text.LastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace)
+        {
+            text = text[firstBrace..(lastBrace + 1)];
+        }
+
+        return text.Trim();
+    }
+
+    private static AnalyzeImageResponseDto NormalizeAnalyzeImageResult(AnalyzeImageResponseDto result)
+    {
+        result.Quality ??= new ImageQualityDto();
+        result.SuggestedCategories ??= new List<CategorySuggestionItem>();
+        result.SuggestedTags ??= new List<TagSuggestionItem>();
+        result.SuggestedMaterials ??= new List<MaterialSuggestionItem>();
+        result.Improvements ??= new List<string>();
+        result.Summary ??= string.Empty;
+
+        result.Quality.Score = Math.Clamp(result.Quality.Score, 1, 10);
+        result.Quality.Rating = string.IsNullOrWhiteSpace(result.Quality.Rating)
+            ? "fair"
+            : result.Quality.Rating.Trim().ToLowerInvariant();
+
+        result.SuggestedCategories = result.SuggestedCategories
+            .Where(x => x.CategoryId > 0)
+            .OrderByDescending(x => x.ConfidenceScore)
+            .Take(3)
+            .ToList();
+
+        result.SuggestedTags = result.SuggestedTags
+            .Where(x => !string.IsNullOrWhiteSpace(x.TagName))
+            .OrderByDescending(x => x.ConfidenceScore)
+            .Take(8)
+            .ToList();
+
+        result.SuggestedMaterials = result.SuggestedMaterials
+            .Where(x => !string.IsNullOrWhiteSpace(x.MaterialName))
+            .OrderByDescending(x => x.ConfidenceScore)
+            .Take(3)
+            .ToList();
+
+        result.Improvements = result.Improvements
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList();
+
+        if (result.Improvements.Count == 0)
+        {
+            result.Improvements.Add("Nên bổ sung ảnh rõ nét hơn để tăng độ tin cậy khi phân tích.");
+        }
+
+        return result;
+    }
+
+    private static object BuildAnalyzeImageSchema()
+    {
+        return new
+        {
+            type = "OBJECT",
+            properties = new
+            {
+                quality = new
+                {
+                    type = "OBJECT",
+                    properties = new
+                    {
+                        score = new { type = "INTEGER" },
+                        rating = new { type = "STRING", @enum = new[] { "excellent", "good", "fair", "poor" } },
+                        has_good_lighting = new { type = "BOOLEAN" },
+                        has_clean_background = new { type = "BOOLEAN" },
+                        is_product_centered = new { type = "BOOLEAN" },
+                        has_high_resolution = new { type = "BOOLEAN" }
+                    },
+                    required = new[] { "score", "rating", "has_good_lighting", "has_clean_background", "is_product_centered", "has_high_resolution" }
+                },
+                suggested_categories = new
+                {
+                    type = "ARRAY",
+                    items = new
+                    {
+                        type = "OBJECT",
+                        properties = new
+                        {
+                            category_id = new { type = "INTEGER" },
+                            category_name = new { type = "STRING" },
+                            category_path = new { type = "STRING" },
+                            confidence_score = new { type = "NUMBER" }
+                        },
+                        required = new[] { "category_id", "category_name", "category_path", "confidence_score" }
+                    }
+                },
+                suggested_tags = new
+                {
+                    type = "ARRAY",
+                    items = new
+                    {
+                        type = "OBJECT",
+                        properties = new
+                        {
+                            tag_id = new { type = "INTEGER" },
+                            tag_name = new { type = "STRING" },
+                            confidence_score = new { type = "NUMBER" }
+                        },
+                        required = new[] { "tag_id", "tag_name", "confidence_score" }
+                    }
+                },
+                suggested_materials = new
+                {
+                    type = "ARRAY",
+                    items = new
+                    {
+                        type = "OBJECT",
+                        properties = new
+                        {
+                            material_id = new { type = "STRING" },
+                            material_name = new { type = "STRING" },
+                            confidence_score = new { type = "NUMBER" }
+                        },
+                        required = new[] { "material_id", "material_name", "confidence_score" }
+                    }
+                },
+                improvements = new
+                {
+                    type = "ARRAY",
+                    items = new { type = "STRING" }
+                },
+                summary = new { type = "STRING" }
+            },
+            required = new[] { "quality", "suggested_categories", "suggested_tags", "suggested_materials", "improvements", "summary" }
+        };
+    }
+
+    private static string LoadPromptFromFile(string fileName, string fallback)
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "Prompts", fileName);
+            return File.Exists(path) ? File.ReadAllText(path) : fallback;
         }
         catch
         {
-            return default;
+            return fallback;
+        }
+    }
+
+    /// <summary>
+    /// Gemini đôi khi trả material_id không phải GUID hợp lệ; converter này hạ xuống null thay vì ném lỗi.
+    /// </summary>
+    private sealed class SafeNullableGuidConverter : JsonConverter<Guid?>
+    {
+        public override Guid? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.Null:
+                    return null;
+
+                case JsonTokenType.String:
+                    var raw = reader.GetString();
+                    return Guid.TryParse(raw, out var guid) ? guid : null;
+
+                case JsonTokenType.StartArray:
+                case JsonTokenType.StartObject:
+                    reader.Skip();
+                    return null;
+
+                default:
+                    return null;
+            }
+        }
+
+        public override void Write(Utf8JsonWriter writer, Guid? value, JsonSerializerOptions options)
+        {
+            if (value.HasValue)
+            {
+                writer.WriteStringValue(value.Value);
+                return;
+            }
+
+            writer.WriteNullValue();
         }
     }
 }

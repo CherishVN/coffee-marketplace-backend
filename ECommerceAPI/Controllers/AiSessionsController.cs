@@ -15,6 +15,11 @@ namespace ECommerceAPI.Controllers;
 [Authorize]
 public class AiSessionsController : ControllerBase
 {
+    public sealed class ToggleMuteRequest
+    {
+        public bool IsMuted { get; set; }
+    }
+
     private readonly ApplicationDbContext _context;
     private readonly IUserClaimsService _userClaims;
 
@@ -35,7 +40,7 @@ public class AiSessionsController : ControllerBase
         if (userId == null) return Unauthorized();
 
         var sessions = await _context.AiChatSessions
-            .Where(s => s.UserId == userId.Value)
+            .Where(s => s.UserId == userId.Value && (s.Preference == null || !s.Preference.IsDeleted))
             .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -45,6 +50,8 @@ public class AiSessionsController : ControllerBase
                 status      = s.Status,
                 createdAt   = s.CreatedAt,
                 updatedAt   = s.UpdatedAt,
+                isMuted     = s.Preference != null && s.Preference.IsMuted,
+                lastReadMessageId = s.Preference != null ? s.Preference.LastReadMessageId : null,
                 title       = s.AiChatMessages
                     .Where(m => m.Role == "user")
                     .OrderBy(m => m.CreatedAt)
@@ -58,10 +65,38 @@ public class AiSessionsController : ControllerBase
             })
             .ToListAsync();
 
-        var totalCount = await _context.AiChatSessions
-            .CountAsync(s => s.UserId == userId.Value);
+        var sessionIds = sessions.Select(s => (Guid)s.sessionId).ToList();
+        var assistantMessages = await _context.AiChatMessages
+            .Where(m => sessionIds.Contains(m.SessionId) && m.Role == "assistant")
+            .Select(m => new { m.SessionId, m.Id })
+            .ToListAsync();
 
-        return Ok(new { success = true, sessions, totalCount, page, pageSize });
+        var sessionItems = sessions.Select(s =>
+        {
+            var sid = (Guid)s.sessionId;
+            var lastRead = (long?)s.lastReadMessageId;
+            var unreadCount = assistantMessages
+                .Where(m => m.SessionId == sid)
+                .Count(m => !lastRead.HasValue || m.Id > lastRead.Value);
+
+            return new
+            {
+                s.sessionId,
+                s.status,
+                s.createdAt,
+                s.updatedAt,
+                s.title,
+                s.lastMessage,
+                s.messageCount,
+                s.isMuted,
+                unreadCount,
+            };
+        }).ToList();
+
+        var totalCount = await _context.AiChatSessions
+            .CountAsync(s => s.UserId == userId.Value && (s.Preference == null || !s.Preference.IsDeleted));
+
+        return Ok(new { success = true, sessions = sessionItems, totalCount, page, pageSize });
     }
 
     /// <summary>
@@ -92,5 +127,108 @@ public class AiSessionsController : ControllerBase
             .ToListAsync();
 
         return Ok(new { success = true, sessionId, messages });
+    }
+
+    [HttpPost("{sessionId:guid}/read")]
+    public async Task<IActionResult> MarkSessionAsRead(Guid sessionId)
+    {
+        var userId = _userClaims.GetUserId();
+        if (userId == null) return Unauthorized();
+
+        var session = await _context.AiChatSessions
+            .Where(s => s.Id == sessionId && s.UserId == userId.Value)
+            .FirstOrDefaultAsync();
+
+        if (session == null) return NotFound(new { success = false, message = "Không tìm thấy phiên chat" });
+
+        var latestMessageId = await _context.AiChatMessages
+            .Where(m => m.SessionId == sessionId)
+            .MaxAsync(m => (long?)m.Id);
+
+        var pref = await _context.AiChatSessionPreferences
+            .FirstOrDefaultAsync(p => p.SessionId == sessionId);
+
+        if (pref == null)
+        {
+            pref = new Domain.Entities.AiChatSessionPreference
+            {
+                SessionId = sessionId,
+                IsMuted = false,
+                IsDeleted = false,
+            };
+            _context.AiChatSessionPreferences.Add(pref);
+        }
+
+        pref.LastReadMessageId = latestMessageId;
+        pref.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return Ok(new { success = true, sessionId, unreadCount = 0 });
+    }
+
+    [HttpPatch("{sessionId:guid}/mute")]
+    public async Task<IActionResult> ToggleMute(Guid sessionId, [FromBody] ToggleMuteRequest request)
+    {
+        var userId = _userClaims.GetUserId();
+        if (userId == null) return Unauthorized();
+
+        var session = await _context.AiChatSessions
+            .Where(s => s.Id == sessionId && s.UserId == userId.Value)
+            .FirstOrDefaultAsync();
+
+        if (session == null) return NotFound(new { success = false, message = "Không tìm thấy phiên chat" });
+
+        var pref = await _context.AiChatSessionPreferences
+            .FirstOrDefaultAsync(p => p.SessionId == sessionId);
+
+        if (pref == null)
+        {
+            pref = new Domain.Entities.AiChatSessionPreference
+            {
+                SessionId = sessionId,
+                LastReadMessageId = null,
+                IsDeleted = false,
+            };
+            _context.AiChatSessionPreferences.Add(pref);
+        }
+
+        pref.IsMuted = request.IsMuted;
+        pref.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return Ok(new { success = true, sessionId, isMuted = pref.IsMuted });
+    }
+
+    [HttpDelete("{sessionId:guid}")]
+    public async Task<IActionResult> DeleteSession(Guid sessionId)
+    {
+        var userId = _userClaims.GetUserId();
+        if (userId == null) return Unauthorized();
+
+        var session = await _context.AiChatSessions
+            .Where(s => s.Id == sessionId && s.UserId == userId.Value)
+            .FirstOrDefaultAsync();
+
+        if (session == null) return NotFound(new { success = false, message = "Không tìm thấy phiên chat" });
+
+        var pref = await _context.AiChatSessionPreferences
+            .FirstOrDefaultAsync(p => p.SessionId == sessionId);
+
+        if (pref == null)
+        {
+            pref = new Domain.Entities.AiChatSessionPreference
+            {
+                SessionId = sessionId,
+                IsMuted = false,
+                LastReadMessageId = null,
+            };
+            _context.AiChatSessionPreferences.Add(pref);
+        }
+
+        pref.IsDeleted = true;
+        pref.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return Ok(new { success = true, sessionId });
     }
 }

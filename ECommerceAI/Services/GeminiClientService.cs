@@ -125,6 +125,20 @@ public class GeminiClientService
     /// Gọi Gemini với ảnh (multimodal). Tải ảnh từ URL về, encode base64, gửi cùng text prompt.
     /// </summary>
     public async Task<string> GenerateWithImagesAsync(string systemPrompt, string userMessage, List<string> imageUrls)
+        => await GenerateWithImagesInternalAsync(systemPrompt, userMessage, imageUrls, forceJsonResponse: false, responseSchema: null);
+
+    /// <summary>
+    /// Gọi Gemini multimodal và yêu cầu trả về JSON chuẩn theo schema.
+    /// </summary>
+    public async Task<string> GenerateWithImagesJsonAsync(string systemPrompt, string userMessage, List<string> imageUrls, object responseSchema)
+        => await GenerateWithImagesInternalAsync(systemPrompt, userMessage, imageUrls, forceJsonResponse: true, responseSchema);
+
+    private async Task<string> GenerateWithImagesInternalAsync(
+        string systemPrompt,
+        string userMessage,
+        List<string> imageUrls,
+        bool forceJsonResponse,
+        object? responseSchema)
     {
         var parts = new List<object>();
 
@@ -151,11 +165,28 @@ public class GeminiClientService
         // Thêm text prompt sau ảnh
         parts.Add(new { text = userMessage });
 
-        var body = new
+        object body;
+        if (forceJsonResponse)
         {
-            system_instruction = new { parts = new[] { new { text = systemPrompt } } },
-            contents = new[] { new { role = "user", parts } }
-        };
+            body = new
+            {
+                system_instruction = new { parts = new[] { new { text = systemPrompt } } },
+                contents = new[] { new { role = "user", parts } },
+                generation_config = new
+                {
+                    response_mime_type = "application/json",
+                    response_schema = responseSchema
+                }
+            };
+        }
+        else
+        {
+            body = new
+            {
+                system_instruction = new { parts = new[] { new { text = systemPrompt } } },
+                contents = new[] { new { role = "user", parts } }
+            };
+        }
 
         return await CallApiAsync(body);
     }
@@ -163,6 +194,28 @@ public class GeminiClientService
     /// <summary>Tải ảnh từ URL và trả về (base64, mimeType).</summary>
     private async Task<(string Base64, string MimeType)> DownloadImageAsBase64Async(string url)
     {
+        if (url.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+        {
+            var commaIndex = url.IndexOf(',');
+            if (commaIndex <= 0) throw new InvalidOperationException("Data URL khong hop le");
+
+            var meta = url[..commaIndex];
+            var data = url[(commaIndex + 1)..];
+
+            var dataMime = "image/jpeg";
+            var mimeStart = "data:";
+            var mimeEnd = meta.IndexOf(';');
+            if (meta.StartsWith(mimeStart, StringComparison.OrdinalIgnoreCase) && mimeEnd > mimeStart.Length)
+            {
+                dataMime = meta.Substring(mimeStart.Length, mimeEnd - mimeStart.Length);
+            }
+
+            if (!meta.Contains(";base64", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Data URL phai o dang base64");
+
+            return (data, dataMime);
+        }
+
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var bytes = await _http.GetByteArrayAsync(url, cts.Token);
 

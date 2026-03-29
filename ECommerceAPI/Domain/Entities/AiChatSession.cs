@@ -19,6 +19,8 @@ public partial class AiChatSession
 
     public virtual ICollection<AiChatMessage> AiChatMessages { get; set; } = new List<AiChatMessage>();
 
+    public virtual AiChatSessionPreference? Preference { get; set; }
+
     public virtual ICollection<AiGeneratedCart> AiGeneratedCarts { get; set; } = new List<AiGeneratedCart>();
 
     public virtual ICollection<AiProductRecommendation> AiProductRecommendations { get; set; } = new List<AiProductRecommendation>();

@@ -77,9 +77,19 @@ public class AiSellerController : ControllerBase
         if (dto.ImageUrls.Count > 3)
             return BadRequest(new { message = "Tối đa 3 ảnh mỗi lần phân tích." });
 
-        var invalidUrls = dto.ImageUrls.Where(u => !Uri.TryCreate(u, UriKind.Absolute, out _)).ToList();
+        var invalidUrls = dto.ImageUrls
+            .Where(u =>
+                !u.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) &&
+                (!Uri.TryCreate(u, UriKind.Absolute, out var uri) ||
+                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+            .ToList();
+
         if (invalidUrls.Any())
-            return BadRequest(new { message = "Một số URL ảnh không hợp lệ.", invalidUrls });
+            return BadRequest(new
+            {
+                message = "Một số ảnh không hợp lệ. Chỉ hỗ trợ http/https hoặc data:image/...;base64",
+                invalidUrls
+            });
 
         var sellerId = GetUserId();
         var result = await _sellerService.AnalyzeImageAsync(dto, sellerId);
