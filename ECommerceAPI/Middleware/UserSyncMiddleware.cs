@@ -60,6 +60,14 @@ public class UserSyncMiddleware
                         newUser.Role = customerRole;
                         existingUser = newUser;
                     }
+                    else if (string.IsNullOrWhiteSpace(existingUser.FullName)
+                             && !string.IsNullOrWhiteSpace(userClaims.FullName))
+                    {
+                        // Đăng ký Supabase đã lưu họ tên trong JWT user_metadata; bản ghi cũ có thể tạo khi claim chưa đọc đúng
+                        existingUser.FullName = userClaims.FullName;
+                        await userRepository.UpdateAsync(existingUser);
+                        _logger.LogInformation("Backfilled FullName for user {UserId} from auth metadata", userClaims.UserId);
+                    }
                     
                     // Enrich claims with role from database
                     if (existingUser != null && context.User.Identity is System.Security.Claims.ClaimsIdentity identity)
