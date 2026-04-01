@@ -60,6 +60,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<ECommerceAPI.Domain.Entities.Payment> Payments { get; set; }
 
+    public virtual DbSet<PlatformFeeRecord> PlatformFeeRecords { get; set; }
+
     public virtual DbSet<Product> Products { get; set; }
 
     public virtual DbSet<ProductImage> ProductImages { get; set; }
@@ -981,6 +983,69 @@ public partial class ApplicationDbContext : DbContext
                 .HasForeignKey(d => d.TransactionId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("payments_transaction_id_fkey");
+        });
+
+        modelBuilder.Entity<PlatformFeeRecord>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("platform_fee_records_pkey");
+
+            entity.ToTable("platform_fee_records");
+
+            entity.HasIndex(e => e.CreatedAt, "idx_platform_fee_records_created_at");
+            entity.HasIndex(e => e.ShopId, "idx_platform_fee_records_shop_id");
+            entity.HasIndex(e => e.SellerId, "idx_platform_fee_records_seller_id");
+
+            entity.HasIndex(e => e.OrderId, "platform_fee_records_order_id_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.PaymentId).HasColumnName("payment_id");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.SellerId).HasColumnName("seller_id");
+            entity.Property(e => e.GrossSubtotal)
+                .HasPrecision(12, 2)
+                .HasColumnName("gross_subtotal");
+            entity.Property(e => e.CommissionPercent)
+                .HasPrecision(6, 2)
+                .HasColumnName("commission_percent");
+            entity.Property(e => e.FeeAmount)
+                .HasPrecision(12, 2)
+                .HasColumnName("fee_amount");
+            entity.Property(e => e.NetToSeller)
+                .HasPrecision(12, 2)
+                .HasColumnName("net_to_seller");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Order)
+                .WithMany()
+                .HasForeignKey(d => d.OrderId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("platform_fee_records_order_id_fkey");
+
+            entity.HasOne(d => d.Payment)
+                .WithMany()
+                .HasForeignKey(d => d.PaymentId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("platform_fee_records_payment_id_fkey");
+
+            entity.HasOne(d => d.Shop)
+                .WithMany()
+                .HasForeignKey(d => d.ShopId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("platform_fee_records_shop_id_fkey");
+
+            entity.HasOne(d => d.Seller)
+                .WithMany()
+                .HasForeignKey(d => d.SellerId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("platform_fee_records_seller_id_fkey");
         });
 
         modelBuilder.Entity<Product>(entity =>

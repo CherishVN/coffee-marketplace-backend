@@ -4,6 +4,7 @@ using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ECommerceAPI.Application.Services;
 
@@ -11,11 +12,16 @@ public class WithdrawAdminService : IWithdrawAdminService
 {
     private readonly ApplicationDbContext _context;
     private readonly INotificationService _notifications;
+    private readonly ILogger<WithdrawAdminService> _logger;
 
-    public WithdrawAdminService(ApplicationDbContext context, INotificationService notifications)
+    public WithdrawAdminService(
+        ApplicationDbContext context,
+        INotificationService notifications,
+        ILogger<WithdrawAdminService> logger)
     {
         _context = context;
         _notifications = notifications;
+        _logger = logger;
     }
 
     public async Task<WithdrawListResponseDto> GetAllRequestsAsync(int page, int pageSize, short? status)
@@ -101,9 +107,21 @@ public class WithdrawAdminService : IWithdrawAdminService
         request.AdminNote = dto.AdminNote;
         request.PaidAt = DateTime.UtcNow;
 
+        // Tiền đã chuyển từ Available → Pending lúc seller tạo yêu cầu; duyệt chỉ trừ Pending (đã chi).
         if (request.Wallet != null)
         {
-            request.Wallet.AvailableBalance -= request.Amount;
+            if (request.Wallet.PendingBalance < request.Amount)
+            {
+                _logger.LogWarning(
+                    "Withdraw approve: wallet {WalletId} pending {Pending} < amount {Amount}, clearing pending",
+                    request.Wallet.Id, request.Wallet.PendingBalance, request.Amount);
+                request.Wallet.PendingBalance = 0;
+            }
+            else
+            {
+                request.Wallet.PendingBalance -= request.Amount;
+            }
+
             request.Wallet.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -126,7 +144,7 @@ public class WithdrawAdminService : IWithdrawAdminService
             request.SellerId,
             nameof(NotificationType.Payment),
             "Rút tiền đã được duyệt",
-            $"Yêu cầu rút {request.Amount:N0} {request.Currency} đã được duyệt. Số dư ví khả dụng đã được cập nhật.",
+            $"Yêu cầu rút {request.Amount:N0} {request.Currency} đã được duyệt. Số tiền đang giữ (pending) đã được ghi nhận chi trả.",
             "WithdrawalRequest",
             request.Id,
             queueEmail: true);
@@ -157,6 +175,7 @@ public class WithdrawAdminService : IWithdrawAdminService
 
         var request = await _context.SellerWithdrawalRequests
             .Include(r => r.Seller)
+            .Include(r => r.Wallet)
             .FirstOrDefaultAsync(r => r.Id == requestId);
 
         if (request == null)
@@ -175,6 +194,15 @@ public class WithdrawAdminService : IWithdrawAdminService
                 Success = false,
                 Message = "Chỉ có thể từ chối yêu cầu đang chờ xử lý"
             };
+        }
+
+        if (request.Wallet != null)
+        {
+            request.Wallet.AvailableBalance += request.Amount;
+            request.Wallet.PendingBalance -= request.Amount;
+            if (request.Wallet.PendingBalance < 0)
+                request.Wallet.PendingBalance = 0;
+            request.Wallet.UpdatedAt = DateTime.UtcNow;
         }
 
         request.Status = 2;

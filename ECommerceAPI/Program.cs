@@ -45,6 +45,9 @@ namespace ECommerceAPI
             builder.Services.Configure<MoMoSettings>(
                 builder.Configuration.GetSection(MoMoSettings.SectionName));
 
+            builder.Services.Configure<PlatformFeeSettings>(
+                builder.Configuration.GetSection(PlatformFeeSettings.SectionName));
+
             builder.Services.AddScoped<IUserRepository, UserRepository>();
 
             builder.Services.AddHttpContextAccessor();
@@ -57,6 +60,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IProductModerationService, ProductModerationService>();
             builder.Services.AddScoped<IDisputeAdminService, DisputeAdminService>();
             builder.Services.AddScoped<IDashboardService, DashboardService>();
+            builder.Services.AddScoped<IPlatformFeeReportService, PlatformFeeReportService>();
             builder.Services.AddScoped<IOrderAdminService, OrderAdminService>();
             builder.Services.AddScoped<IUserProfileService, UserProfileService>();
             builder.Services.AddSingleton<IOtpService, OtpService>();
@@ -72,6 +76,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<ICategoryStorefrontService, CategoryStorefrontService>();
             builder.Services.AddScoped<IFavoriteService, FavoriteService>();
             builder.Services.AddScoped<ICartService, CartService>();
+            builder.Services.AddScoped<ISellerWalletSettlementService, SellerWalletSettlementService>();
             builder.Services.AddScoped<IPaymentService, PaymentService>();
             builder.Services.AddScoped<IConversationService, ConversationService>();
             builder.Services.AddScoped<IMaterialAdminService, MaterialAdminService>();

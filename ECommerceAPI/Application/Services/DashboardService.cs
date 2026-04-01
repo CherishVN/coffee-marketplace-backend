@@ -118,6 +118,20 @@ public class DashboardService : IDashboardService
                 ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
                 : 0m;
 
+            // 5b) Platform fee (phí sàn) — từ bảng platform_fee_records
+            var platformFeeStats = await _context.PlatformFeeRecords
+                .AsNoTracking()
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Sum(x => x.FeeAmount),
+                    Today = g.Where(x => x.CreatedAt >= startOfToday).Sum(x => x.FeeAmount),
+                    ThisMonth = g.Where(x => x.CreatedAt >= startOfMonth).Sum(x => x.FeeAmount),
+                    LastMonth = g.Where(x => x.CreatedAt >= lastMonthStart && x.CreatedAt < startOfMonth).Sum(x => x.FeeAmount),
+                    Count = g.Count()
+                })
+                .FirstOrDefaultAsync();
+
             // 6) Dispute Stats — single query
             var disputeStats = await _context.Disputes
                 .GroupBy(_ => 1)
@@ -184,6 +198,14 @@ public class DashboardService : IDashboardService
                     UnderReview = disputeStats?.UnderReview ?? 0,
                     Resolved = disputeStats?.Resolved ?? 0,
                     Refunded = disputeStats?.Refunded ?? 0
+                },
+                PlatformFees = new PlatformFeeStats
+                {
+                    TotalFees = platformFeeStats?.Total ?? 0m,
+                    TodayFees = platformFeeStats?.Today ?? 0m,
+                    ThisMonthFees = platformFeeStats?.ThisMonth ?? 0m,
+                    LastMonthFees = platformFeeStats?.LastMonth ?? 0m,
+                    SettledOrdersCount = platformFeeStats?.Count ?? 0
                 }
             };
 

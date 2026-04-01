@@ -23,6 +23,7 @@ public class PaymentService : IPaymentService
     private readonly MoMoSettings _moMoSettings;
     private readonly ILogger<PaymentService> _logger;
     private readonly INotificationService _notifications;
+    private readonly ISellerWalletSettlementService _sellerWalletSettlement;
     private readonly IMemoryCache _memoryCache;
     private readonly HttpClient _httpClient;
 
@@ -32,6 +33,7 @@ public class PaymentService : IPaymentService
         IOptions<MoMoSettings> moMoSettings,
         ILogger<PaymentService> logger,
         INotificationService notifications,
+        ISellerWalletSettlementService sellerWalletSettlement,
         IMemoryCache memoryCache,
         IHttpClientFactory httpClientFactory)
     {
@@ -40,6 +42,7 @@ public class PaymentService : IPaymentService
         _moMoSettings = moMoSettings.Value;
         _logger = logger;
         _notifications = notifications;
+        _sellerWalletSettlement = sellerWalletSettlement;
         _memoryCache = memoryCache;
         _httpClient = httpClientFactory.CreateClient();
     }
@@ -208,6 +211,8 @@ public class PaymentService : IPaymentService
                 }
             }
 
+            var settlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
+
             await _context.SaveChangesAsync();
 
             var oid = NotificationFormatting.ShortEntityId(order.Id);
@@ -219,6 +224,18 @@ public class PaymentService : IPaymentService
                 "Order",
                 order.Id,
                 queueEmail: true);
+
+            if (settlement is { NetAmount: > 0 })
+            {
+                await _notifications.PublishAsync(
+                    settlement.SellerId,
+                    nameof(NotificationType.Payment),
+                    "Nhận tiền từ đơn hàng",
+                    $"Đơn #{oid}: +{settlement.NetAmount:N0} VND vào ví khả dụng (tiền hàng {settlement.GrossSubtotal:N0} VND, phí sàn {settlement.CommissionPercent}%: {settlement.PlatformFeeAmount:N0} VND).",
+                    "Order",
+                    order.Id,
+                    queueEmail: true);
+            }
 
             _logger.LogInformation("[VNPay Return] Payment SUCCESS for OrderId: {OrderId}", order.Id);
 
@@ -438,6 +455,8 @@ public class PaymentService : IPaymentService
                 }
             }
 
+            var momoSettlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
+
             await _context.SaveChangesAsync();
 
             var momoOk = NotificationFormatting.ShortEntityId(order.Id);
@@ -449,6 +468,18 @@ public class PaymentService : IPaymentService
                 "Order",
                 order.Id,
                 queueEmail: true);
+
+            if (momoSettlement is { NetAmount: > 0 })
+            {
+                await _notifications.PublishAsync(
+                    momoSettlement.SellerId,
+                    nameof(NotificationType.Payment),
+                    "Nhận tiền từ đơn hàng",
+                    $"Đơn #{momoOk}: +{momoSettlement.NetAmount:N0} VND vào ví khả dụng (tiền hàng {momoSettlement.GrossSubtotal:N0} VND, phí sàn {momoSettlement.CommissionPercent}%: {momoSettlement.PlatformFeeAmount:N0} VND).",
+                    "Order",
+                    order.Id,
+                    queueEmail: true);
+            }
 
             _logger.LogInformation("[MoMo IPN] Payment SUCCESS for OrderId: {OrderId}", order.Id);
 

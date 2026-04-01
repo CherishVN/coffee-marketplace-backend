@@ -8,6 +8,8 @@ public class DashboardStatsDto
     public OrderStats Orders { get; set; } = new();
     public RevenueStats Revenue { get; set; } = new();
     public DisputeStats Disputes { get; set; } = new();
+    /// <summary>Phí sàn tích lũy từ các đơn đã quyết toán ví.</summary>
+    public PlatformFeeStats PlatformFees { get; set; } = new();
 }
 
 public class UserStats
@@ -66,6 +68,17 @@ public class DisputeStats
     public int UnderReview { get; set; }
     public int Resolved { get; set; }
     public int Refunded { get; set; }
+}
+
+public class PlatformFeeStats
+{
+    /// <summary>Tổng phí sàn (VND) mọi thời điểm.</summary>
+    public decimal TotalFees { get; set; }
+    public decimal TodayFees { get; set; }
+    public decimal ThisMonthFees { get; set; }
+    public decimal LastMonthFees { get; set; }
+    /// <summary>Số đơn đã có bản ghi quyết toán (có phí / net).</summary>
+    public int SettledOrdersCount { get; set; }
 }
 
 public class DashboardResponseDto
