@@ -18,15 +18,18 @@ public class SellerService : ISellerService
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
+    private readonly ISellerWalletReversalService _walletReversal;
 
     public SellerService(
         ApplicationDbContext context,
         IHubContext<OrderTrackingHub> hubContext,
-        INotificationService notifications)
+        INotificationService notifications,
+        ISellerWalletReversalService walletReversal)
     {
         _context = context;
         _hubContext = hubContext;
         _notifications = notifications;
+        _walletReversal = walletReversal;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -117,7 +120,12 @@ public class SellerService : ISellerService
             .ToListAsync();
 
         var totalEarnings = ledgers.Where(l => l.Amount > 0).Sum(l => l.Amount);
-        var totalWithdrawn = ledgers.Where(l => l.Amount < 0).Sum(l => Math.Abs(l.Amount));
+        var totalWithdrawn = ledgers
+            .Where(l => l.Amount < 0 && l.ReferenceType == WalletLedgerReferenceTypes.Withdrawal)
+            .Sum(l => Math.Abs(l.Amount));
+        var totalRefunded = ledgers
+            .Where(l => l.Amount < 0 && l.ReferenceType == WalletLedgerReferenceTypes.OrderRefund)
+            .Sum(l => Math.Abs(l.Amount));
 
         return new ServiceResponse<WalletDto>
         {
@@ -129,6 +137,7 @@ public class SellerService : ISellerService
                 PendingBalance = wallet.PendingBalance,
                 TotalEarnings = totalEarnings,
                 TotalWithdrawn = totalWithdrawn,
+                TotalRefunded = totalRefunded,
                 UpdatedAt = wallet.UpdatedAt
             }
         };
@@ -871,6 +880,13 @@ public class SellerService : ISellerService
         if (nowFulfilled && !alreadyFulfilled)
         {
             await IncrementSoldCountAsync(order.OrderItems);
+        }
+
+        if (newOrderStatus is OrderStatus.Cancelled or OrderStatus.Refunded)
+        {
+            await _walletReversal.TryReverseSettlementForOrderAsync(
+                order.Id,
+                $"Seller đổi trạng thái → {newOrderStatus}");
         }
 
         await _context.SaveChangesAsync();

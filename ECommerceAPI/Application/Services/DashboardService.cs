@@ -121,6 +121,7 @@ public class DashboardService : IDashboardService
             // 5b) Platform fee (phí sàn) — từ bảng platform_fee_records
             var platformFeeStats = await _context.PlatformFeeRecords
                 .AsNoTracking()
+                .Where(r => r.ReversedAt == null)
                 .GroupBy(_ => 1)
                 .Select(g => new
                 {

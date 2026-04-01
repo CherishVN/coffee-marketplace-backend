@@ -1022,6 +1022,7 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
+            entity.Property(e => e.ReversedAt).HasColumnName("reversed_at");
 
             entity.HasOne(d => d.Order)
                 .WithMany()

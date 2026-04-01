@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -123,6 +124,20 @@ public class WithdrawAdminService : IWithdrawAdminService
             }
 
             request.Wallet.UpdatedAt = DateTime.UtcNow;
+
+            var withdrawLedger = new SellerWalletLedger
+            {
+                Id = Guid.NewGuid(),
+                WalletId = request.Wallet.Id,
+                Type = "debit",
+                Amount = -request.Amount,
+                Currency = request.Wallet.Currency,
+                ReferenceType = WalletLedgerReferenceTypes.Withdrawal,
+                ReferenceId = request.Id,
+                Note = $"Rút tiền đã duyệt (yêu cầu {request.Id})",
+                CreatedAt = DateTime.UtcNow
+            };
+            await _context.SellerWalletLedgers.AddAsync(withdrawLedger);
         }
 
         var auditLog = new UserAuditLog

@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -10,8 +11,6 @@ namespace ECommerceAPI.Application.Services;
 
 public class SellerWalletSettlementService : ISellerWalletSettlementService
 {
-    public const string LedgerReferenceType = "order_settlement";
-
     private readonly ApplicationDbContext _context;
     private readonly PlatformFeeSettings _feeSettings;
     private readonly ILogger<SellerWalletSettlementService> _logger;
@@ -38,7 +37,7 @@ public class SellerWalletSettlementService : ISellerWalletSettlementService
 
         var alreadyCredited = await _context.SellerWalletLedgers
             .AnyAsync(
-                l => l.ReferenceType == LedgerReferenceType && l.ReferenceId == order.Id,
+                l => l.ReferenceType == WalletLedgerReferenceTypes.OrderSettlement && l.ReferenceId == order.Id,
                 cancellationToken);
 
         if (alreadyCredited)
@@ -97,7 +96,7 @@ public class SellerWalletSettlementService : ISellerWalletSettlementService
             Type = "credit",
             Amount = net,
             Currency = wallet.Currency,
-            ReferenceType = LedgerReferenceType,
+            ReferenceType = WalletLedgerReferenceTypes.OrderSettlement,
             ReferenceId = order.Id,
             Note = note,
             CreatedAt = DateTime.UtcNow

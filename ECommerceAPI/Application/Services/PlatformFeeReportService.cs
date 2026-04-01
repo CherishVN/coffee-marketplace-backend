@@ -17,7 +17,7 @@ public class PlatformFeeReportService : IPlatformFeeReportService
 
     public async Task<PlatformFeeSummaryDto> GetSummaryAsync(DateTime? fromUtc, DateTime? toUtc)
     {
-        var q = _context.PlatformFeeRecords.AsNoTracking().AsQueryable();
+        var q = ActiveFeeRecords(_context.PlatformFeeRecords.AsNoTracking());
         q = ApplyRange(q, fromUtc, toUtc);
 
         var agg = await q
@@ -52,11 +52,11 @@ public class PlatformFeeReportService : IPlatformFeeReportService
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
 
-        var q = _context.PlatformFeeRecords
-            .AsNoTracking()
-            .Include(r => r.Shop)
-            .Include(r => r.Seller)
-            .AsQueryable();
+        var q = ActiveFeeRecords(
+            _context.PlatformFeeRecords
+                .AsNoTracking()
+                .Include(r => r.Shop)
+                .Include(r => r.Seller));
 
         q = ApplyRange(q, fromUtc, toUtc);
 
@@ -68,7 +68,8 @@ public class PlatformFeeReportService : IPlatformFeeReportService
         var summary = await GetSummaryAsync(fromUtc, toUtc);
         if (shopId.HasValue)
         {
-            var shopQ = _context.PlatformFeeRecords.AsNoTracking().Where(r => r.ShopId == shopId.Value);
+            var shopQ = ActiveFeeRecords(_context.PlatformFeeRecords.AsNoTracking())
+                .Where(r => r.ShopId == shopId.Value);
             shopQ = ApplyRange(shopQ, fromUtc, toUtc);
             var shopAgg = await shopQ
                 .GroupBy(_ => 1)
@@ -123,6 +124,9 @@ public class PlatformFeeReportService : IPlatformFeeReportService
             Summary = summary
         };
     }
+
+    private static IQueryable<PlatformFeeRecord> ActiveFeeRecords(IQueryable<PlatformFeeRecord> q) =>
+        q.Where(r => r.ReversedAt == null);
 
     private static IQueryable<PlatformFeeRecord> ApplyRange(
         IQueryable<PlatformFeeRecord> q,

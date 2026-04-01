@@ -15,17 +15,20 @@ public class OrderAdminService : IOrderAdminService
     private readonly ILogger<OrderAdminService> _logger;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
+    private readonly ISellerWalletReversalService _walletReversal;
 
     public OrderAdminService(
         ApplicationDbContext context,
         ILogger<OrderAdminService> logger,
         IHubContext<OrderTrackingHub> hubContext,
-        INotificationService notifications)
+        INotificationService notifications,
+        ISellerWalletReversalService walletReversal)
     {
         _context = context;
         _logger = logger;
         _hubContext = hubContext;
         _notifications = notifications;
+        _walletReversal = walletReversal;
     }
 
     public async Task<AdminOrderListResponseDto> GetAllOrdersAsync(
@@ -228,6 +231,15 @@ public class OrderAdminService : IOrderAdminService
                         .Where(p => p.Id == item.ProductId)
                         .ExecuteUpdateAsync(s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity));
                 }
+            }
+
+            if (newOrderStatus is OrderStatus.Cancelled or OrderStatus.Refunded)
+            {
+                await _walletReversal.TryReverseSettlementForOrderAsync(
+                    order.Id,
+                    string.IsNullOrWhiteSpace(dto.Reason)
+                        ? $"Admin → {newOrderStatus}"
+                        : dto.Reason);
             }
 
             await _context.SaveChangesAsync();

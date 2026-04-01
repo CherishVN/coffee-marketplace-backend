@@ -33,7 +33,10 @@ public class WalletDto
     public decimal AvailableBalance { get; set; }
     public decimal PendingBalance { get; set; }
     public decimal TotalEarnings { get; set; }
+    /// <summary>Tổng đã rút (ledger withdrawal, sau khi admin duyệt).</summary>
     public decimal TotalWithdrawn { get; set; }
+    /// <summary>Tổng đã hoàn tác do hủy/hoàn đơn (ledger order_refund).</summary>
+    public decimal TotalRefunded { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
 

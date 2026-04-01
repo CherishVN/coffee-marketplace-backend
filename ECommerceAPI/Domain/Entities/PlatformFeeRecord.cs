@@ -27,6 +27,9 @@ public partial class PlatformFeeRecord
 
     public DateTime CreatedAt { get; set; }
 
+    /// <summary>Khi hoàn tác quyết toán (hủy/hoàn đơn), báo cáo phí sàn bỏ qua bản ghi đã reversed.</summary>
+    public DateTime? ReversedAt { get; set; }
+
     public virtual Order Order { get; set; } = null!;
 
     public virtual Shop Shop { get; set; } = null!;
