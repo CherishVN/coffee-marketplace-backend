@@ -20,6 +20,9 @@ public interface ISellerService
     Task<ServiceResponse<ProductDto>> CreateProductAsync(Guid userId, CreateProductDto dto);
     Task<ServiceResponse> UpdateProductAsync(Guid userId, Guid productId, UpdateProductDto dto);
     Task<ServiceResponse> DeleteProductAsync(Guid userId, Guid productId);
+
+    /// <summary>Thêm biến thể sau khi đã tạo sản phẩm (kèm dòng tồn kho).</summary>
+    Task<ServiceResponse<ProductVariantDetailDto>> AddProductVariantAsync(Guid userId, Guid productId, ProductVariantDto dto);
     
     // Inventory Management
     Task<ServiceResponse> UpdateInventoryAsync(Guid userId, Guid productId, UpdateInventoryDto dto);

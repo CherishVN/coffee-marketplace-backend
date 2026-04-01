@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ECommerceAPI.Application.Services;
@@ -433,10 +434,7 @@ public class SellerService : ISellerService
             };
         }
 
-        var seqValue = await _context.Database
-            .SqlQueryRaw<long>("SELECT nextval('products_code_seq') AS \"Value\"")
-            .FirstAsync();
-        var productCode = $"PRD{seqValue:D5}";
+        var productCode = await GenerateUniqueProductCodeAsync();
         var slug = await GenerateUniqueProductSlugAsync(dto.Name);
 
         var product = new Product
@@ -489,7 +487,7 @@ public class SellerService : ISellerService
                     Price = variantDto.Price,
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow,
-                    Attributes = variantDto.Attributes
+                    Attributes = NormalizeVariantAttributesForJsonb(variantDto.Attributes)
                 };
                 _context.ProductVariants.Add(variant);
 
@@ -668,6 +666,94 @@ public class SellerService : ISellerService
         {
             Success = true,
             Message = "Ẩn sản phẩm thành công"
+        };
+    }
+
+    public async Task<ServiceResponse<ProductVariantDetailDto>> AddProductVariantAsync(Guid userId, Guid productId, ProductVariantDto dto)
+    {
+        var shop = await _context.Shops
+            .FirstOrDefaultAsync(s => s.OwnerId == userId);
+
+        if (shop == null)
+        {
+            return new ServiceResponse<ProductVariantDetailDto>
+            {
+                Success = false,
+                Message = "Bạn chưa có shop"
+            };
+        }
+
+        if (shop.Status != 1 || shop.VerificationStatus != 1)
+        {
+            return new ServiceResponse<ProductVariantDetailDto>
+            {
+                Success = false,
+                Message = "Shop của bạn chưa được kích hoạt hoặc chưa được xác minh"
+            };
+        }
+
+        var product = await _context.Products
+            .FirstOrDefaultAsync(p => p.Id == productId && p.ShopId == shop.Id);
+
+        if (product == null)
+        {
+            return new ServiceResponse<ProductVariantDetailDto>
+            {
+                Success = false,
+                Message = "Không tìm thấy sản phẩm"
+            };
+        }
+
+        var hadNoVariants = !await _context.ProductVariants.AnyAsync(v => v.ProductId == productId);
+        if (hadNoVariants)
+        {
+            var baseInventories = await _context.Inventories
+                .Where(i => i.ProductId == productId && i.VariantId == null)
+                .ToListAsync();
+            _context.Inventories.RemoveRange(baseInventories);
+        }
+
+        var variant = new ProductVariant
+        {
+            Id = Guid.NewGuid(),
+            ProductId = product.Id,
+            VariantName = dto.VariantName.Trim(),
+            Sku = string.IsNullOrWhiteSpace(dto.Sku) ? null : dto.Sku.Trim(),
+            Price = dto.Price,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            Attributes = NormalizeVariantAttributesForJsonb(dto.Attributes)
+        };
+        _context.ProductVariants.Add(variant);
+
+        _context.Inventories.Add(new Inventory
+        {
+            Id = Guid.NewGuid(),
+            ProductId = product.Id,
+            VariantId = variant.Id,
+            Quantity = dto.Quantity,
+            ReservedQuantity = 0,
+            UpdatedAt = DateTime.UtcNow
+        });
+
+        product.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return new ServiceResponse<ProductVariantDetailDto>
+        {
+            Success = true,
+            Message = "Đã thêm biến thể",
+            Data = new ProductVariantDetailDto
+            {
+                Id = variant.Id,
+                VariantName = variant.VariantName,
+                Sku = variant.Sku,
+                Price = variant.Price,
+                IsActive = variant.IsActive,
+                Stock = dto.Quantity,
+                Attributes = variant.Attributes
+            }
         };
     }
 
@@ -943,6 +1029,68 @@ public class SellerService : ISellerService
             newStatusName = newStatus.ToString(),
             updatedAt = order.UpdatedAt
         });
+    }
+
+    /// <summary>
+    /// Cột <c>product_variants.attributes</c> là jsonb. Văn bản tự do (vd. &quot;Màu đỏ&quot;) không phải JSON — bọc thành chuỗi JSON hợp lệ.
+    /// </summary>
+    private static string? NormalizeVariantAttributesForJsonb(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var t = raw.Trim();
+        try
+        {
+            using (JsonDocument.Parse(t))
+                return t;
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(t);
+        }
+    }
+
+    /// <summary>
+    /// Sinh mã PRD##### duy nhất. Sequence PostgreSQL có thể lệch so với dữ liệu (import / seed),
+    /// nên luôn đối chiếu MAX trên bảng và đồng bộ lại sequence sau khi chọn mã.
+    /// </summary>
+    private async Task<string> GenerateUniqueProductCodeAsync(CancellationToken cancellationToken = default)
+    {
+        // Không dùng regex dạng {5} trong chuỗi — EF SqlQueryRaw gọi string.Format và coi {n} là placeholder.
+        const string sqlMaxNumeric = """
+            SELECT COALESCE(MAX(CAST(SUBSTRING(p.product_code FROM 4) AS BIGINT)), 0) AS "Value"
+            FROM products AS p
+            WHERE length(p.product_code) = 8
+              AND p.product_code LIKE 'PRD%'
+              AND translate(substring(p.product_code FROM 4), '0123456789', '') = ''
+            """;
+
+        var maxNumeric = await _context.Database
+            .SqlQueryRaw<long>(sqlMaxNumeric)
+            .FirstAsync(cancellationToken);
+
+        var seqVal = await _context.Database
+            .SqlQueryRaw<long>("SELECT nextval('products_code_seq') AS \"Value\"")
+            .FirstAsync(cancellationToken);
+
+        var candidate = Math.Max(maxNumeric + 1, seqVal);
+
+        for (var attempt = 0; attempt < 500; attempt++)
+        {
+            var code = $"PRD{candidate:D5}";
+            if (!await _context.Products.AnyAsync(p => p.ProductCode == code, cancellationToken))
+            {
+                await _context.Database.ExecuteSqlInterpolatedAsync(
+                    $"""SELECT setval('products_code_seq', {candidate}, true)""",
+                    cancellationToken);
+                return code;
+            }
+
+            candidate++;
+        }
+
+        throw new InvalidOperationException("Không thể sinh mã sản phẩm PRD duy nhất.");
     }
 
     private async Task<string> GenerateUniqueProductSlugAsync(string productName, Guid? excludeProductId = null)
