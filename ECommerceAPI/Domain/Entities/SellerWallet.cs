@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -10,6 +10,9 @@ public partial class SellerWallet
     public Guid SellerId { get; set; }
 
     public decimal AvailableBalance { get; set; }
+
+    /// <summary>Tiền tạm giữ sau thanh toán; chuyển sang Available khi đơn Completed.</summary>
+    public decimal HeldBalance { get; set; }
 
     public decimal PendingBalance { get; set; }
 

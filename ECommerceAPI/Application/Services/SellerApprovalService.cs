@@ -122,6 +122,7 @@ public class SellerApprovalService : ISellerApprovalService
                     Id = Guid.NewGuid(),
                     SellerId = shop.OwnerId,
                     AvailableBalance = 0,
+                    HeldBalance = 0,
                     PendingBalance = 0,
                     Currency = "VND",
                     CreatedAt = DateTime.UtcNow,

@@ -70,6 +70,7 @@ public class SellerWalletSettlementService : ISellerWalletSettlementService
                 Id = Guid.NewGuid(),
                 SellerId = shop.OwnerId,
                 AvailableBalance = 0,
+                HeldBalance = 0,
                 PendingBalance = 0,
                 Currency = "VND",
                 CreatedAt = DateTime.UtcNow,
@@ -81,13 +82,13 @@ public class SellerWalletSettlementService : ISellerWalletSettlementService
 
         if (net > 0)
         {
-            wallet.AvailableBalance += net;
+            wallet.HeldBalance += net;
             wallet.UpdatedAt = DateTime.UtcNow;
         }
 
         var note = pct > 0
-            ? $"Đơn hàng (payment {payment.Id}). Subtotal {gross:N0} VND, phí sàn {pct}% = {fee:N0} VND, nhận {net:N0} VND."
-            : $"Thanh toán đơn hàng (payment {payment.Id}). Subtotal {gross:N0} VND (không phí sàn).";
+            ? $"Tạm giữ sau thanh toán (payment {payment.Id}). Subtotal {gross:N0} VND, phí sàn {pct}% = {fee:N0} VND, net {net:N0} VND — giải ngân khi đơn hoàn thành."
+            : $"Tạm giữ sau thanh toán (payment {payment.Id}). Subtotal {gross:N0} VND (không phí sàn) — giải ngân khi đơn hoàn thành.";
 
         var ledger = new SellerWalletLedger
         {

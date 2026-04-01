@@ -1269,6 +1269,10 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.AvailableBalance)
                 .HasPrecision(12, 2)
                 .HasColumnName("available_balance");
+            entity.Property(e => e.HeldBalance)
+                .HasPrecision(12, 2)
+                .HasDefaultValue(0m)
+                .HasColumnName("held_balance");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");

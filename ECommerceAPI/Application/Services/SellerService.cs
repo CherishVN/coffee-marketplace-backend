@@ -19,17 +19,20 @@ public class SellerService : ISellerService
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
     private readonly ISellerWalletReversalService _walletReversal;
+    private readonly ISellerWalletReleaseService _walletRelease;
 
     public SellerService(
         ApplicationDbContext context,
         IHubContext<OrderTrackingHub> hubContext,
         INotificationService notifications,
-        ISellerWalletReversalService walletReversal)
+        ISellerWalletReversalService walletReversal,
+        ISellerWalletReleaseService walletRelease)
     {
         _context = context;
         _hubContext = hubContext;
         _notifications = notifications;
         _walletReversal = walletReversal;
+        _walletRelease = walletRelease;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -134,6 +137,7 @@ public class SellerService : ISellerService
             {
                 Id = wallet.Id,
                 AvailableBalance = wallet.AvailableBalance,
+                HeldBalance = wallet.HeldBalance,
                 PendingBalance = wallet.PendingBalance,
                 TotalEarnings = totalEarnings,
                 TotalWithdrawn = totalWithdrawn,
@@ -880,6 +884,11 @@ public class SellerService : ISellerService
         if (nowFulfilled && !alreadyFulfilled)
         {
             await IncrementSoldCountAsync(order.OrderItems);
+        }
+
+        if (newOrderStatus == OrderStatus.Completed)
+        {
+            await _walletRelease.TryReleaseSettlementForOrderAsync(order.Id);
         }
 
         if (newOrderStatus is OrderStatus.Cancelled or OrderStatus.Refunded)

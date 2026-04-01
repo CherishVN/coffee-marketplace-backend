@@ -15,15 +15,18 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
+    private readonly ISellerWalletReleaseService _walletRelease;
 
     public CustomerOrderService(
         ApplicationDbContext context,
         IHubContext<OrderTrackingHub> hubContext,
-        INotificationService notifications)
+        INotificationService notifications,
+        ISellerWalletReleaseService walletRelease)
     {
         _context = context;
         _hubContext = hubContext;
         _notifications = notifications;
+        _walletRelease = walletRelease;
     }
 
     public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
@@ -187,6 +190,8 @@ public class CustomerOrderService : ICustomerOrderService
                 .Where(p => p.Id == item.ProductId)
                 .ExecuteUpdateAsync(s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity));
         }
+
+        await _walletRelease.TryReleaseSettlementForOrderAsync(order.Id);
 
         await _context.SaveChangesAsync();
 

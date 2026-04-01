@@ -51,7 +51,32 @@ public class SellerWalletReversalService : ISellerWalletReversalService
 
         if (netToRecover > 0)
         {
-            wallet.AvailableBalance -= netToRecover;
+            var released = await _context.SellerWalletLedgers
+                .AnyAsync(
+                    l => l.ReferenceType == WalletLedgerReferenceTypes.OrderRelease && l.ReferenceId == orderId,
+                    cancellationToken);
+
+            if (released)
+            {
+                wallet.AvailableBalance -= netToRecover;
+            }
+            else if (wallet.HeldBalance >= netToRecover)
+            {
+                wallet.HeldBalance -= netToRecover;
+            }
+            else
+            {
+                var fromHeld = wallet.HeldBalance;
+                wallet.HeldBalance = 0;
+                wallet.AvailableBalance -= netToRecover - fromHeld;
+                if (fromHeld > 0)
+                {
+                    _logger.LogWarning(
+                        "Reversal order {OrderId}: trừ held {FromHeld} và available {FromAvail} (legacy / held thiếu)",
+                        orderId, fromHeld, netToRecover - fromHeld);
+                }
+            }
+
             wallet.UpdatedAt = DateTime.UtcNow;
         }
 
