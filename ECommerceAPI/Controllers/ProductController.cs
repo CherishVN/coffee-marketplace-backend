@@ -33,12 +33,13 @@ public class ProductController : ControllerBase
         [FromQuery] string? search = null,
         [FromQuery] decimal? minPrice = null,
         [FromQuery] decimal? maxPrice = null,
+        [FromQuery] double? minRating = null,
         [FromQuery] string? sortBy = null,
         [FromQuery] List<long>? tagIds = null,
         [FromQuery] List<Guid>? materialIds = null)
     {
         var result = await _productStorefrontService.GetProductsAsync(
-            page, pageSize, categoryId, search, minPrice, maxPrice, sortBy, tagIds, materialIds);
+            page, pageSize, categoryId, search, minPrice, maxPrice, minRating, sortBy, tagIds, materialIds);
         return Ok(result);
     }
 

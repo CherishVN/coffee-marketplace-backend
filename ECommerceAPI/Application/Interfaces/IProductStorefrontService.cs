@@ -11,6 +11,7 @@ public interface IProductStorefrontService
         string? search = null,
         decimal? minPrice = null,
         decimal? maxPrice = null,
+        double? minRating = null,
         string? sortBy = null,
         List<long>? tagIds = null,
         List<Guid>? materialIds = null);

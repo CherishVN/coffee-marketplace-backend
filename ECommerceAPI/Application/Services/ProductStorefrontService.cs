@@ -26,6 +26,7 @@ public class ProductStorefrontService : IProductStorefrontService
         string? search = null,
         decimal? minPrice = null,
         decimal? maxPrice = null,
+        double? minRating = null,
         string? sortBy = null,
         List<long>? tagIds = null,
         List<Guid>? materialIds = null)
@@ -58,6 +59,9 @@ public class ProductStorefrontService : IProductStorefrontService
             if (maxPrice.HasValue)
                 query = query.Where(p => p.BasePrice <= maxPrice.Value);
 
+            if (minRating.HasValue)
+                query = query.Where(p => p.ProductReviews.Any() && p.ProductReviews.Average(r => (double)r.Rating) >= minRating.Value);
+
             if (tagIds != null && tagIds.Count > 0)
                 query = query.Where(p => p.ProductTags.Any(pt => tagIds.Contains(pt.TagId)));
 
@@ -68,6 +72,7 @@ public class ProductStorefrontService : IProductStorefrontService
             {
                 "price_asc"   => query.OrderBy(p => p.BasePrice).ThenBy(p => p.Id),
                 "price_desc"  => query.OrderByDescending(p => p.BasePrice).ThenBy(p => p.Id),
+                "rating"      => query.OrderByDescending(p => p.ProductReviews.Any() ? p.ProductReviews.Average(r => (double)r.Rating) : 0).ThenBy(p => p.Id),
                 "newest"      => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
                 "best_seller" => query.OrderByDescending(p => p.SoldCount).ThenBy(p => p.Id),
                 _             => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
