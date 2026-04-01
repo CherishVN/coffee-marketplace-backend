@@ -48,8 +48,12 @@ public class ProductStorefrontService : IProductStorefrontService
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-                var searchLower = search.ToLower();
-                query = query.Where(p => p.Name.ToLower().Contains(searchLower)
+                var searchTerm = search.Trim();
+                var searchLower = searchTerm.ToLower();
+
+                query = query.Where(p =>
+                    (p.SearchVector != null && p.SearchVector.Matches(EF.Functions.WebSearchToTsQuery("simple", searchTerm)))
+                    || p.Name.ToLower().Contains(searchLower)
                     || (p.Description != null && p.Description.ToLower().Contains(searchLower)));
             }
 
