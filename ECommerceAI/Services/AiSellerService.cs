@@ -16,9 +16,10 @@ public class AiSellerService : IAiSellerService
     private const int MaxPromptTags = 200;
     private const int MaxPromptMaterials = 150;
 
+    /// <summary>Parse JSON từ Gemini: model trả camelCase (categoryId, tagName, …). SnakeCaseLower sẽ không map → toàn 0/rỗng.</summary>
     private static readonly JsonSerializerOptions _jsonReadOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
         Converters = { new SafeNullableGuidConverter() }
@@ -180,6 +181,8 @@ public class AiSellerService : IAiSellerService
             Materials có trong hệ thống: {materialList}
             
             Trả về JSON theo format: {matJsonExample}
+            
+            BẮT BUỘC: với mỗi gợi ý, materialId phải là đúng GUID trong danh sách (phần sau "ID:"), trùng với materialName — không được bỏ trống hoặc tự bịa UUID.
             """;
 
         try
