@@ -40,7 +40,10 @@ public class ProductStorefrontService : IProductStorefrontService
                 .AsQueryable();
 
             if (categoryId.HasValue)
-                query = query.Where(p => p.CategoryId == categoryId.Value);
+            {
+                var allowedCategoryIds = await GetDescendantCategoryIdsAsync(categoryId.Value);
+                query = query.Where(p => p.CategoryId.HasValue && allowedCategoryIds.Contains(p.CategoryId.Value));
+            }
 
             if (!string.IsNullOrWhiteSpace(search))
             {
@@ -326,5 +329,44 @@ public class ProductStorefrontService : IProductStorefrontService
                 Message = "Có lỗi xảy ra khi lấy thông tin sản phẩm"
             };
         }
+    }
+
+    private async Task<HashSet<long>> GetDescendantCategoryIdsAsync(long rootCategoryId)
+    {
+        var categories = await _context.Categories
+            .AsNoTracking()
+            .Where(c => c.IsActive)
+            .Select(c => new { c.Id, c.ParentId })
+            .ToListAsync();
+
+        var childrenByParent = categories
+            .Where(c => c.ParentId.HasValue)
+            .GroupBy(c => c.ParentId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Id).ToList());
+
+        var result = new HashSet<long> { rootCategoryId };
+        var queue = new Queue<long>();
+        queue.Enqueue(rootCategoryId);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!childrenByParent.TryGetValue(current, out var children))
+            {
+                continue;
+            }
+
+            foreach (var childId in children)
+            {
+                if (!result.Add(childId))
+                {
+                    continue;
+                }
+
+                queue.Enqueue(childId);
+            }
+        }
+
+        return result;
     }
 }
