@@ -25,16 +25,18 @@ namespace ECommerceAPI
     {
         public static void Main(string[] args)
         {
-            // Npgsql: treat DateTime Kind=Unspecified as UTC
             AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
             var builder = WebApplication.CreateBuilder(args);
 
-            // Database
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(
                     builder.Configuration.GetConnectionString("DefaultConnection"),
-                    npgsql => npgsql.EnableRetryOnFailure(3)));
+                    npgsql =>
+                    {
+                        npgsql.EnableRetryOnFailure(3);
+                        npgsql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
+                    }));
 
             builder.Services.Configure<AiServiceSettings>(
                 builder.Configuration.GetSection(AiServiceSettings.SectionName));
@@ -127,30 +129,7 @@ namespace ECommerceAPI
                 {
                     OnAuthenticationFailed = context =>
                     {
-                        Console.WriteLine($"Authentication failed: {context.Exception.Message}");
-                        if (context.Exception.InnerException != null)
-                        {
-                            Console.WriteLine($"   Inner exception: {context.Exception.InnerException.Message}");
-                        }
-                        return Task.CompletedTask;
-                    },
-                    OnTokenValidated = context =>
-                    {
-                        Console.WriteLine("Token validated successfully");
-                        var claims = context.Principal?.Claims.Select(c => $"{c.Type}: {c.Value}");
-                        if (claims != null)
-                        {
-                            Console.WriteLine($"   Claims: {string.Join(", ", claims)}");
-                        }
-                        return Task.CompletedTask;
-                    },
-                    OnMessageReceived = context =>
-                    {
-                        var token = context.Request.Headers["Authorization"].FirstOrDefault()?.Split(" ").Last();
-                        if (!string.IsNullOrEmpty(token))
-                        {
-                            Console.WriteLine($"Token received (first 50 chars): {token.Substring(0, Math.Min(50, token.Length))}...");
-                        }
+                        // Keep auth failure handling minimal to avoid noisy per-request console logs.
                         return Task.CompletedTask;
                     }
                 };
@@ -198,9 +177,21 @@ namespace ECommerceAPI
             {
                 options.AddPolicy("AllowAll", policy =>
                 {
-                    policy.AllowAnyOrigin()
-                          .AllowAnyMethod()
-                          .AllowAnyHeader();
+                    policy
+                        .SetIsOriginAllowed(origin =>
+                        {
+                            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                            {
+                                return false;
+                            }
+
+                            return uri.Scheme is "http" or "https"
+                                && (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                                    || uri.Host.Equals("127.0.0.1"));
+                        })
+                        .AllowAnyMethod()
+                        .AllowAnyHeader()
+                        .AllowCredentials();
                 });
             });
 
@@ -212,7 +203,10 @@ namespace ECommerceAPI
                 app.UseSwaggerUI();
             }
 
-            app.UseHttpsRedirection();
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHttpsRedirection();
+            }
             app.UseCors("AllowAll");
             app.UseAuthentication();
             app.UseMiddleware<UserSyncMiddleware>();

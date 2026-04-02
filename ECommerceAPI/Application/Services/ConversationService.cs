@@ -1,18 +1,27 @@
 using ECommerceAPI.Application.DTOs.Chat;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 
 namespace ECommerceAPI.Application.Services;
 
 public class ConversationService : IConversationService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IUserAuthEmailResolver _authResolver;
+    private readonly IHubContext<OrderTrackingHub> _hubContext;
 
-    public ConversationService(ApplicationDbContext context)
+    public ConversationService(
+        ApplicationDbContext context,
+        IUserAuthEmailResolver authResolver,
+        IHubContext<OrderTrackingHub> hubContext)
     {
         _context = context;
+        _authResolver = authResolver;
+        _hubContext = hubContext;
     }
 
     public async Task<ServiceResponse<ConversationDto>> StartOrGetConversationAsync(Guid buyerId, StartConversationDto dto)
@@ -123,8 +132,9 @@ public class ConversationService : IConversationService
             .ToListAsync();
 
         var result = new List<ConversationDto>();
+        var avatarCache = new Dictionary<Guid, string?>();
         foreach (var c in conversations)
-            result.Add(await MapConversationDtoAsync(c, userId));
+            result.Add(await MapConversationDtoAsync(c, userId, avatarCache));
 
         return new ServiceResponse<List<ConversationDto>> { Success = true, Data = result };
     }
@@ -221,10 +231,39 @@ public class ConversationService : IConversationService
         // Load sender để lấy tên
         await _context.Entry(message).Reference(m => m.Sender).LoadAsync();
 
+        // Load latest conversation state (including newest message) for realtime push.
+        var conversationForPush = await _context.Conversations
+            .Include(c => c.Shop)
+            .Include(c => c.Buyer)
+            .Include(c => c.Seller)
+            .Include(c => c.Messages.OrderByDescending(m => m.CreatedAt).Take(1))
+            .FirstAsync(c => c.Id == conversationId);
+
+        var buyerConversation = await MapConversationDtoAsync(conversationForPush, conversationForPush.BuyerId);
+        var sellerConversation = await MapConversationDtoAsync(conversationForPush, conversationForPush.SellerId);
+        var messageDto = MapMessageDto(message, conversation);
+
+        var buyerGroup = OrderTrackingHub.GetUserGroupName(conversationForPush.BuyerId);
+        var sellerGroup = OrderTrackingHub.GetUserGroupName(conversationForPush.SellerId);
+
+        await _hubContext.Clients.Group(buyerGroup).SendAsync("ChatMessageReceived", new
+        {
+            ConversationId = conversationId,
+            Message = messageDto
+        });
+        await _hubContext.Clients.Group(sellerGroup).SendAsync("ChatMessageReceived", new
+        {
+            ConversationId = conversationId,
+            Message = messageDto
+        });
+
+        await _hubContext.Clients.Group(buyerGroup).SendAsync("ConversationUpdated", buyerConversation);
+        await _hubContext.Clients.Group(sellerGroup).SendAsync("ConversationUpdated", sellerConversation);
+
         return new ServiceResponse<MessageDto>
         {
             Success = true,
-            Data = MapMessageDto(message, conversation)
+            Data = messageDto
         };
     }
 
@@ -256,7 +295,10 @@ public class ConversationService : IConversationService
 
     // ─── Helpers ────────────────────────────────────────────────────────────
 
-    private async Task<ConversationDto> MapConversationDtoAsync(Conversation c, Guid currentUserId)
+    private async Task<ConversationDto> MapConversationDtoAsync(
+        Conversation c,
+        Guid currentUserId,
+        Dictionary<Guid, string?>? avatarCache = null)
     {
         var unreadCount = await _context.Messages
             .CountAsync(m =>
@@ -265,6 +307,17 @@ public class ConversationService : IConversationService
                 !m.IsRead);
 
         var lastMessage = c.Messages.OrderByDescending(m => m.CreatedAt).FirstOrDefault();
+        string? buyerAvatarUrl;
+
+        if (avatarCache != null && avatarCache.TryGetValue(c.BuyerId, out var cachedAvatar))
+        {
+            buyerAvatarUrl = cachedAvatar;
+        }
+        else
+        {
+            buyerAvatarUrl = await _authResolver.GetAvatarUrlByUserIdAsync(c.BuyerId);
+            avatarCache?.TryAdd(c.BuyerId, buyerAvatarUrl);
+        }
 
         return new ConversationDto
         {
@@ -274,6 +327,7 @@ public class ConversationService : IConversationService
             ShopLogoUrl = c.Shop?.LogoUrl,
             BuyerId = c.BuyerId,
             BuyerName = c.Buyer?.FullName ?? string.Empty,
+            BuyerAvatarUrl = buyerAvatarUrl,
             SellerId = c.SellerId,
             OrderId = c.OrderId,
             UnreadCount = unreadCount,

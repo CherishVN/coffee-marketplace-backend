@@ -25,6 +25,7 @@ public class ConversationDto
     public string? ShopLogoUrl { get; set; }
     public Guid BuyerId { get; set; }
     public string BuyerName { get; set; } = string.Empty;
+    public string? BuyerAvatarUrl { get; set; }
     public Guid SellerId { get; set; }
     public Guid? OrderId { get; set; }
     public MessageDto? LastMessage { get; set; }
