@@ -18,7 +18,7 @@ public class AiSellerService : IAiSellerService
 
     private static readonly JsonSerializerOptions _jsonReadOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
         Converters = { new SafeNullableGuidConverter() }
