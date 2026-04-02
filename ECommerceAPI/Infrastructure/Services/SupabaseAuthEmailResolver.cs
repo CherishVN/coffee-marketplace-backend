@@ -93,6 +93,17 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
         string? avatarUrl = null;
         if (root.TryGetProperty("user_metadata", out var metadataElement) && metadataElement.ValueKind == JsonValueKind.Object)
         {
+            var avatarBucket = _configuration["Supabase:AvatarBucket"] ?? "image";
+            if (metadataElement.TryGetProperty("avatar_storage_bucket", out var bucketElement)
+                && bucketElement.ValueKind == JsonValueKind.String)
+            {
+                var metadataBucket = bucketElement.GetString();
+                if (!string.IsNullOrWhiteSpace(metadataBucket))
+                {
+                    avatarBucket = metadataBucket;
+                }
+            }
+
             if (metadataElement.TryGetProperty("avatar_storage_path", out var storagePathElement)
                 && storagePathElement.ValueKind == JsonValueKind.String)
             {
@@ -102,16 +113,10 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
                     avatarUrl = await CreateSignedAvatarUrlAsync(
                         http,
                         supabaseUrl,
+                        avatarBucket,
                         storagePath,
                         cancellationToken);
                 }
-            }
-
-            if (metadataElement.TryGetProperty("avatar_url", out var avatarElement)
-                && avatarElement.ValueKind == JsonValueKind.String
-                && string.IsNullOrWhiteSpace(avatarUrl))
-            {
-                avatarUrl = avatarElement.GetString();
             }
         }
 
@@ -134,19 +139,28 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
     private async Task<string?> CreateSignedAvatarUrlAsync(
         HttpClient http,
         string supabaseUrl,
+        string bucket,
         string storagePath,
         CancellationToken cancellationToken)
     {
         try
         {
-            var encodedPath = Uri.EscapeDataString(storagePath).Replace("%2F", "/");
+            var normalizedBucket = bucket.Trim().Trim('/');
+            var normalizedPath = storagePath.Trim().Trim('/');
+
+            if (normalizedPath.StartsWith($"{normalizedBucket}/", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedPath = normalizedPath[(normalizedBucket.Length + 1)..];
+            }
+
+            var encodedPath = Uri.EscapeDataString(normalizedPath).Replace("%2F", "/");
             using var body = new StringContent(
                 "{\"expiresIn\":3600}",
                 Encoding.UTF8,
                 "application/json");
 
             var response = await http.PostAsync(
-                $"{supabaseUrl.TrimEnd('/')}/storage/v1/object/sign/avatars/{encodedPath}",
+                $"{supabaseUrl.TrimEnd('/')}/storage/v1/object/sign/{normalizedBucket}/{encodedPath}",
                 body,
                 cancellationToken);
 
@@ -173,7 +187,7 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
         }
         catch
         {
-            // fallback to avatar_url from metadata
+            // Ignore and return null so UI falls back to initials/avatar placeholder.
         }
 
         return null;
