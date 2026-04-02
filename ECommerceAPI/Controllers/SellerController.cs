@@ -211,6 +211,24 @@ public class SellerController : ControllerBase
         return Ok(new { success = true, message = result.Message });
     }
 
+    /// <summary>
+    /// Thêm biến thể cho sản phẩm đã tồn tại
+    /// </summary>
+    [HttpPost("products/{productId}/variants")]
+    public async Task<IActionResult> AddProductVariant(Guid productId, [FromBody] ProductVariantDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _sellerService.AddProductVariantAsync(userId.Value, productId, dto);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = "Đã thêm biến thể", data = result.Data });
+    }
+
     // ==================== INVENTORY MANAGEMENT ====================
 
     /// <summary>

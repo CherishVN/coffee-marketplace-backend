@@ -200,6 +200,31 @@ public class UpdateInventoryDtoValidator : AbstractValidator<UpdateInventoryDto>
     }
 }
 
+public class ProductVariantDtoValidator : AbstractValidator<ProductVariantDto>
+{
+    public ProductVariantDtoValidator()
+    {
+        RuleFor(x => x.VariantName)
+            .NotEmpty().WithMessage("Tên biến thể không được để trống")
+            .MaximumLength(255).WithMessage("Tên biến thể không quá 255 ký tự");
+
+        RuleFor(x => x.Sku)
+            .MaximumLength(100).WithMessage("SKU không quá 100 ký tự")
+            .When(x => !string.IsNullOrEmpty(x.Sku));
+
+        RuleFor(x => x.Quantity)
+            .GreaterThanOrEqualTo(0).WithMessage("Số lượng tồn phải >= 0");
+
+        RuleFor(x => x.Price)
+            .GreaterThan(0).WithMessage("Giá biến thể phải lớn hơn 0")
+            .When(x => x.Price.HasValue);
+
+        RuleFor(x => x.Attributes)
+            .MaximumLength(2000).WithMessage("Thuộc tính không quá 2000 ký tự")
+            .When(x => !string.IsNullOrEmpty(x.Attributes));
+    }
+}
+
 public class SellerUpdateOrderStatusDtoValidator : AbstractValidator<SellerUpdateOrderStatusDto>
 {
     public SellerUpdateOrderStatusDtoValidator()
