@@ -1,3 +1,4 @@
+using ECommerceAPI.Domain.Enums;
 using FluentValidation;
 
 namespace ECommerceAPI.Application.DTOs.Seller;
@@ -230,6 +231,7 @@ public class SellerUpdateOrderStatusDtoValidator : AbstractValidator<SellerUpdat
     public SellerUpdateOrderStatusDtoValidator()
     {
         RuleFor(x => x.Status)
-            .InclusiveBetween((short)0, (short)5).WithMessage("Trạng thái đơn hàng không hợp lệ");
+            .Must(s => Enum.IsDefined(typeof(OrderStatus), s))
+            .WithMessage("Trạng thái đơn hàng không hợp lệ");
     }
 }
