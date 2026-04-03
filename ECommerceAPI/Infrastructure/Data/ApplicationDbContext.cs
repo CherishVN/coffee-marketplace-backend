@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using ECommerceAPI.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace ECommerceAPI.Infrastructure.Data;
 
 public partial class ApplicationDbContext : DbContext
 {
+    private static readonly JsonSerializerOptions ReviewImageUrlsJsonOptions = new();
+
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
         : base(options)
     {
@@ -39,6 +43,8 @@ public partial class ApplicationDbContext : DbContext
     public virtual DbSet<Category> Categories { get; set; }
 
     public virtual DbSet<Conversation> Conversations { get; set; }
+
+    public virtual DbSet<ConversationUserPreference> ConversationUserPreferences { get; set; }
 
     public virtual DbSet<Dispute> Disputes { get; set; }
 
@@ -567,6 +573,37 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.Shop).WithMany(p => p.Conversations)
                 .HasForeignKey(d => d.ShopId)
                 .HasConstraintName("conversations_shop_id_fkey");
+        });
+
+        modelBuilder.Entity<ConversationUserPreference>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("conversation_user_preferences_pkey");
+
+            entity.ToTable("conversation_user_preferences");
+
+            entity.HasIndex(e => new { e.ConversationId, e.UserId }, "conversation_user_preferences_conversation_id_user_id_key").IsUnique();
+
+            entity.HasIndex(e => e.UserId, "idx_conversation_user_prefs_user");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.IsMuted)
+                .HasDefaultValue(false)
+                .HasColumnName("is_muted");
+            entity.Property(e => e.HiddenAt).HasColumnName("hidden_at");
+
+            entity.HasOne(d => d.Conversation).WithMany(p => p.UserPreferences)
+                .HasForeignKey(d => d.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("conversation_user_preferences_conversation_id_fkey");
+
+            entity.HasOne(d => d.User).WithMany(p => p.ConversationUserPreferences)
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("conversation_user_preferences_user_id_fkey");
         });
 
         modelBuilder.Entity<Dispute>(entity =>
@@ -1204,6 +1241,17 @@ public partial class ApplicationDbContext : DbContext
                 .HasDefaultValueSql("now()")
                 .HasColumnName("updated_at");
             entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            var reviewImagesConverter = new ValueConverter<List<string>, string>(
+                v => JsonSerializer.Serialize(v ?? new List<string>(), ReviewImageUrlsJsonOptions),
+                v => string.IsNullOrEmpty(v)
+                    ? new List<string>()
+                    : JsonSerializer.Deserialize<List<string>>(v, ReviewImageUrlsJsonOptions) ?? new List<string>());
+            entity.Property(e => e.ImageUrls)
+                .HasColumnName("image_urls")
+                .HasColumnType("text")
+                .HasConversion(reviewImagesConverter);
+            entity.Property(e => e.SellerReply).HasColumnName("seller_reply");
 
             entity.HasOne(d => d.Product).WithMany(p => p.ProductReviews)
                 .HasForeignKey(d => d.ProductId)

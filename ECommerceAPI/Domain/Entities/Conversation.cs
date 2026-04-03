@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -20,6 +20,8 @@ public partial class Conversation
     public virtual User Buyer { get; set; } = null!;
 
     public virtual ICollection<Message> Messages { get; set; } = new List<Message>();
+
+    public virtual ICollection<ConversationUserPreference> UserPreferences { get; set; } = new List<ConversationUserPreference>();
 
     public virtual Order? Order { get; set; }
 

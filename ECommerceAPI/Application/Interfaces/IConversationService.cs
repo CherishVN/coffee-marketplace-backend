@@ -18,4 +18,9 @@ public interface IConversationService
 
     /// <summary>Đánh dấu tất cả tin nhắn trong conversation là đã đọc</summary>
     Task<ServiceResponse> MarkAsReadAsync(Guid userId, Guid conversationId);
+
+    Task<ServiceResponse> SetConversationMutedAsync(Guid userId, Guid conversationId, bool muted);
+
+    /// <summary>Ẩn cuộc trò chuyện khỏi danh sách của user (tin mới từ đối phương sẽ hiện lại).</summary>
+    Task<ServiceResponse> HideConversationAsync(Guid userId, Guid conversationId);
 }

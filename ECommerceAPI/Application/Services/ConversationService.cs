@@ -48,6 +48,8 @@ public class ConversationService : IConversationService
 
         if (existing != null)
         {
+            await UnhideForUserAsync(buyerId, existing.Id);
+
             // Nếu có tin nhắn đầu tiên thì gửi luôn
             if (!string.IsNullOrWhiteSpace(dto.FirstMessage))
             {
@@ -125,16 +127,26 @@ public class ConversationService : IConversationService
             .Include(c => c.Seller)
             .Include(c => c.Messages.OrderByDescending(m => m.CreatedAt).Take(1))
             .Where(c => c.BuyerId == userId || c.SellerId == userId)
+            .Where(c => !_context.ConversationUserPreferences.Any(p =>
+                p.ConversationId == c.Id &&
+                p.UserId == userId &&
+                p.HiddenAt != null))
             .OrderByDescending(c => c.Messages
                 .OrderByDescending(m => m.CreatedAt)
                 .Select(m => m.CreatedAt)
                 .FirstOrDefault())
             .ToListAsync();
 
+        var ids = conversations.Select(c => c.Id).ToList();
+        var prefRows = await _context.ConversationUserPreferences.AsNoTracking()
+            .Where(p => p.UserId == userId && ids.Contains(p.ConversationId))
+            .ToListAsync();
+        var prefByConv = prefRows.ToDictionary(p => p.ConversationId);
+
         var result = new List<ConversationDto>();
         var avatarCache = new Dictionary<Guid, string?>();
         foreach (var c in conversations)
-            result.Add(await MapConversationDtoAsync(c, userId, avatarCache));
+            result.Add(await MapConversationDtoAsync(c, userId, avatarCache, prefByConv));
 
         return new ServiceResponse<List<ConversationDto>> { Success = true, Data = result };
     }
@@ -156,6 +168,8 @@ public class ConversationService : IConversationService
                 Success = false,
                 Message = "Không tìm thấy cuộc trò chuyện"
             };
+
+        await UnhideForUserAsync(userId, conversationId);
 
         var totalMessages = await _context.Messages
             .CountAsync(m => m.ConversationId == conversationId);
@@ -228,6 +242,9 @@ public class ConversationService : IConversationService
         await _context.Messages.AddAsync(message);
         await _context.SaveChangesAsync();
 
+        var recipientId = senderId == conversation.BuyerId ? conversation.SellerId : conversation.BuyerId;
+        await UnhideForUserAsync(recipientId, conversationId);
+
         // Load sender để lấy tên
         await _context.Entry(message).Reference(m => m.Sender).LoadAsync();
 
@@ -293,12 +310,92 @@ public class ConversationService : IConversationService
         return new ServiceResponse { Success = true, Message = $"Đã đánh dấu {unreadMessages.Count} tin nhắn đã đọc" };
     }
 
+    public async Task<ServiceResponse> SetConversationMutedAsync(Guid userId, Guid conversationId, bool muted)
+    {
+        var conv = await _context.Conversations
+            .FirstOrDefaultAsync(c =>
+                c.Id == conversationId &&
+                (c.BuyerId == userId || c.SellerId == userId));
+
+        if (conv == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy cuộc trò chuyện" };
+
+        var pref = await _context.ConversationUserPreferences
+            .FirstOrDefaultAsync(p => p.ConversationId == conversationId && p.UserId == userId);
+
+        if (pref == null)
+        {
+            await _context.ConversationUserPreferences.AddAsync(new ConversationUserPreference
+            {
+                Id = Guid.NewGuid(),
+                ConversationId = conversationId,
+                UserId = userId,
+                IsMuted = muted,
+                HiddenAt = null
+            });
+        }
+        else
+        {
+            pref.IsMuted = muted;
+        }
+
+        await _context.SaveChangesAsync();
+        return new ServiceResponse { Success = true, Message = muted ? "Đã tắt thông báo" : "Đã bật thông báo" };
+    }
+
+    public async Task<ServiceResponse> HideConversationAsync(Guid userId, Guid conversationId)
+    {
+        var conv = await _context.Conversations
+            .FirstOrDefaultAsync(c =>
+                c.Id == conversationId &&
+                (c.BuyerId == userId || c.SellerId == userId));
+
+        if (conv == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy cuộc trò chuyện" };
+
+        var pref = await _context.ConversationUserPreferences
+            .FirstOrDefaultAsync(p => p.ConversationId == conversationId && p.UserId == userId);
+        var now = DateTime.UtcNow;
+
+        if (pref == null)
+        {
+            await _context.ConversationUserPreferences.AddAsync(new ConversationUserPreference
+            {
+                Id = Guid.NewGuid(),
+                ConversationId = conversationId,
+                UserId = userId,
+                IsMuted = false,
+                HiddenAt = now
+            });
+        }
+        else
+        {
+            pref.HiddenAt = now;
+        }
+
+        await _context.SaveChangesAsync();
+        return new ServiceResponse { Success = true, Message = "Đã ẩn cuộc trò chuyện" };
+    }
+
+    private async Task UnhideForUserAsync(Guid userId, Guid conversationId)
+    {
+        var pref = await _context.ConversationUserPreferences
+            .FirstOrDefaultAsync(p => p.ConversationId == conversationId && p.UserId == userId);
+
+        if (pref?.HiddenAt == null)
+            return;
+
+        pref.HiddenAt = null;
+        await _context.SaveChangesAsync();
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────
 
     private async Task<ConversationDto> MapConversationDtoAsync(
         Conversation c,
         Guid currentUserId,
-        Dictionary<Guid, string?>? avatarCache = null)
+        Dictionary<Guid, string?>? avatarCache = null,
+        IReadOnlyDictionary<Guid, ConversationUserPreference>? prefByConv = null)
     {
         var unreadCount = await _context.Messages
             .CountAsync(m =>
@@ -319,6 +416,13 @@ public class ConversationService : IConversationService
             avatarCache?.TryAdd(c.BuyerId, buyerAvatarUrl);
         }
 
+        ConversationUserPreference? pr = null;
+        if (prefByConv != null && prefByConv.TryGetValue(c.Id, out var pRow))
+            pr = pRow;
+        else
+            pr = await _context.ConversationUserPreferences.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ConversationId == c.Id && x.UserId == currentUserId);
+
         return new ConversationDto
         {
             Id = c.Id,
@@ -330,6 +434,7 @@ public class ConversationService : IConversationService
             BuyerAvatarUrl = buyerAvatarUrl,
             SellerId = c.SellerId,
             OrderId = c.OrderId,
+            IsMuted = pr?.IsMuted ?? false,
             UnreadCount = unreadCount,
             CreatedAt = c.CreatedAt,
             LastMessage = lastMessage == null ? null : new MessageDto

@@ -10,7 +10,12 @@ public interface IReviewService
         Guid productId,
         int page,
         int pageSize,
-        string? sortBy = null);
+        string? sortBy = null,
+        short? rating = null,
+        bool? hasComment = null,
+        bool? hasImage = null);
+
+    Task<ProductReviewStatsResponseDto> GetProductReviewStatsAsync(Guid productId);
 
     Task<ServiceResponse<ShopReviewDto>> CreateShopReviewAsync(Guid userId, CreateShopReviewDto dto);
 

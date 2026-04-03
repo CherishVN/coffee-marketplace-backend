@@ -307,4 +307,26 @@ public class SellerController : ControllerBase
 
         return Ok(new { success = true, message = result.Message });
     }
+
+    /// <summary>
+    /// Đánh giá sản phẩm từ khách (theo sản phẩm thuộc shop)
+    /// </summary>
+    [HttpGet("reviews")]
+    public async Task<IActionResult> GetMyProductReviews(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] short? rating = null,
+        [FromQuery] string? search = null)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _sellerService.GetMyProductReviewsAsync(userId.Value, page, pageSize, rating, search);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, data = result.Data });
+    }
 }

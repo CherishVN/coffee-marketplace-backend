@@ -38,6 +38,16 @@ public class ReviewsController : ControllerBase
     }
 
     /// <summary>
+    /// Thống kê số lượng đánh giá theo sao / có bình luận / có ảnh (trang chi tiết sản phẩm).
+    /// </summary>
+    [HttpGet("products/{productId}/stats")]
+    public async Task<IActionResult> GetProductReviewStats(Guid productId)
+    {
+        var result = await _reviewService.GetProductReviewStatsAsync(productId);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Get approved reviews of a product
     /// </summary>
     [HttpGet("products/{productId}")]
@@ -45,9 +55,13 @@ public class ReviewsController : ControllerBase
         Guid productId,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
-        [FromQuery] string? sortBy = "newest")
+        [FromQuery] string? sortBy = "newest",
+        [FromQuery] short? rating = null,
+        [FromQuery] bool? hasComment = null,
+        [FromQuery] bool? hasImage = null)
     {
-        var result = await _reviewService.GetProductReviewsAsync(productId, page, pageSize, sortBy);
+        var result = await _reviewService.GetProductReviewsAsync(
+            productId, page, pageSize, sortBy, rating, hasComment, hasImage);
         return Ok(result);
     }
 

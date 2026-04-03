@@ -21,12 +21,15 @@ public class CustomerOrderItemDto
     public decimal UnitPrice { get; set; }
     public decimal TotalPrice { get; set; }
     public string? ThumbnailUrl { get; set; }
+    /// <summary>Đã có bản ghi đánh giá sản phẩm của user (product_reviews: unique theo product + user).</summary>
+    public bool HasReviewedByUser { get; set; }
 }
 
 public class CustomerOrderSummaryDto
 {
     public Guid Id { get; set; }
     public Guid ShopId { get; set; }
+    public string ShopSlug { get; set; } = string.Empty;
     public string ShopName { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
     public short Status { get; set; }

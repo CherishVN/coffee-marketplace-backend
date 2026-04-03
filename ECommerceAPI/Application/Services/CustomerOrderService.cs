@@ -53,10 +53,23 @@ public class CustomerOrderService : ICustomerOrderService
             .Take(pageSize)
             .ToListAsync();
 
+        var allProductIds = rawOrders.SelectMany(o => o.OrderItems).Select(oi => oi.ProductId).Distinct().ToList();
+        HashSet<Guid> reviewedProductIds;
+        if (allProductIds.Count == 0)
+            reviewedProductIds = new HashSet<Guid>();
+        else
+            reviewedProductIds = (await _context.ProductReviews
+                .AsNoTracking()
+                .Where(r => r.UserId == customerId && allProductIds.Contains(r.ProductId))
+                .Select(r => r.ProductId)
+                .ToListAsync())
+                .ToHashSet();
+
         var orders = rawOrders.Select(o => new CustomerOrderSummaryDto
         {
             Id = o.Id,
             ShopId = o.ShopId,
+            ShopSlug = o.Shop.Slug,
             ShopName = o.Shop.Name,
             TotalAmount = o.Total,
             Status = o.Status,
@@ -70,7 +83,8 @@ public class CustomerOrderService : ICustomerOrderService
                 Quantity = oi.Quantity,
                 UnitPrice = oi.UnitPrice,
                 TotalPrice = oi.LineTotal,
-                ThumbnailUrl = oi.Product.ProductImages.FirstOrDefault()?.ImageUrl
+                ThumbnailUrl = oi.Product.ProductImages.FirstOrDefault()?.ImageUrl,
+                HasReviewedByUser = reviewedProductIds.Contains(oi.ProductId)
             }).ToList()
         }).ToList();
 
@@ -90,6 +104,7 @@ public class CustomerOrderService : ICustomerOrderService
             .Include(o => o.Shop)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
+                    .ThenInclude(p => p.ProductImages)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Variant)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
@@ -103,10 +118,21 @@ public class CustomerOrderService : ICustomerOrderService
             };
         }
 
+        var detailProductIds = order.OrderItems.Select(oi => oi.ProductId).Distinct().ToList();
+        var detailReviewed = detailProductIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _context.ProductReviews
+                .AsNoTracking()
+                .Where(r => r.UserId == customerId && detailProductIds.Contains(r.ProductId))
+                .Select(r => r.ProductId)
+                .ToListAsync())
+                .ToHashSet();
+
         var detail = new CustomerOrderDetailDto
         {
             Id = order.Id,
             ShopId = order.ShopId,
+            ShopSlug = order.Shop.Slug,
             ShopName = order.Shop.Name,
             TotalAmount = order.Total,
             Status = order.Status,
@@ -122,7 +148,9 @@ public class CustomerOrderService : ICustomerOrderService
                 VariantName = oi.Variant?.VariantName,
                 Quantity = oi.Quantity,
                 UnitPrice = oi.UnitPrice,
-                TotalPrice = oi.LineTotal
+                TotalPrice = oi.LineTotal,
+                ThumbnailUrl = oi.Product.ProductImages.FirstOrDefault()?.ImageUrl,
+                HasReviewedByUser = detailReviewed.Contains(oi.ProductId)
             }).ToList()
         };
 

@@ -21,6 +21,27 @@ public class ProductReviewDto
     public string? Comment { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<string> ImageUrls { get; set; } = new();
+    public string? SellerReply { get; set; }
+    /// <summary>Tạm thời 0 — có thể bổ sung vote hữu ích sau.</summary>
+    public int HelpfulCount { get; set; }
+}
+
+public class ProductReviewStatsDto
+{
+    public int Total { get; set; }
+    public int Count5 { get; set; }
+    public int Count4 { get; set; }
+    public int Count3 { get; set; }
+    public int Count2 { get; set; }
+    public int Count1 { get; set; }
+    public int WithComment { get; set; }
+    public int WithImage { get; set; }
+}
+
+public class ProductReviewStatsResponseDto
+{
+    public bool Success { get; set; }
+    public ProductReviewStatsDto Data { get; set; } = new();
 }
 
 public class ProductReviewListResponseDto

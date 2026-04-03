@@ -103,4 +103,36 @@ public class ConversationController : ControllerBase
 
         return Ok(new { success = true, message = result.Message });
     }
+
+    /// <summary>Tắt / bật thông báo tin nhắn cho cuộc trò chuyện này (theo user đang đăng nhập).</summary>
+    [HttpPut("{conversationId:guid}/mute")]
+    public async Task<IActionResult> SetMute(Guid conversationId, [FromBody] SetConversationMuteDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _conversationService.SetConversationMutedAsync(userId.Value, conversationId, dto.Muted);
+
+        if (!result.Success)
+            return NotFound(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>Ẩn cuộc trò chuyện khỏi danh sách (tin mới từ đối phương sẽ hiện lại).</summary>
+    [HttpPost("{conversationId:guid}/hide")]
+    public async Task<IActionResult> HideConversation(Guid conversationId)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _conversationService.HideConversationAsync(userId.Value, conversationId);
+
+        if (!result.Success)
+            return NotFound(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
 }

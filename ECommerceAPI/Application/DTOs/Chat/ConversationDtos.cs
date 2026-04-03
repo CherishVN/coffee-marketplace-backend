@@ -31,6 +31,13 @@ public class ConversationDto
     public MessageDto? LastMessage { get; set; }
     public int UnreadCount { get; set; }
     public DateTime CreatedAt { get; set; }
+    /// <summary>Đã tắt thông báo (theo người đang xem).</summary>
+    public bool IsMuted { get; set; }
+}
+
+public class SetConversationMuteDto
+{
+    public bool Muted { get; set; }
 }
 
 public class MessageDto

@@ -1006,6 +1006,105 @@ public class SellerService : ISellerService
         };
     }
 
+    public async Task<ServiceResponse<SellerProductReviewsDataDto>> GetMyProductReviewsAsync(
+        Guid userId,
+        int page,
+        int pageSize,
+        short? rating,
+        string? search)
+    {
+        var shop = await _context.Shops.AsNoTracking().FirstOrDefaultAsync(s => s.OwnerId == userId);
+        if (shop == null)
+        {
+            return new ServiceResponse<SellerProductReviewsDataDto>
+            {
+                Success = false,
+                Message = "Bạn chưa có shop"
+            };
+        }
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var approved = (short)ReviewStatus.Approved;
+
+        var baseQuery =
+            from r in _context.ProductReviews.AsNoTracking()
+            join p in _context.Products.AsNoTracking() on r.ProductId equals p.Id
+            where p.ShopId == shop.Id && r.Status == approved
+            join u in _context.Users.AsNoTracking() on r.UserId equals u.Id
+            select new { r, p, u };
+
+        if (rating is >= 1 and <= 5)
+            baseQuery = baseQuery.Where(x => x.r.Rating == rating.Value);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            if (term.Length > 200)
+                term = term[..200];
+            var pattern = "%" + term.Replace("%", "\\%").Replace("_", "\\_") + "%";
+            baseQuery = baseQuery.Where(x =>
+                (x.u.FullName != null && EF.Functions.ILike(x.u.FullName, pattern)) ||
+                (x.r.Content != null && EF.Functions.ILike(x.r.Content, pattern)) ||
+                EF.Functions.ILike(x.p.Name, pattern));
+        }
+
+        var totalCount = await baseQuery.CountAsync();
+
+        var averageRating = 0.0;
+        if (totalCount > 0)
+            averageRating = Math.Round(await baseQuery.AverageAsync(x => (double)x.r.Rating), 1);
+
+        var dist = new int[5];
+        var groups = await baseQuery
+            .GroupBy(x => x.r.Rating)
+            .Select(g => new { Rating = g.Key, Cnt = g.Count() })
+            .ToListAsync();
+        foreach (var g in groups)
+        {
+            if (g.Rating is >= 1 and <= 5)
+                dist[5 - g.Rating] = g.Cnt;
+        }
+
+        var items = await baseQuery
+            .OrderByDescending(x => x.r.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new SellerProductReviewItemDto
+            {
+                Id = x.r.Id,
+                ProductId = x.p.Id,
+                ProductName = x.p.Name,
+                ProductThumbnailUrl = _context.ProductImages
+                    .Where(pi => pi.ProductId == x.p.Id)
+                    .OrderBy(pi => pi.SortOrder)
+                    .Select(pi => pi.ImageUrl)
+                    .FirstOrDefault(),
+                BuyerName = x.u.FullName,
+                Rating = x.r.Rating,
+                Comment = x.r.Content,
+                CreatedAt = x.r.CreatedAt,
+                ImageUrls = x.r.ImageUrls
+            })
+            .ToListAsync();
+
+        return new ServiceResponse<SellerProductReviewsDataDto>
+        {
+            Success = true,
+            Data = new SellerProductReviewsDataDto
+            {
+                Reviews = items,
+                TotalCount = totalCount,
+                Page = page,
+                PageSize = pageSize,
+                AverageRating = averageRating,
+                RatingDistribution = dist,
+                PendingReplyCount = totalCount
+            }
+        };
+    }
+
     private async Task IncrementSoldCountAsync(IEnumerable<OrderItem> items)
     {
         foreach (var item in items)
