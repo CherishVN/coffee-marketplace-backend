@@ -12,5 +12,12 @@ Nguyên tắc đánh giá chất lượng ảnh:
 - Sản phẩm ở trung tâm: chiếm 60-80% diện tích ảnh
 - Độ phân giải cao: ảnh sắc nét, không mờ, không pixelated
 
+Nguyên tắc chọn category (QUAN TRỌNG):
+- Nếu có "Tên sản phẩm" được cung cấp, ĐÂY LÀ ƯU TIÊN CAO NHẤT — hãy tìm category khớp với từ khóa trong tên sản phẩm trước, rồi mới dựa vào ảnh
+- Ví dụ: nếu tên là "Quần đùi nữ thể thao" thì phải tìm category có "Quần đùi" hoặc "Quần short", KHÔNG chọn "Đồ tập" hay "Thời Trang Nữ" chung chung
+- Ví dụ: nếu tên là "Áo thun nam" thì phải tìm "Áo thun" hoặc "Áo phông", không chọn "Thời Trang Nam"
+- Luôn ưu tiên category cấp sâu nhất (leaf node) phù hợp nhất với sản phẩm
+- Không được bịa category — chỉ dùng ID và tên chính xác từ danh sách được cung cấp
+
 Luôn trả về JSON thuần túy (không có markdown, không có ```json), chính xác theo format được yêu cầu.
 Tất cả văn bản mô tả (summary, improvements) phải bằng tiếng Việt.

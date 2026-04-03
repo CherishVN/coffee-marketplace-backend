@@ -40,31 +40,53 @@ public class AiSellerService : IAiSellerService
         _logger = logger;
     }
 
-    // ── Gợi ý Category ───────────────────────────────────────────────────────
+    // ── Gợi ý Category ─────────────────────────────────────────────────────────────
     public async Task<SuggestCategoryResponseDto> SuggestCategoryAsync(SuggestCategoryRequestDto request, Guid sellerId)
     {
-        // Lấy danh sách categories từ DB
-        var categories = await _context.Categories
+        // Lấy danh sách categories từ DB kèm parent để build đường dẫn
+        var allCats = await _context.Categories
             .Where(c => c.IsActive)
             .OrderBy(c => c.Level).ThenBy(c => c.Name)
             .Take(MaxPromptCategories)
             .ToListAsync();
 
-        var categoryList = string.Join("\n", categories.Select(c =>
-            $"ID:{c.Id} | {new string('-', c.Level)}{c.Name} (Level {c.Level})"));
+        var catById = allCats.ToDictionary(c => c.Id);
 
-        var jsonExample = """{"suggestions":[{"categoryId":123,"categoryName":"Tên category","categoryPath":"Cha > Con","confidenceScore":0.95}]}""";
+        string BuildPath(long id)
+        {
+            var parts = new List<string>();
+            var cur = catById.GetValueOrDefault(id);
+            while (cur != null)
+            {
+                parts.Insert(0, cur.Name);
+                cur = cur.ParentId.HasValue
+                    ? catById.GetValueOrDefault(cur.ParentId.Value)
+                    : null;
+            }
+            return string.Join(" > ", parts);
+        }
+
+        var categoryList = string.Join("\n", allCats.Select(c =>
+            $"ID:{c.Id} | {BuildPath(c.Id)} (Level {c.Level})"));
+
+        var jsonExample = """{"suggestions":[{"categoryId":123,"categoryName":"Tên danh mục","categoryPath":"Đường dẫn đầy đủ","confidenceScore":0.95}]}""";
         var userMessage = $"""
-            Phân tích sản phẩm sau và gợi ý top 3 category phù hợp nhất:
-            
+            Phân tích sản phẩm sau và gợi ý top 3 category phù hợp nhất từ danh sách dưới.
+
             Tên sản phẩm: {request.Title}
             Mô tả: {request.Description ?? "Không có"}
-            
-            Danh sách category có trong hệ thống:
+
+            QUAN TRỌNG:
+            - Chỉ được chọn category có trong danh sách (dùng đúng categoryId)
+            - Ưu tiên category cấp sâu nhất (leaf) phù hợp, KHÔNG chọn category gốc chung chung nếu có category con phù hợp hơn
+            - Ví dụ: sản phẩm là quần jeans thì chọn "Thời Trang Nữ > Quần Jeans" (nếu có), KHÔNG chọn "Thời Trang Nữ" đơn thuần
+            - Điền categoryPath đúng theo cột "Đường dẫn đầy đủ" trong danh sách (sao chép nguyên văn)
+
+            Danh sách category (ID | Đường dẫn đầy đủ | Cấp):
             {categoryList}
-            
-            Trả về JSON theo format: {jsonExample}
-            (gồm đúng 3 suggestions với categoryId, categoryName, categoryPath, confidenceScore)
+
+            Trả về JSON: {jsonExample}
+            (3 gợi ý, sắp xếp theo confidenceScore giảm dần)
             """;
 
         try
@@ -260,7 +282,6 @@ public class AiSellerService : IAiSellerService
         }
     }
 
-    // ── Phân tích ảnh sản phẩm (Gemini Vision) ───────────────────────────────
     public async Task<AnalyzeImageResponseDto> AnalyzeImageAsync(AnalyzeImageRequestDto request, Guid sellerId)
     {
         if (request.ImageUrls == null || request.ImageUrls.Count == 0)
@@ -269,12 +290,11 @@ public class AiSellerService : IAiSellerService
         if (request.ImageUrls.Count > 3)
             request.ImageUrls = request.ImageUrls.Take(3).ToList();
 
-        // Lấy danh sách categories, tags, materials từ DB để AI gợi ý chính xác hơn
         var categories = await _context.Categories
             .Where(c => c.IsActive)
             .OrderBy(c => c.Level).ThenBy(c => c.Name)
             .Take(MaxPromptCategories)
-            .Select(c => new { c.Id, c.Name, c.Level })
+            .Select(c => new { c.Id, c.Name, c.Level, c.ParentId })
             .ToListAsync();
 
         var tags = await _context.Tags
@@ -290,7 +310,21 @@ public class AiSellerService : IAiSellerService
             .Select(m => new { m.Id, m.Name })
             .ToListAsync();
 
-        var categoryList = string.Join(", ", categories.Select(c => $"{c.Name}(ID:{c.Id})"));
+        var catById2 = categories.ToDictionary(c => c.Id);
+        string BuildImagePath(long id)
+        {
+            var parts = new List<string>();
+            var cur = catById2.GetValueOrDefault(id);
+            while (cur != null)
+            {
+                parts.Insert(0, cur.Name);
+                cur = cur.ParentId.HasValue
+                    ? catById2.GetValueOrDefault(cur.ParentId.Value)
+                    : null;
+            }
+            return string.Join(" > ", parts);
+        }
+        var categoryList = string.Join("\n", categories.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
         var tagList = string.Join(", ", tags.Select(t => $"{t.Name}(ID:{t.Id})"));
         var materialList = string.Join(", ", materials.Select(m => $"{m.Name}(ID:{m.Id})"));
 
@@ -329,7 +363,15 @@ public class AiSellerService : IAiSellerService
             {(string.IsNullOrWhiteSpace(request.ProductTitle) ? "" : $"Tên sản phẩm: {request.ProductTitle}")}
             {(string.IsNullOrWhiteSpace(request.ProductDescription) ? "" : $"Mô tả: {request.ProductDescription}")}
             
-            Danh sách categories có trong hệ thống: {categoryList}
+            Danh sách categories có trong hệ thống (ID | Đường dẫn đầy đủ | Cấp):
+            {categoryList}
+            
+            QUAN TRỌNG khi chọn category:
+            - Chỉ được dùng ID có trong danh sách trên
+            - Ưu tiên category cấp sâu nhất (leaf) phù hợp với sản phẩm, KHÔNG chọn category gốc chung chung nếu có category con phù hợp hơn
+            - Ví dụ: với quần jeans nữ thì chọn "Thời Trang Nữ > Quần Jeans" (nếu có), KHÔNG chọn "Thời Trang Nữ" đơn thuần
+            - Điền categoryPath đúng theo cột "Đường dẫn đầy đủ" trong danh sách (sao chép nguyên văn)
+            
             Danh sách tags có trong hệ thống: {tagList}
             Danh sách materials có trong hệ thống: {materialList}
             
