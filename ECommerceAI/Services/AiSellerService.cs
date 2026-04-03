@@ -144,7 +144,7 @@ public class AiSellerService : IAiSellerService
         }
     }
 
-    // ── Lưu phản hồi sau khi seller chọn tags ────────────────────────────────
+    // ── Lưu phản hồi sau khi seller chọn tags ────────────────────────────────────
     public async Task<bool> SaveTagSuggestionFeedbackAsync(SaveSuggestionFeedbackDto dto, Guid sellerId)
     {
         var log = await _context.AiTagSuggestions
@@ -152,13 +152,76 @@ public class AiSellerService : IAiSellerService
 
         if (log == null) return false;
 
-        var chosenJson = JsonSerializer.Serialize(dto.ChosenTagIds ?? new List<long>());
+        // chosen_tags lưu dưới dạng ["tag1", "tag2"] (tên tag, không phải ID)
+        var chosenJson = JsonSerializer.Serialize(dto.ChosenTagNames ?? new List<string>());
         log.ChosenCategoryId = dto.ChosenCategoryId;
         log.ChosenTags = JsonDocument.Parse(chosenJson);
         log.Action = dto.Action;
 
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    // ── Lấy lịch sử gợi ý tags ──────────────────────────────────────────────
+    public async Task<TagSuggestionLogResponse> GetTagSuggestionLogsAsync(Guid sellerId, int page, int pageSize)
+    {
+        var query = _context.AiTagSuggestions
+            .Where(s => s.SellerId == sellerId && s.Action != ActionPending)
+            .OrderByDescending(s => s.CreatedAt);
+
+        var all = await query.ToListAsync();
+
+        var items = all
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(s =>
+            {
+                // Parse suggested_tags: [{"tag": "vải cotton", "confidence": 0.95}]
+                var suggestedTags = new List<SuggestedTagJsonItem>();
+                try
+                {
+                    suggestedTags = JsonSerializer.Deserialize<List<SuggestedTagJsonItem>>(
+                        s.SuggestedTags.RootElement.GetRawText(), _jsonReadOptions) ?? new();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Parse suggested_tags failed for log {LogId}", s.Id);
+                }
+
+                // Parse chosen_tags: ["vải cotton", "tối giản"]
+                var chosenTags = new List<string>();
+                try
+                {
+                    chosenTags = JsonSerializer.Deserialize<List<string>>(
+                        s.ChosenTags.RootElement.GetRawText()) ?? new();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Parse chosen_tags failed for log {LogId}", s.Id);
+                }
+
+                return new TagSuggestionLogItem
+                {
+                    Id = s.Id,
+                    ProductId = s.ProductId,
+                    InputTitle = s.InputTitle,
+                    SuggestedCategoryId = s.SuggestedCategoryId,
+                    SuggestedTags = suggestedTags,
+                    ChosenTags = chosenTags,
+                    Action = s.Action,
+                    CreatedAt = s.CreatedAt
+                };
+            })
+            .ToList();
+
+        return new TagSuggestionLogResponse
+        {
+            Items = items,
+            Total = all.Count,
+            Accepted = all.Count(s => s.Action == "accepted"),
+            Modified = all.Count(s => s.Action == "modified"),
+            Rejected = all.Count(s => s.Action == "rejected"),
+        };
     }
 
     // ── Gợi ý Materials ──────────────────────────────────────────────────────

@@ -15,8 +15,9 @@ public interface IAiSellerService
     Task<bool> SaveTagSuggestionFeedbackAsync(SaveSuggestionFeedbackDto dto, Guid sellerId);
 
     /// <summary>
-    /// Phân tích ảnh sản phẩm bằng Gemini Vision:
-    /// đánh giá chất lượng ảnh, gợi ý category/tags/materials, đề xuất cải thiện.
+    /// Lấy lịch sử gợi ý tags của seller (không bao gồm các bản ghi đang pending).
     /// </summary>
+    Task<TagSuggestionLogResponse> GetTagSuggestionLogsAsync(Guid sellerId, int page, int pageSize);
+
     Task<AnalyzeImageResponseDto> AnalyzeImageAsync(AnalyzeImageRequestDto request, Guid sellerId);
 }

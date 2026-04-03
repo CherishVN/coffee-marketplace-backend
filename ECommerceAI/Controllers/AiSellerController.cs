@@ -64,6 +64,15 @@ public class AiSellerController : ControllerBase
         return Ok(new { message = "Đã lưu phản hồi thành công" });
     }
 
+    /// <summary>Lấy lịch sử gợi ý tags của seller (không gồm pending)</summary>
+    [HttpGet("tag-suggestions")]
+    public async Task<IActionResult> GetTagSuggestions([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var sellerId = GetUserId();
+        var result = await _sellerService.GetTagSuggestionLogsAsync(sellerId, page, pageSize);
+        return Ok(result);
+    }
+
     /// <summary>
     /// Phân tích ảnh sản phẩm bằng Gemini Vision.
     /// Trả về: đánh giá chất lượng ảnh, gợi ý category/tags/materials, đề xuất cải thiện.

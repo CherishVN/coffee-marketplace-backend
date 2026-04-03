@@ -115,7 +115,40 @@ public class SaveSuggestionFeedbackDto
 {
     public Guid LogId { get; set; }
     public long? ChosenCategoryId { get; set; }
-    public List<long>? ChosenTagIds { get; set; }
+    /// <summary>Tên các tag seller đã chọn (khớp với format chosen_tags trong DB: ["tag1", "tag2"])</summary>
+    public List<string>? ChosenTagNames { get; set; }
     public List<Guid>? ChosenMaterialIds { get; set; }
     public string Action { get; set; } = "accepted";  // accepted | rejected | modified
+}
+
+// ── Tag Suggestion Log ────────────────────────────────────────────────────────
+
+/// <summary>Item trong suggest_tags JSONB: {"tag": "vải cotton", "confidence": 0.95}</summary>
+public class SuggestedTagJsonItem
+{
+    public string Tag { get; set; } = null!;
+    public decimal Confidence { get; set; }
+}
+
+public class TagSuggestionLogItem
+{
+    public Guid Id { get; set; }
+    public Guid ProductId { get; set; }
+    public string? InputTitle { get; set; }
+    public long? SuggestedCategoryId { get; set; }
+    /// <summary>Tên các tag AI đã gợi ý kèm confidence</summary>
+    public List<SuggestedTagJsonItem> SuggestedTags { get; set; } = new();
+    /// <summary>Tên các tag seller đã chọn cuối cùng</summary>
+    public List<string> ChosenTags { get; set; } = new();
+    public string Action { get; set; } = "pending";
+    public DateTime CreatedAt { get; set; }
+}
+
+public class TagSuggestionLogResponse
+{
+    public List<TagSuggestionLogItem> Items { get; set; } = new();
+    public int Total { get; set; }
+    public int Accepted { get; set; }
+    public int Modified { get; set; }
+    public int Rejected { get; set; }
 }
