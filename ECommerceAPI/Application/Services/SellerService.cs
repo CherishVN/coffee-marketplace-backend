@@ -19,6 +19,7 @@ public class SellerService : ISellerService
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
+    private readonly IUserAuthEmailResolver _authResolver;
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly ISellerWalletReleaseService _walletRelease;
 
@@ -26,12 +27,14 @@ public class SellerService : ISellerService
         ApplicationDbContext context,
         IHubContext<OrderTrackingHub> hubContext,
         INotificationService notifications,
+        IUserAuthEmailResolver authResolver,
         ISellerWalletReversalService walletReversal,
         ISellerWalletReleaseService walletRelease)
     {
         _context = context;
         _hubContext = hubContext;
         _notifications = notifications;
+        _authResolver = authResolver;
         _walletReversal = walletReversal;
         _walletRelease = walletRelease;
     }
@@ -864,6 +867,23 @@ public class SellerService : ISellerService
             })
             .ToListAsync();
 
+        var customerIds = orders.Select(o => o.CustomerId).Distinct().ToList();
+        if (customerIds.Count > 0)
+        {
+            var avatarLookups = await Task.WhenAll(
+                customerIds.Select(async customerId => new
+                {
+                    CustomerId = customerId,
+                    AvatarUrl = await _authResolver.GetAvatarUrlByUserIdAsync(customerId)
+                }));
+
+            var avatarByCustomer = avatarLookups.ToDictionary(x => x.CustomerId, x => x.AvatarUrl);
+            foreach (var orderDto in orders)
+            {
+                orderDto.CustomerAvatarUrl = avatarByCustomer.GetValueOrDefault(orderDto.CustomerId);
+            }
+        }
+
         return new ServiceResponse<List<OrderDto>>
         {
             Success = true,
@@ -911,6 +931,7 @@ public class SellerService : ISellerService
                 Id = order.Id,
                 CustomerId = order.CustomerId,
                 CustomerName = order.Customer.FullName,
+                CustomerAvatarUrl = await _authResolver.GetAvatarUrlByUserIdAsync(order.CustomerId),
                 CustomerPhone = order.Customer.Phone,
                 TotalAmount = order.Total,
                 Status = order.Status,

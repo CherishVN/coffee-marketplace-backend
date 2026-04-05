@@ -115,6 +115,7 @@ public class OrderDto
     public Guid Id { get; set; }
     public Guid CustomerId { get; set; }
     public string? CustomerName { get; set; }
+    public string? CustomerAvatarUrl { get; set; }
     public string? CustomerPhone { get; set; }
     public decimal TotalAmount { get; set; }
     public short Status { get; set; }
