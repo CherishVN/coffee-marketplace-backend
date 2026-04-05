@@ -829,6 +829,7 @@ public class SellerService : ISellerService
             .Include(o => o.ShippingAddress)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
+                    .ThenInclude(p => p.ProductImages)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Variant)
             .Where(o => o.ShopId == shop.Id);
@@ -845,6 +846,7 @@ public class SellerService : ISellerService
             .Select(o => new OrderDto
             {
                 Id = o.Id,
+                OrderCode = o.OrderCode,
                 CustomerId = o.CustomerId,
                 CustomerName = o.Customer.FullName,
                 CustomerPhone = o.Customer.Phone,
@@ -853,12 +855,22 @@ public class SellerService : ISellerService
                 ShippingAddress = o.ShippingAddress != null 
                     ? $"{o.ShippingAddress.AddressLine1}, {o.ShippingAddress.Ward}, {o.ShippingAddress.District}, {o.ShippingAddress.City}"
                     : o.ShipAddress,
+                ProviderShippingFee = o.ProviderShippingFee,
+                ShippingProvider = o.ShippingProvider,
+                ShippingServiceId = o.ShippingServiceId,
+                TrackingCode = o.TrackingCode,
+                EstimatedDeliveryDate = o.EstimatedDeliveryDate,
+                ActualDeliveryDate = o.ActualDeliveryDate,
                 CreatedAt = o.CreatedAt,
                 Items = o.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,
                     ProductId = oi.ProductId,
                     ProductName = oi.Product.Name,
+                    ProductThumbnailUrl = oi.Product.ProductImages
+                        .OrderBy(pi => pi.SortOrder)
+                        .Select(pi => pi.ImageUrl)
+                        .FirstOrDefault(),
                     VariantName = oi.Variant != null ? oi.Variant.VariantName : null,
                     Quantity = oi.Quantity,
                     UnitPrice = oi.UnitPrice,
@@ -874,12 +886,15 @@ public class SellerService : ISellerService
                 customerIds.Select(async customerId => new
                 {
                     CustomerId = customerId,
+                    Email = await _authResolver.GetEmailByUserIdAsync(customerId),
                     AvatarUrl = await _authResolver.GetAvatarUrlByUserIdAsync(customerId)
                 }));
 
             var avatarByCustomer = avatarLookups.ToDictionary(x => x.CustomerId, x => x.AvatarUrl);
+            var emailByCustomer = avatarLookups.ToDictionary(x => x.CustomerId, x => x.Email);
             foreach (var orderDto in orders)
             {
+                orderDto.CustomerEmail = emailByCustomer.GetValueOrDefault(orderDto.CustomerId);
                 orderDto.CustomerAvatarUrl = avatarByCustomer.GetValueOrDefault(orderDto.CustomerId);
             }
         }
@@ -910,6 +925,7 @@ public class SellerService : ISellerService
             .Include(o => o.ShippingAddress)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
+                    .ThenInclude(p => p.ProductImages)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Variant)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.ShopId == shop.Id);
@@ -929,8 +945,10 @@ public class SellerService : ISellerService
             Data = new OrderDto
             {
                 Id = order.Id,
+                OrderCode = order.OrderCode,
                 CustomerId = order.CustomerId,
                 CustomerName = order.Customer.FullName,
+                CustomerEmail = await _authResolver.GetEmailByUserIdAsync(order.CustomerId),
                 CustomerAvatarUrl = await _authResolver.GetAvatarUrlByUserIdAsync(order.CustomerId),
                 CustomerPhone = order.Customer.Phone,
                 TotalAmount = order.Total,
@@ -938,12 +956,22 @@ public class SellerService : ISellerService
                 ShippingAddress = order.ShippingAddress != null 
                     ? $"{order.ShippingAddress.AddressLine1}, {order.ShippingAddress.Ward}, {order.ShippingAddress.District}, {order.ShippingAddress.City}"
                     : order.ShipAddress,
+                ProviderShippingFee = order.ProviderShippingFee,
+                ShippingProvider = order.ShippingProvider,
+                ShippingServiceId = order.ShippingServiceId,
+                TrackingCode = order.TrackingCode,
+                EstimatedDeliveryDate = order.EstimatedDeliveryDate,
+                ActualDeliveryDate = order.ActualDeliveryDate,
                 CreatedAt = order.CreatedAt,
                 Items = order.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,
                     ProductId = oi.ProductId,
                     ProductName = oi.Product.Name,
+                    ProductThumbnailUrl = oi.Product.ProductImages
+                        .OrderBy(pi => pi.SortOrder)
+                        .Select(pi => pi.ImageUrl)
+                        .FirstOrDefault(),
                     VariantName = oi.Variant?.VariantName,
                     Quantity = oi.Quantity,
                     UnitPrice = oi.UnitPrice,
@@ -984,6 +1012,16 @@ public class SellerService : ISellerService
         var newOrderStatus = (OrderStatus)dto.Status;
         order.Status = dto.Status;
         order.UpdatedAt = DateTime.UtcNow;
+
+        if (!string.IsNullOrEmpty(dto.TrackingCode))
+        {
+            order.TrackingCode = dto.TrackingCode;
+        }
+
+        if (newOrderStatus == OrderStatus.Delivered && oldStatus != OrderStatus.Delivered)
+        {
+            order.ActualDeliveryDate = DateTime.UtcNow;
+        }
 
         // Cộng SoldCount khi đơn lần đầu đạt Completed(6) — khách xác nhận nhận hàng
         var alreadyFulfilled = oldStatus == OrderStatus.Completed;

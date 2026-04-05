@@ -11,6 +11,8 @@ public partial class Order
 
     public Guid ShopId { get; set; }
 
+    public string OrderCode { get; set; } = null!;
+
     public short Status { get; set; }
 
     public decimal Subtotal { get; set; }
@@ -32,6 +34,24 @@ public partial class Order
     public Guid? ShippingAddressId { get; set; }
 
     public Guid? TransactionId { get; set; }
+
+    /// <summary>Phí thực tế trả cho GHN</summary>
+    public decimal ProviderShippingFee { get; set; } = 0;
+
+    /// <summary>Đối tác vận chuyển (VD: 'GHN')</summary>
+    public string? ShippingProvider { get; set; }
+
+    /// <summary>Gói dịch vụ (VD: '53320')</summary>
+    public string? ShippingServiceId { get; set; }
+
+    /// <summary>Mã vận đơn GHN</summary>
+    public string? TrackingCode { get; set; }
+
+    /// <summary>Dự kiến giao hàng</summary>
+    public DateTimeOffset? EstimatedDeliveryDate { get; set; }
+
+    /// <summary>Thời gian giao thực tế</summary>
+    public DateTimeOffset? ActualDeliveryDate { get; set; }
 
     public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 

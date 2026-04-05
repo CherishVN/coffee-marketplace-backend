@@ -68,6 +68,7 @@ public class CustomerOrderService : ICustomerOrderService
         var orders = rawOrders.Select(o => new CustomerOrderSummaryDto
         {
             Id = o.Id,
+            OrderCode = o.OrderCode,
             ShopId = o.ShopId,
             ShopSlug = o.Shop.Slug,
             ShopName = o.Shop.Name,
@@ -131,6 +132,7 @@ public class CustomerOrderService : ICustomerOrderService
         var detail = new CustomerOrderDetailDto
         {
             Id = order.Id,
+            OrderCode = order.OrderCode,
             ShopId = order.ShopId,
             ShopSlug = order.Shop.Slug,
             ShopName = order.Shop.Name,

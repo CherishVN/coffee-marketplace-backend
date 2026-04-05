@@ -917,6 +917,17 @@ public partial class ApplicationDbContext : DbContext
                 .HasDefaultValueSql("now()")
                 .HasColumnName("updated_at");
 
+            // Shipping provider fields
+            entity.Property(e => e.ProviderShippingFee)
+                .HasPrecision(12, 2)
+                .HasDefaultValue(0m)
+                .HasColumnName("provider_shipping_fee");
+            entity.Property(e => e.ShippingProvider).HasColumnName("shipping_provider");
+            entity.Property(e => e.ShippingServiceId).HasColumnName("shipping_service_id");
+            entity.Property(e => e.TrackingCode).HasColumnName("tracking_code");
+            entity.Property(e => e.EstimatedDeliveryDate).HasColumnName("estimated_delivery_date");
+            entity.Property(e => e.ActualDeliveryDate).HasColumnName("actual_delivery_date");
+
             entity.HasOne(d => d.Customer).WithMany(p => p.Orders)
                 .HasForeignKey(d => d.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict)

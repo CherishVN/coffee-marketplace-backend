@@ -28,6 +28,7 @@ public class CustomerOrderItemDto
 public class CustomerOrderSummaryDto
 {
     public Guid Id { get; set; }
+    public string OrderCode { get; set; } = string.Empty;
     public Guid ShopId { get; set; }
     public string ShopSlug { get; set; } = string.Empty;
     public string ShopName { get; set; } = string.Empty;

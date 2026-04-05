@@ -242,7 +242,6 @@ public class CartService : ICartService
                 };
         }
 
-        // 4. Nhóm cart items theo shop → mỗi shop = 1 order
         var itemsByShop = cart.CartItems
             .GroupBy(ci => ci.Product.ShopId)
             .ToList();
@@ -253,17 +252,26 @@ public class CartService : ICartService
 
         foreach (var shopGroup in itemsByShop)
         {
+            var shopId = shopGroup.Key;
+            var shippingOption = dto.ShippingOptions?.FirstOrDefault(x => x.ShopId == shopId);
+            var shippingFee = shippingOption?.ShippingFee ?? ShippingFeePerShop;
+            var providerShippingFee = shippingOption?.ProviderShippingFee ?? 0m;
             var subtotal = shopGroup.Sum(ci => ci.UnitPrice * ci.Quantity);
-            var total = subtotal + ShippingFeePerShop;
+            var total = subtotal + shippingFee;
 
             var order = new Order
             {
                 Id = Guid.NewGuid(),
+                OrderCode = Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper() + DateTime.Now.ToString("yyMMdd"),
                 CustomerId = customerId,
-                ShopId = shopGroup.Key,
-                Status = 0, // Pending
+                ShopId = shopId,
+                Status = 0,
                 Subtotal = subtotal,
-                ShippingFee = ShippingFeePerShop,
+                ShippingFee = shippingFee,
+                ProviderShippingFee = providerShippingFee,
+                ShippingProvider = "GHN",
+                ShippingServiceId = shippingOption?.ShippingServiceId,
+                EstimatedDeliveryDate = shippingOption?.EstimatedDeliveryDate,
                 Total = total,
                 ShipFullName = address.FullName,
                 ShipPhone = address.Phone,

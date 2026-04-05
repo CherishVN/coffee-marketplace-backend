@@ -56,6 +56,7 @@ public class SellerUpdateOrderStatusDto
 {
     public short Status { get; set; }
     public string? Note { get; set; }
+    public string? TrackingCode { get; set; }
 }
 
 // Response DTOs
@@ -113,13 +114,21 @@ public class ProductVariantDetailDto
 public class OrderDto
 {
     public Guid Id { get; set; }
+    public string OrderCode { get; set; } = string.Empty;
     public Guid CustomerId { get; set; }
     public string? CustomerName { get; set; }
+    public string? CustomerEmail { get; set; }
     public string? CustomerAvatarUrl { get; set; }
     public string? CustomerPhone { get; set; }
     public decimal TotalAmount { get; set; }
     public short Status { get; set; }
     public string? ShippingAddress { get; set; }
+    public decimal ProviderShippingFee { get; set; }
+    public string? ShippingProvider { get; set; }
+    public string? ShippingServiceId { get; set; }
+    public string? TrackingCode { get; set; }
+    public DateTimeOffset? EstimatedDeliveryDate { get; set; }
+    public DateTimeOffset? ActualDeliveryDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<OrderItemDto>? Items { get; set; }
 }
@@ -129,6 +138,7 @@ public class OrderItemDto
     public Guid Id { get; set; }
     public Guid ProductId { get; set; }
     public string ProductName { get; set; } = string.Empty;
+    public string? ProductThumbnailUrl { get; set; }
     public string? VariantName { get; set; }
     public int Quantity { get; set; }
     public decimal UnitPrice { get; set; }

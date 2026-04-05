@@ -14,10 +14,21 @@ public class UpdateCartItemDto
     public int Quantity { get; set; }
 }
 
+public class ShopShippingOptionDto
+{
+    public Guid ShopId { get; set; }
+    public string? ShippingProvider { get; set; }
+    public string? ShippingServiceId { get; set; }
+    public decimal ProviderShippingFee { get; set; }
+    public decimal ShippingFee { get; set; }
+    public DateTimeOffset? EstimatedDeliveryDate { get; set; }
+}
+
 public class CheckoutDto
 {
     public Guid CartId { get; set; }
     public Guid ShippingAddressId { get; set; }
+    public List<ShopShippingOptionDto>? ShippingOptions { get; set; }
 }
 
 // ── Response DTOs ─────────────────────────────────────────────────────────────
