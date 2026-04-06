@@ -527,7 +527,7 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.ParentId).HasColumnName("parent_id");
             entity.Property(e => e.Slug).HasColumnName("slug");
-
+            entity.Property(e => e.Image).HasColumnName("image");
             entity.HasOne(d => d.Parent).WithMany(p => p.InverseParent)
                 .HasForeignKey(d => d.ParentId)
                 .OnDelete(DeleteBehavior.SetNull)
@@ -891,6 +891,7 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Id)
                 .HasDefaultValueSql("gen_random_uuid()")
                 .HasColumnName("id");
+            entity.Property(e => e.OrderCode).HasColumnName("order_code");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");

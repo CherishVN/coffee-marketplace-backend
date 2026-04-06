@@ -104,7 +104,7 @@ public class PaymentService : IPaymentService
         vnpay.AddRequestData("vnp_CurrCode", _vnPaySettings.CurrCode);
         vnpay.AddRequestData("vnp_IpAddr", ipAddress);
         vnpay.AddRequestData("vnp_Locale", _vnPaySettings.Locale);
-        vnpay.AddRequestData("vnp_OrderInfo", $"Thanh toan don hang {orderId}");
+        vnpay.AddRequestData("vnp_OrderInfo", $"Thanh toán đơn hàng {order.OrderCode}");
         vnpay.AddRequestData("vnp_OrderType", "other");
         vnpay.AddRequestData("vnp_ReturnUrl", _vnPaySettings.ReturnUrl);
         vnpay.AddRequestData("vnp_TxnRef", txnRef);
@@ -215,7 +215,7 @@ public class PaymentService : IPaymentService
 
             await _context.SaveChangesAsync();
 
-            var oid = NotificationFormatting.ShortEntityId(order.Id);
+            var oid = order.OrderCode;
             await _notifications.PublishAsync(
                 order.CustomerId,
                 nameof(NotificationType.Payment),
@@ -274,7 +274,7 @@ public class PaymentService : IPaymentService
 
             await _context.SaveChangesAsync();
 
-            var oidFail = NotificationFormatting.ShortEntityId(order.Id);
+            var oidFail = order.OrderCode;
             await _notifications.PublishAsync(
                 order.CustomerId,
                 nameof(NotificationType.Payment),
@@ -331,7 +331,7 @@ public class PaymentService : IPaymentService
 
         var requestId = payment.Id.ToString();
         var momoOrderId = payment.Id.ToString();
-        var orderInfo = $"Thanh toan don hang {orderId}";
+        var orderInfo = $"Thanh toán đơn hàng {order.OrderCode}";
         var amount = ((long)order.Total).ToString();
         var extraData = string.Empty;
 
@@ -459,7 +459,7 @@ public class PaymentService : IPaymentService
 
             await _context.SaveChangesAsync();
 
-            var momoOk = NotificationFormatting.ShortEntityId(order.Id);
+            var momoOk = order.OrderCode;
             await _notifications.PublishAsync(
                 order.CustomerId,
                 nameof(NotificationType.Payment),
@@ -507,7 +507,7 @@ public class PaymentService : IPaymentService
 
             await _context.SaveChangesAsync();
 
-            var momoFail = NotificationFormatting.ShortEntityId(order.Id);
+            var momoFail = order.OrderCode;
             await _notifications.PublishAsync(
                 order.CustomerId,
                 nameof(NotificationType.Payment),

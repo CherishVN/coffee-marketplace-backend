@@ -16,7 +16,6 @@ public partial class Category
 
     public string Slug { get; set; } = null!;
 
-    [Column("image")]
     public string? Image { get; set; }
 
     public short Level { get; set; }

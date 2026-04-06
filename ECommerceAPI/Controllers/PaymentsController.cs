@@ -109,12 +109,11 @@ public class PaymentsController : ControllerBase
     {
         _logger.LogInformation("[MoMo Return] OrderId={OrderId}, ResultCode={Code}", orderId, resultCode);
 
-        return Ok(new
-        {
-            success = resultCode == 0,
-            orderId,
-            resultCode,
-            message = resultCode == 0 ? "Thanh toán thành công" : (message ?? "Thanh toán thất bại")
-        });
+        var frontendUrl = _configuration["FrontendUrl"];
+
+        if (resultCode == 0)
+            return Redirect($"{frontendUrl}/payment/success?orderId={orderId}");
+        else
+            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(message ?? "Thanh toán thất bại")}");
     }
 }
