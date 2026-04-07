@@ -17,6 +17,7 @@ public class OrderAdminService : IOrderAdminService
     private readonly INotificationService _notifications;
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly ISellerWalletReleaseService _walletRelease;
+    private readonly IOrderNotificationEmailComposer _orderEmailComposer;
 
     public OrderAdminService(
         ApplicationDbContext context,
@@ -24,7 +25,8 @@ public class OrderAdminService : IOrderAdminService
         IHubContext<OrderTrackingHub> hubContext,
         INotificationService notifications,
         ISellerWalletReversalService walletReversal,
-        ISellerWalletReleaseService walletRelease)
+        ISellerWalletReleaseService walletRelease,
+        IOrderNotificationEmailComposer orderEmailComposer)
     {
         _context = context;
         _logger = logger;
@@ -32,6 +34,7 @@ public class OrderAdminService : IOrderAdminService
         _notifications = notifications;
         _walletReversal = walletReversal;
         _walletRelease = walletRelease;
+        _orderEmailComposer = orderEmailComposer;
     }
 
     public async Task<AdminOrderListResponseDto> GetAllOrdersAsync(
@@ -257,6 +260,7 @@ public class OrderAdminService : IOrderAdminService
             var newStatus = (OrderStatus)order.Status;
             var code = NotificationFormatting.ShortEntityId(order.Id);
             var reasonPart = string.IsNullOrWhiteSpace(dto.Reason) ? "" : $" Ghi chú: {dto.Reason}";
+            var composed = await _orderEmailComposer.TryComposeAsync(order.Id, oldStatus, newStatus);
             await _notifications.PublishAsync(
                 order.CustomerId,
                 nameof(NotificationType.Order),
@@ -264,7 +268,9 @@ public class OrderAdminService : IOrderAdminService
                 $"Đơn #{code} được cập nhật trạng thái: {newStatus}.{reasonPart}",
                 "Order",
                 order.Id,
-                queueEmail: true);
+                queueEmail: true,
+                emailHtmlBody: composed?.Html,
+                emailSubjectOverride: composed?.Subject);
 
             _logger.LogInformation(
                 "Admin {AdminId} updated order {OrderId} status to {Status}. Reason: {Reason}",

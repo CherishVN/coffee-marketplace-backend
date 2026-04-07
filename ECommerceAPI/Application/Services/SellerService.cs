@@ -22,6 +22,7 @@ public class SellerService : ISellerService
     private readonly IUserAuthEmailResolver _authResolver;
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly ISellerWalletReleaseService _walletRelease;
+    private readonly IOrderNotificationEmailComposer _orderEmailComposer;
 
     public SellerService(
         ApplicationDbContext context,
@@ -29,7 +30,8 @@ public class SellerService : ISellerService
         INotificationService notifications,
         IUserAuthEmailResolver authResolver,
         ISellerWalletReversalService walletReversal,
-        ISellerWalletReleaseService walletRelease)
+        ISellerWalletReleaseService walletRelease,
+        IOrderNotificationEmailComposer orderEmailComposer)
     {
         _context = context;
         _hubContext = hubContext;
@@ -37,6 +39,7 @@ public class SellerService : ISellerService
         _authResolver = authResolver;
         _walletReversal = walletReversal;
         _walletRelease = walletRelease;
+        _orderEmailComposer = orderEmailComposer;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -1049,6 +1052,7 @@ public class SellerService : ISellerService
 
         var newStatus = (OrderStatus)order.Status;
         var code = NotificationFormatting.ShortEntityId(order.Id);
+        var composed = await _orderEmailComposer.TryComposeAsync(order.Id, oldStatus, newStatus);
         await _notifications.PublishAsync(
             order.CustomerId,
             nameof(NotificationType.Order),
@@ -1056,7 +1060,9 @@ public class SellerService : ISellerService
             $"Đơn #{code} chuyển từ {oldStatus} sang {newStatus}.",
             "Order",
             order.Id,
-            queueEmail: true);
+            queueEmail: true,
+            emailHtmlBody: composed?.Html,
+            emailSubjectOverride: composed?.Subject);
 
         return new ServiceResponse
         {

@@ -93,6 +93,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IConversationService, ConversationService>();
             builder.Services.AddScoped<IMaterialAdminService, MaterialAdminService>();
             builder.Services.AddScoped<IShopStorefrontService, ShopStorefrontService>();
+            builder.Services.AddScoped<IOrderNotificationEmailComposer, OrderNotificationEmailComposer>();
             builder.Services.AddScoped<INotificationService, NotificationService>();
             builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
             builder.Services.AddHostedService<NotificationEmailBackgroundService>();

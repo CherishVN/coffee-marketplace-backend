@@ -16,6 +16,7 @@ public interface INotificationService
 
     /// <summary>
     /// Lưu thông báo trong DB; tùy chọn đưa email vào hàng đợi (gửi bởi background service).
+    /// Nếu <paramref name="emailHtmlBody"/> có giá trị, email dùng HTML này thay vì chỉ bọc <paramref name="content"/>.
     /// </summary>
     Task PublishAsync(
         Guid userId,
@@ -25,5 +26,7 @@ public interface INotificationService
         string? referenceType = null,
         Guid? referenceId = null,
         bool queueEmail = false,
+        string? emailHtmlBody = null,
+        string? emailSubjectOverride = null,
         CancellationToken cancellationToken = default);
 }
