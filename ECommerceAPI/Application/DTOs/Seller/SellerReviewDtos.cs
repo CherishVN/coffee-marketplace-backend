@@ -9,8 +9,14 @@ public class SellerProductReviewItemDto
     public string? BuyerName { get; set; }
     public short Rating { get; set; }
     public string? Comment { get; set; }
+    public string? SellerReply { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<string> ImageUrls { get; set; } = new();
+}
+
+public class ReplyToReviewDto
+{
+    public string Reply { get; set; } = string.Empty;
 }
 
 /// <summary>Đánh giá sản phẩm của khách (theo shop), có phân trang và thống kê.</summary>

@@ -258,18 +258,19 @@ public class SellerController : ControllerBase
     public async Task<IActionResult> GetMyOrders(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] short? status = null)
+        [FromQuery] short? status = null,
+        [FromQuery] string? search = null)
     {
         var userId = _userClaimsService.GetUserId();
         if (userId == null)
             return Unauthorized(new { success = false, message = "Token không hợp lệ" });
 
-        var result = await _sellerService.GetMyOrdersAsync(userId.Value, page, pageSize, status);
+        var result = await _sellerService.GetMyOrdersAsync(userId.Value, page, pageSize, status, search);
 
         if (!result.Success)
             return BadRequest(new { success = false, message = result.Message });
 
-        return Ok(new { success = true, data = result.Data });
+        return Ok(new { success = true, data = result.Data, totalCount = result.TotalCount });
     }
 
     /// <summary>
@@ -328,5 +329,26 @@ public class SellerController : ControllerBase
             return BadRequest(new { success = false, message = result.Message });
 
         return Ok(new { success = true, data = result.Data });
+    }
+
+    /// <summary>
+    /// Phản hồi một đánh giá sản phẩm thuộc shop
+    /// </summary>
+    [HttpPost("reviews/{reviewId}/reply")]
+    public async Task<IActionResult> ReplyToReview(Guid reviewId, [FromBody] ReplyToReviewDto dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        if (string.IsNullOrWhiteSpace(dto.Reply))
+            return BadRequest(new { success = false, message = "Nội dung phản hồi không được để trống" });
+
+        var result = await _sellerService.ReplyToReviewAsync(userId.Value, reviewId, dto.Reply);
+
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
     }
 }

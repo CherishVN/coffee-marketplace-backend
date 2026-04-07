@@ -100,6 +100,7 @@ public class CustomerOrderService : ICustomerOrderService
             {
                 Id = oi.Id,
                 ProductId = oi.ProductId,
+                VariantId = oi.VariantId,
                 ProductName = oi.Product.Name,
                 VariantName = oi.Variant?.VariantName,
                 Quantity = oi.Quantity,
@@ -173,6 +174,7 @@ public class CustomerOrderService : ICustomerOrderService
             {
                 Id = oi.Id,
                 ProductId = oi.ProductId,
+                VariantId = oi.VariantId,
                 ProductName = oi.Product.Name,
                 VariantName = oi.Variant?.VariantName,
                 Quantity = oi.Quantity,
@@ -447,7 +449,9 @@ public class CustomerOrderService : ICustomerOrderService
 
         await NotifyStatusChanged(order, oldStatus, OrderStatus.Cancelled);
 
-        var code = NotificationFormatting.ShortEntityId(order.Id);
+        var code = string.IsNullOrWhiteSpace(order.OrderCode)
+            ? NotificationFormatting.ShortEntityId(order.Id)
+            : order.OrderCode;
         var reasonPart = string.IsNullOrWhiteSpace(normalizedReason) ? string.Empty : $" Lý do: {normalizedReason}";
         var composed = await _orderEmailComposer.TryComposeAsync(order.Id, oldStatus, OrderStatus.Cancelled);
         await _notifications.PublishAsync(

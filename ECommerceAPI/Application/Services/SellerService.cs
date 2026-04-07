@@ -813,7 +813,7 @@ public class SellerService : ISellerService
         };
     }
 
-    public async Task<ServiceResponse<List<OrderDto>>> GetMyOrdersAsync(Guid userId, int page, int pageSize, short? status)
+    public async Task<ServiceResponse<List<OrderDto>>> GetMyOrdersAsync(Guid userId, int page, int pageSize, short? status, string? search = null)
     {
         var shop = await _context.Shops
             .FirstOrDefaultAsync(s => s.OwnerId == userId);
@@ -841,6 +841,17 @@ public class SellerService : ISellerService
         {
             query = query.Where(o => o.Status == status.Value);
         }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var q = search.ToLower();
+            query = query.Where(o =>
+                (o.OrderCode != null && o.OrderCode.ToLower().Contains(q)) ||
+                (o.Customer.FullName != null && o.Customer.FullName.ToLower().Contains(q)) ||
+                (o.Customer.Phone != null && o.Customer.Phone.Contains(q)));
+        }
+
+        var totalCount = await query.CountAsync();
 
         var orders = await query
             .OrderByDescending(o => o.CreatedAt)
@@ -905,7 +916,8 @@ public class SellerService : ISellerService
         return new ServiceResponse<List<OrderDto>>
         {
             Success = true,
-            Data = orders
+            Data = orders,
+            TotalCount = totalCount
         };
     }
 
@@ -1155,6 +1167,7 @@ public class SellerService : ISellerService
                 BuyerName = x.u.FullName,
                 Rating = x.r.Rating,
                 Comment = x.r.Content,
+                SellerReply = x.r.SellerReply,
                 CreatedAt = x.r.CreatedAt,
                 ImageUrls = x.r.ImageUrls
             })
@@ -1171,9 +1184,29 @@ public class SellerService : ISellerService
                 PageSize = pageSize,
                 AverageRating = averageRating,
                 RatingDistribution = dist,
-                PendingReplyCount = totalCount
+                PendingReplyCount = await baseQuery.CountAsync(x => x.r.SellerReply == null || x.r.SellerReply == "")
             }
         };
+    }
+
+    public async Task<ServiceResponse> ReplyToReviewAsync(Guid userId, Guid reviewId, string reply)
+    {
+        var shop = await _context.Shops.AsNoTracking().FirstOrDefaultAsync(s => s.OwnerId == userId);
+        if (shop == null)
+            return new ServiceResponse { Success = false, Message = "Bạn chưa có shop" };
+
+        var review = await _context.ProductReviews
+            .Include(r => r.Product)
+            .FirstOrDefaultAsync(r => r.Id == reviewId && r.Product.ShopId == shop.Id);
+
+        if (review == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy đánh giá" };
+
+        review.SellerReply = reply.Trim();
+        review.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return new ServiceResponse { Success = true, Message = "Phản hồi đã được lưu" };
     }
 
     private async Task IncrementSoldCountAsync(IEnumerable<OrderItem> items)

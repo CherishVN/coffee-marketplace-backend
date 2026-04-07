@@ -28,7 +28,7 @@ public interface ISellerService
     Task<ServiceResponse> UpdateInventoryAsync(Guid userId, Guid productId, UpdateInventoryDto dto);
     
     // Order Management
-    Task<ServiceResponse<List<OrderDto>>> GetMyOrdersAsync(Guid userId, int page, int pageSize, short? status);
+    Task<ServiceResponse<List<OrderDto>>> GetMyOrdersAsync(Guid userId, int page, int pageSize, short? status, string? search = null);
     Task<ServiceResponse<OrderDto>> GetOrderByIdAsync(Guid userId, Guid orderId);
     Task<ServiceResponse> UpdateOrderStatusAsync(Guid userId, Guid orderId, SellerUpdateOrderStatusDto dto);
 
@@ -39,4 +39,7 @@ public interface ISellerService
         int pageSize,
         short? rating,
         string? search);
+
+    /// <summary>Phản hồi một đánh giá sản phẩm thuộc shop.</summary>
+    Task<ServiceResponse> ReplyToReviewAsync(Guid userId, Guid reviewId, string reply);
 }
