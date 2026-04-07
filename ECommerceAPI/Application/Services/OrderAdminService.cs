@@ -224,6 +224,12 @@ public class OrderAdminService : IOrderAdminService
             var oldStatus = (OrderStatus)order.Status;
             var newOrderStatus = (OrderStatus)dto.NewStatus;
             order.Status = dto.NewStatus;
+            if (newOrderStatus == OrderStatus.Cancelled)
+            {
+                order.CancelReason = string.IsNullOrWhiteSpace(dto.Reason)
+                    ? null
+                    : dto.Reason.Trim()[..Math.Min(dto.Reason.Trim().Length, 500)];
+            }
             order.UpdatedAt = DateTime.UtcNow;
 
             // Cộng SoldCount khi đơn lần đầu đạt Completed(6) — khách xác nhận nhận hàng

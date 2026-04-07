@@ -97,6 +97,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<INotificationService, NotificationService>();
             builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
             builder.Services.AddHostedService<NotificationEmailBackgroundService>();
+            builder.Services.AddHostedService<PaymentTimeoutBackgroundService>();
             builder.Services.AddMemoryCache();
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();

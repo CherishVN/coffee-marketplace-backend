@@ -65,7 +65,7 @@ public class PaymentsController : ControllerBase
         if (result.Success)
             return Redirect($"{frontendUrl}/payment/success?orderCode={result.OrderCode}&amount={result.Amount}");
         else
-            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}");
+            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}&orderCode={Uri.EscapeDataString(result.OrderCode ?? string.Empty)}");
     }
 
     [HttpPost("momo/create")]
@@ -115,6 +115,6 @@ public class PaymentsController : ControllerBase
         if (result.Success)
             return Redirect($"{frontendUrl}/payment/success?orderCode={result.OrderCode}&amount={result.Amount}");
         else
-            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}");
+            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}&orderCode={Uri.EscapeDataString(result.OrderCode ?? string.Empty)}");
     }
 }

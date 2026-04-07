@@ -27,6 +27,8 @@ public partial class Order
 
     public string? ShipAddress { get; set; }
 
+    public string? CancelReason { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }

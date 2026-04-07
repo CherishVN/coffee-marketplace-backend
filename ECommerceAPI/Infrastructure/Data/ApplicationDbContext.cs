@@ -892,6 +892,7 @@ public partial class ApplicationDbContext : DbContext
                 .HasDefaultValueSql("gen_random_uuid()")
                 .HasColumnName("id");
             entity.Property(e => e.OrderCode).HasColumnName("order_code");
+            entity.Property(e => e.CancelReason).HasColumnName("cancel_reason");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");

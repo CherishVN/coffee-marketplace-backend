@@ -1014,6 +1014,12 @@ public class SellerService : ISellerService
         var oldStatus = (OrderStatus)order.Status;
         var newOrderStatus = (OrderStatus)dto.Status;
         order.Status = dto.Status;
+        if (newOrderStatus == OrderStatus.Cancelled)
+        {
+            order.CancelReason = string.IsNullOrWhiteSpace(dto.Note)
+                ? null
+                : dto.Note.Trim()[..Math.Min(dto.Note.Trim().Length, 500)];
+        }
         order.UpdatedAt = DateTime.UtcNow;
 
         if (!string.IsNullOrEmpty(dto.TrackingCode))

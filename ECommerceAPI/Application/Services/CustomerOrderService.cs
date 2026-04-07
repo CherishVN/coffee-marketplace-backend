@@ -16,6 +16,7 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
     private readonly ISellerWalletReleaseService _walletRelease;
+    private readonly ISellerWalletReversalService _walletReversal;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
 
     public CustomerOrderService(
@@ -23,12 +24,14 @@ public class CustomerOrderService : ICustomerOrderService
         IHubContext<OrderTrackingHub> hubContext,
         INotificationService notifications,
         ISellerWalletReleaseService walletRelease,
+        ISellerWalletReversalService walletReversal,
         IOrderNotificationEmailComposer orderEmailComposer)
     {
         _context = context;
         _hubContext = hubContext;
         _notifications = notifications;
         _walletRelease = walletRelease;
+        _walletReversal = walletReversal;
         _orderEmailComposer = orderEmailComposer;
     }
 
@@ -56,6 +59,19 @@ public class CustomerOrderService : ICustomerOrderService
             .Take(pageSize)
             .ToListAsync();
 
+        var orderIds = rawOrders.Select(o => o.Id).ToList();
+        var paymentProviderMap = orderIds.Count == 0
+            ? new Dictionary<Guid, string?>()
+            : await _context.Payments
+                .Where(p => orderIds.Contains(p.OrderId))
+                .GroupBy(p => p.OrderId)
+                .Select(g => new
+                {
+                    OrderId = g.Key,
+                    Provider = g.OrderBy(p => p.CreatedAt).Select(p => p.Provider).FirstOrDefault()
+                })
+                .ToDictionaryAsync(x => x.OrderId, x => x.Provider);
+
         var allProductIds = rawOrders.SelectMany(o => o.OrderItems).Select(oi => oi.ProductId).Distinct().ToList();
         HashSet<Guid> reviewedProductIds;
         if (allProductIds.Count == 0)
@@ -72,6 +88,8 @@ public class CustomerOrderService : ICustomerOrderService
         {
             Id = o.Id,
             OrderCode = o.OrderCode,
+            PaymentProvider = paymentProviderMap.TryGetValue(o.Id, out var provider) ? provider : null,
+            CancelReason = o.CancelReason,
             ShopId = o.ShopId,
             ShopSlug = o.Shop.Slug,
             ShopName = o.Shop.Name,
@@ -136,6 +154,12 @@ public class CustomerOrderService : ICustomerOrderService
         {
             Id = order.Id,
             OrderCode = order.OrderCode,
+            PaymentProvider = await _context.Payments
+                .Where(p => p.OrderId == order.Id)
+                .OrderBy(p => p.CreatedAt)
+                .Select(p => p.Provider)
+                .FirstOrDefaultAsync(),
+            CancelReason = order.CancelReason,
             ShopId = order.ShopId,
             ShopSlug = order.Shop.Slug,
             ShopName = order.Shop.Name,
@@ -337,27 +361,105 @@ public class CustomerOrderService : ICustomerOrderService
         return result;
     }
 
-    public async Task<ServiceResponse> CancelPendingOrderAsync(Guid customerId, Guid orderId)
+    public Task<ServiceResponse> CancelOrderAsync(Guid customerId, Guid orderId, string? reason = null)
+    {
+        return CancelOrderCoreAsync(customerId, orderId, reason, pendingOnly: false);
+    }
+
+    public Task<ServiceResponse> CancelPendingOrderAsync(Guid customerId, Guid orderId, string? reason = null)
+    {
+        return CancelOrderCoreAsync(customerId, orderId, reason, pendingOnly: true);
+    }
+
+    private async Task<ServiceResponse> CancelOrderCoreAsync(Guid customerId, Guid orderId, string? reason, bool pendingOnly)
     {
         var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Include(o => o.Payments)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
 
         if (order == null)
             return new ServiceResponse { Success = false, Message = "Không tìm thấy đơn hàng" };
 
-        if (order.Status != (short)OrderStatus.PendingPayment)
+        var oldStatus = (OrderStatus)order.Status;
+        var normalizedReason = string.IsNullOrWhiteSpace(reason)
+            ? null
+            : reason.Trim()[..Math.Min(reason.Trim().Length, 500)];
+
+        var canCancel = pendingOnly
+            ? oldStatus == OrderStatus.PendingPayment
+            : oldStatus is OrderStatus.PendingPayment
+                or OrderStatus.PendingConfirmation
+                or OrderStatus.Confirmed
+                or OrderStatus.Processing;
+
+        if (!canCancel)
+        {
             return new ServiceResponse
             {
                 Success = false,
-                Message = "Chỉ có thể huỷ đơn hàng đang chờ thanh toán"
+                Message = pendingOnly
+                    ? "Chỉ có thể huỷ đơn hàng đang chờ thanh toán"
+                    : "Chỉ có thể huỷ đơn hàng trước khi giao"
             };
+        }
+
+        var now = DateTime.UtcNow;
+        var hasPaidPayment = order.Payments.Any(p => p.Status == (short)PaymentStatus.Paid);
+
+        foreach (var item in order.OrderItems)
+        {
+            var inv = await _context.Inventories
+                .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
+
+            if (inv == null)
+                continue;
+
+            if (hasPaidPayment)
+            {
+                inv.Quantity += item.Quantity;
+            }
+
+            inv.ReservedQuantity = Math.Max(0, inv.ReservedQuantity - item.Quantity);
+            inv.UpdatedAt = now;
+        }
+
+        foreach (var payment in order.Payments.Where(p => p.Status == (short)PaymentStatus.Pending))
+        {
+            payment.Status = (short)PaymentStatus.Cancelled;
+            payment.PaidAt = now;
+        }
 
         order.Status = (short)OrderStatus.Cancelled;
-        order.UpdatedAt = DateTime.UtcNow;
+        order.CancelReason = normalizedReason;
+        order.UpdatedAt = now;
+
+        if (hasPaidPayment)
+        {
+            await _walletReversal.TryReverseSettlementForOrderAsync(
+                order.Id,
+                string.IsNullOrWhiteSpace(normalizedReason)
+                    ? "Customer huỷ đơn trước khi giao hàng"
+                    : $"Customer huỷ đơn: {normalizedReason}");
+        }
 
         await _context.SaveChangesAsync();
 
-        await NotifyStatusChanged(order, OrderStatus.PendingPayment, OrderStatus.Cancelled);
+        await NotifyStatusChanged(order, oldStatus, OrderStatus.Cancelled);
+
+        var code = NotificationFormatting.ShortEntityId(order.Id);
+        var reasonPart = string.IsNullOrWhiteSpace(normalizedReason) ? string.Empty : $" Lý do: {normalizedReason}";
+        var composed = await _orderEmailComposer.TryComposeAsync(order.Id, oldStatus, OrderStatus.Cancelled);
+        await _notifications.PublishAsync(
+            order.CustomerId,
+            nameof(NotificationType.Order),
+            "Đơn hàng đã được huỷ",
+            $"Đơn #{code} đã được huỷ thành công.{reasonPart}",
+            "Order",
+            order.Id,
+            queueEmail: true,
+            emailHtmlBody: composed?.Html,
+            emailSubjectOverride: composed?.Subject);
 
         return new ServiceResponse { Success = true, Message = "Đơn hàng đã được huỷ" };
     }

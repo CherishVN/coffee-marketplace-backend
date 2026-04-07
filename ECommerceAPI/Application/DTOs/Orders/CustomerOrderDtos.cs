@@ -29,6 +29,8 @@ public class CustomerOrderSummaryDto
 {
     public Guid Id { get; set; }
     public string OrderCode { get; set; } = string.Empty;
+    public string? PaymentProvider { get; set; }
+    public string? CancelReason { get; set; }
     public Guid ShopId { get; set; }
     public string ShopSlug { get; set; } = string.Empty;
     public string ShopName { get; set; } = string.Empty;
@@ -82,5 +84,10 @@ public class ConfirmOrderResponseDto
     public short NewStatus { get; set; }
     public string NewStatusName { get; set; } = string.Empty;
     public DateTime UpdatedAt { get; set; }
+}
+
+public class CancelOrderRequestDto
+{
+    public string? Reason { get; set; }
 }
 
