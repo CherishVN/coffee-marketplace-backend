@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -47,9 +48,24 @@ public class PaymentService : IPaymentService
         _httpClient = httpClientFactory.CreateClient();
     }
 
+    private static bool IsAllowedClientReturnUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        var t = url.Trim();
+        if (t.Length > 1024) return false;
+        if (t.Contains('\r') || t.Contains('\n')) return false;
+        return t.StartsWith("ecommerce://", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("exp://", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("exps://", StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── 1. Tạo VNPay Payment URL ─────────────────────────────────────────────
     public async Task<CreatePaymentResponseDto> CreateVNPayPaymentAsync(
-        Guid orderId, Guid customerId, string ipAddress)
+        Guid orderId,
+        Guid customerId,
+        string ipAddress,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null)
     {
         // Lấy order và kiểm tra ownership
         var order = await _context.Orders
@@ -86,12 +102,15 @@ public class PaymentService : IPaymentService
         // Tạo TxnRef = DateTime.Now.Ticks (giống dự án FlowerShop)
         var txnRef = DateTime.Now.Ticks.ToString();
 
+        var txnSliding = new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(15));
+
         // Cache: txnRef → paymentId (expire 15 phút)
-        _memoryCache.Set(
-            $"TxnRef_{txnRef}",
-            payment.Id,
-            new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(15))
-        );
+        _memoryCache.Set($"TxnRef_{txnRef}", payment.Id, txnSliding);
+
+        if (IsAllowedClientReturnUrl(clientReturnSuccessUrl))
+            _memoryCache.Set($"VnpayClientSuccess_{txnRef}", clientReturnSuccessUrl!.Trim(), txnSliding);
+        if (IsAllowedClientReturnUrl(clientReturnFailureUrl))
+            _memoryCache.Set($"VnpayClientFailure_{txnRef}", clientReturnFailureUrl!.Trim(), txnSliding);
 
         // Build VNPay request
         var vnpay = new VNPayLibrary();
@@ -369,26 +388,71 @@ public class PaymentService : IPaymentService
         var response = await _httpClient.PostAsync(_moMoSettings.ApiUrl, content);
         var responseBody = await response.Content.ReadAsStringAsync();
 
-        _logger.LogInformation("[MoMo] Response: {Body}", responseBody);
+        var logBody = responseBody.Length > 800 ? responseBody[..800] + "…" : responseBody;
+        _logger.LogInformation("[MoMo] HTTP {StatusCode}, Body: {Body}", (int)response.StatusCode, logBody);
 
-        using var doc = JsonDocument.Parse(responseBody);
-        var root = doc.RootElement;
-
-        if (root.TryGetProperty("resultCode", out var resultCodeProp) && resultCodeProp.GetInt32() == 0)
+        if (!response.IsSuccessStatusCode)
         {
-            var payUrl = root.GetProperty("payUrl").GetString();
-            _logger.LogInformation("[MoMo] Created payUrl for OrderId: {OrderId}, PaymentId: {PaymentId}", orderId, payment.Id);
+            var hint = response.StatusCode switch
+            {
+                HttpStatusCode.GatewayTimeout or HttpStatusCode.RequestTimeout =>
+                    "Cổng MoMo phản hồi quá chậm hoặc tạm ngưng (timeout). Vui lòng thử lại sau.",
+                HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable =>
+                    "Dịch vụ MoMo tạm thời không ổn định. Vui lòng thử lại sau.",
+                _ => $"MoMo trả về HTTP {(int)response.StatusCode}. Vui lòng thử lại."
+            };
+            return new CreatePaymentResponseDto { Success = false, Message = hint };
+        }
+
+        var trimmedBody = responseBody.TrimStart();
+        if (trimmedBody.Length == 0 || (trimmedBody[0] != '{' && trimmedBody[0] != '['))
+        {
+            var preview = responseBody.Length == 0
+                ? "(empty)"
+                : responseBody[..Math.Min(120, responseBody.Length)].ReplaceLineEndings(" ");
+            _logger.LogWarning("[MoMo] Response is not JSON. Preview: {Preview}", preview);
             return new CreatePaymentResponseDto
             {
-                Success = true,
-                PaymentUrl = payUrl,
-                PaymentId = payment.Id,
-                Message = "Tạo URL thanh toán MoMo thành công"
+                Success = false,
+                Message = "Phản hồi từ MoMo không đúng định dạng (có thể là trang lỗi HTML). Vui lòng thử lại."
             };
         }
 
-        var errorMsg = root.TryGetProperty("message", out var msg) ? msg.GetString() : "Lỗi tạo thanh toán MoMo";
-        return new CreatePaymentResponseDto { Success = false, Message = errorMsg };
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(responseBody);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "[MoMo] JSON parse failed");
+            return new CreatePaymentResponseDto
+            {
+                Success = false,
+                Message = "Không đọc được phản hồi JSON từ MoMo. Vui lòng thử lại."
+            };
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("resultCode", out var resultCodeProp) && resultCodeProp.GetInt32() == 0)
+            {
+                var payUrl = root.GetProperty("payUrl").GetString();
+                _logger.LogInformation("[MoMo] Created payUrl for OrderId: {OrderId}, PaymentId: {PaymentId}", orderId, payment.Id);
+                return new CreatePaymentResponseDto
+                {
+                    Success = true,
+                    PaymentUrl = payUrl,
+                    PaymentId = payment.Id,
+                    Message = "Tạo URL thanh toán MoMo thành công"
+                };
+            }
+
+            var errorMsg = root.TryGetProperty("message", out var msg) ? msg.GetString() : "Lỗi tạo thanh toán MoMo";
+            return new CreatePaymentResponseDto { Success = false, Message = errorMsg };
+        }
     }
 
     // ── 4. Xử lý MoMo IPN Callback ───────────────────────────────────────────

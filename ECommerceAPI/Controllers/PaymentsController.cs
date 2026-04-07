@@ -1,8 +1,11 @@
+using System.Globalization;
+using System.Text.Json;
 using ECommerceAPI.Application.DTOs.Payments;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Text.Json;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace ECommerceAPI.Controllers;
 
@@ -14,17 +17,20 @@ public class PaymentsController : ControllerBase
     private readonly IUserClaimsService _userClaims;
     private readonly ILogger<PaymentsController> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IMemoryCache _memoryCache;
 
     public PaymentsController(
         IPaymentService paymentService,
         IUserClaimsService userClaims,
         ILogger<PaymentsController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IMemoryCache memoryCache)
     {
         _paymentService = paymentService;
         _userClaims = userClaims;
         _logger = logger;
         _configuration = configuration;
+        _memoryCache = memoryCache;
     }
 
     /// <summary>
@@ -40,7 +46,12 @@ public class PaymentsController : ControllerBase
 
         string ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
 
-        var result = await _paymentService.CreateVNPayPaymentAsync(dto.OrderId, customerId.Value, ipAddress);
+        var result = await _paymentService.CreateVNPayPaymentAsync(
+            dto.OrderId,
+            customerId.Value,
+            ipAddress,
+            dto.ClientReturnSuccessUrl,
+            dto.ClientReturnFailureUrl);
 
         if (!result.Success)
             return BadRequest(result);
@@ -57,15 +68,44 @@ public class PaymentsController : ControllerBase
     {
         _logger.LogInformation("[VNPay Return] Received: {QueryString}", Request.QueryString.Value);
 
+        var txnRef = Request.Query["vnp_TxnRef"].ToString();
+        _memoryCache.TryGetValue($"VnpayClientSuccess_{txnRef}", out string? clientSuccess);
+        _memoryCache.TryGetValue($"VnpayClientFailure_{txnRef}", out string? clientFailure);
+
         var result = await _paymentService.ProcessVNPayReturnAsync(Request.Query);
 
-        var frontendUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
+        var frontendUrl = (_configuration["FrontendUrl"] ?? "http://localhost:3000").TrimEnd('/');
 
-        if (result.Success)
+        if (result.Success && result.OrderId.HasValue)
+        {
+            if (!string.IsNullOrWhiteSpace(clientSuccess))
+            {
+                var url = QueryHelpers.AddQueryString(clientSuccess.Trim(), new Dictionary<string, string?>
+                {
+                    ["orderId"] = result.OrderId.Value.ToString(),
+                    ["amount"] = result.Amount.ToString(CultureInfo.InvariantCulture)
+                });
+                return Redirect(url);
+            }
+
             return Redirect($"{frontendUrl}/payment/success?orderId={result.OrderId}&amount={result.Amount}");
-        else
-            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}");
+        }
+
+        var failMsg = TruncateForRedirect(result.Message ?? "Thanh toán thất bại", 500);
+        if (!string.IsNullOrWhiteSpace(clientFailure))
+        {
+            var url = QueryHelpers.AddQueryString(clientFailure.Trim(), new Dictionary<string, string?>
+            {
+                ["message"] = failMsg
+            });
+            return Redirect(url);
+        }
+
+        return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(failMsg)}");
     }
+
+    private static string TruncateForRedirect(string message, int maxLen) =>
+        message.Length <= maxLen ? message : message[..maxLen];
 
     /// <summary>
     /// Tạo URL thanh toán MoMo cho một đơn hàng

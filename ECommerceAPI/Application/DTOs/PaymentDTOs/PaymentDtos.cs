@@ -3,6 +3,13 @@ namespace ECommerceAPI.Application.DTOs.Payments;
 public class CreatePaymentDto
 {
     public Guid OrderId { get; set; }
+
+    /// <summary>
+    /// Deep link (vd. ecommerce:// hoặc exp://) — BE redirect sau khi xử lý VNPay return, dùng với in-app browser.
+    /// </summary>
+    public string? ClientReturnSuccessUrl { get; set; }
+
+    public string? ClientReturnFailureUrl { get; set; }
 }
 
 public class CreatePaymentResponseDto
