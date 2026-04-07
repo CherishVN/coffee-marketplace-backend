@@ -10,9 +10,12 @@ public interface IPaymentService
         Guid customerId,
         string ipAddress,
         string? clientReturnSuccessUrl = null,
-        string? clientReturnFailureUrl = null);
+        string? clientReturnFailureUrl = null,
+        string? vnPayReturnUrlOverride = null);
     Task<VNPayReturnDto> ProcessVNPayReturnAsync(IQueryCollection queryParams);
 
     Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId);
     Task<MoMoReturnDto> ProcessMoMoIpnAsync(MoMoIpnRequest request);
+    Task<MoMoReturnDto> ProcessMoMoReturnAsync(IQueryCollection queryParams);
+    Task<int> ExpireStalePendingPaymentsAsync(CancellationToken cancellationToken = default);
 }
