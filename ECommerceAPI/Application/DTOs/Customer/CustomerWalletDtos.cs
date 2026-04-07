@@ -43,7 +43,10 @@ public class CreateCustomerWithdrawalDto
 public class CustomerWithdrawalRequestDto
 {
     public Guid Id { get; set; }
+    public Guid CustomerId { get; set; }
+    public string? CustomerName { get; set; }
     public decimal Amount { get; set; }
+    public string Currency { get; set; } = "VND";
     public string BankName { get; set; } = string.Empty;
     public string BankAccountNumber { get; set; } = string.Empty;
     public string BankAccountName { get; set; } = string.Empty;

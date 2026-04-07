@@ -206,11 +206,11 @@ public class CustomerWalletService : ICustomerWalletService
             .OrderByDescending(r => r.RequestedAt);
 
         var totalCount = await query.CountAsync();
-        var items = await query
+        var raw = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(r => MapToDto(r))
             .ToListAsync();
+        var items = raw.Select(r => MapToDto(r)).ToList();
 
         return new CustomerWithdrawalListResponseDto
         {
@@ -222,10 +222,125 @@ public class CustomerWalletService : ICustomerWalletService
         };
     }
 
-    private static CustomerWithdrawalRequestDto MapToDto(CustomerWithdrawalRequest r) => new()
+    public async Task<CustomerWithdrawalListResponseDto> AdminGetAllRequestsAsync(int page, int pageSize, short? status)
+    {
+        var query = _context.CustomerWithdrawalRequests
+            .Include(r => r.Customer)
+            .AsQueryable();
+
+        if (status.HasValue)
+            query = query.Where(r => r.Status == status.Value);
+
+        var totalCount = await query.CountAsync();
+        var raw = await query
+            .OrderByDescending(r => r.RequestedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+        var items = raw.Select(r => MapToDto(r, r.Customer?.FullName)).ToList();
+
+        return new CustomerWithdrawalListResponseDto
+        {
+            Success = true,
+            Requests = items,
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<CustomerWithdrawalResponseDto> AdminApproveRequestAsync(Guid requestId, string? adminNote, Guid adminId)
+    {
+        var request = await _context.CustomerWithdrawalRequests
+            .Include(r => r.Customer)
+            .FirstOrDefaultAsync(r => r.Id == requestId);
+
+        if (request == null)
+            return new CustomerWithdrawalResponseDto { Success = false, Message = "Không tìm thấy yêu cầu" };
+
+        if (request.Status != 0)
+            return new CustomerWithdrawalResponseDto { Success = false, Message = "Chỉ có thể duyệt yêu cầu đang chờ xử lý" };
+
+        request.Status = 3; // Paid
+        request.AdminNote = adminNote;
+        request.ReviewedAt = DateTime.UtcNow;
+        request.ReviewedBy = adminId;
+        request.PaidAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Admin {AdminId} approved customer withdrawal {RequestId} for {Amount}", adminId, requestId, request.Amount);
+
+        return new CustomerWithdrawalResponseDto
+        {
+            Success = true,
+            Message = "Đã duyệt yêu cầu rút tiền",
+            Request = MapToDto(request, request.Customer?.FullName)
+        };
+    }
+
+    public async Task<CustomerWithdrawalResponseDto> AdminRejectRequestAsync(Guid requestId, string reason, string? adminNote, Guid adminId)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return new CustomerWithdrawalResponseDto { Success = false, Message = "Vui lòng nhập lý do từ chối" };
+
+        var request = await _context.CustomerWithdrawalRequests
+            .Include(r => r.Wallet)
+            .Include(r => r.Customer)
+            .FirstOrDefaultAsync(r => r.Id == requestId);
+
+        if (request == null)
+            return new CustomerWithdrawalResponseDto { Success = false, Message = "Không tìm thấy yêu cầu" };
+
+        if (request.Status != 0)
+            return new CustomerWithdrawalResponseDto { Success = false, Message = "Chỉ có thể từ chối yêu cầu đang chờ xử lý" };
+
+        // Restore balance to wallet
+        if (request.Wallet != null)
+        {
+            request.Wallet.AvailableBalance += request.Amount;
+            request.Wallet.UpdatedAt = DateTime.UtcNow;
+        }
+
+        // Remove the withdrawal ledger entry and add a reversal
+        _context.CustomerWalletLedgers.Add(new CustomerWalletLedger
+        {
+            Id = Guid.NewGuid(),
+            WalletId = request.WalletId,
+            Type = "refund",
+            Amount = request.Amount,
+            Currency = request.Currency,
+            ReferenceType = "WithdrawalRequest",
+            ReferenceId = request.Id,
+            Note = $"Hoàn lại do từ chối yêu cầu rút tiền: {reason}",
+            CreatedAt = DateTime.UtcNow
+        });
+
+        request.Status = 2; // Rejected
+        request.RejectionReason = reason;
+        request.AdminNote = adminNote;
+        request.ReviewedAt = DateTime.UtcNow;
+        request.ReviewedBy = adminId;
+
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Admin {AdminId} rejected customer withdrawal {RequestId}. Reason: {Reason}", adminId, requestId, reason);
+
+        return new CustomerWithdrawalResponseDto
+        {
+            Success = true,
+            Message = "Đã từ chối yêu cầu rút tiền",
+            Request = MapToDto(request, request.Customer?.FullName)
+        };
+    }
+
+    private static CustomerWithdrawalRequestDto MapToDto(CustomerWithdrawalRequest r, string? customerName = null) => new()
     {
         Id = r.Id,
+        CustomerId = r.CustomerId,
+        CustomerName = customerName,
         Amount = r.Amount,
+        Currency = r.Currency,
         BankName = r.BankName,
         BankAccountNumber = r.BankAccountNumber,
         BankAccountName = r.BankAccountName,
