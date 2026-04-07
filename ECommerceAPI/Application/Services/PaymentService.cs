@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -51,7 +52,12 @@ public class PaymentService : IPaymentService
 
     // ── 1. Tạo VNPay Payment URL ─────────────────────────────────────────────
     public async Task<CreatePaymentResponseDto> CreateVNPayPaymentAsync(
-        Guid orderId, Guid customerId, string ipAddress)
+        Guid orderId,
+        Guid customerId,
+        string ipAddress,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? vnPayReturnUrlOverride = null)
     {
         // Lấy order và kiểm tra ownership
         var order = await _context.Orders
@@ -99,12 +105,24 @@ public class PaymentService : IPaymentService
         // Tạo TxnRef = DateTime.Now.Ticks (giống dự án FlowerShop)
         var txnRef = DateTime.Now.Ticks.ToString();
 
+        var txnSliding = new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(15));
+
         // Cache: txnRef → paymentId (expire 15 phút)
-        _memoryCache.Set(
-            $"TxnRef_{txnRef}",
-            payment.Id,
-            new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(15))
-        );
+        _memoryCache.Set($"TxnRef_{txnRef}", payment.Id, txnSliding);
+
+        if (IsAllowedClientReturnUrl(clientReturnSuccessUrl))
+            _memoryCache.Set($"VnpayClientSuccess_{txnRef}", clientReturnSuccessUrl!.Trim(), txnSliding);
+        if (IsAllowedClientReturnUrl(clientReturnFailureUrl))
+            _memoryCache.Set($"VnpayClientFailure_{txnRef}", clientReturnFailureUrl!.Trim(), txnSliding);
+
+        var vnpReturnUrl = _vnPaySettings.ReturnUrl;
+        if (!string.IsNullOrWhiteSpace(vnPayReturnUrlOverride)
+            && IsAllowedVnPayReturnUrlOverride(vnPayReturnUrlOverride.Trim(), out var safeReturn)
+            && safeReturn != null)
+        {
+            vnpReturnUrl = safeReturn;
+            _logger.LogInformation("[VNPay] vnp_ReturnUrl override host: {Host}", new Uri(safeReturn).Host);
+        }
 
         // Build VNPay request
         var vnpay = new VNPayLibrary();
@@ -119,7 +137,7 @@ public class PaymentService : IPaymentService
         vnpay.AddRequestData("vnp_Locale", _vnPaySettings.Locale);
         vnpay.AddRequestData("vnp_OrderInfo", $"Thanh toán đơn hàng {order.OrderCode}");
         vnpay.AddRequestData("vnp_OrderType", "other");
-        vnpay.AddRequestData("vnp_ReturnUrl", _vnPaySettings.ReturnUrl);
+        vnpay.AddRequestData("vnp_ReturnUrl", vnpReturnUrl);
         vnpay.AddRequestData("vnp_TxnRef", txnRef);
 
         string paymentUrl = vnpay.CreateRequestUrl(_vnPaySettings.Url, _vnPaySettings.HashSecret);
@@ -829,6 +847,65 @@ public class PaymentService : IPaymentService
             ExtraData = queryParams["extraData"].ToString(),
             Signature = queryParams["signature"].ToString()
         };
+    }
+
+    /// <summary>
+    /// Cho phép client (mobile) gửi vnp_ReturnUrl khác cấu hình: cùng path API return, host localhost / private / 10.0.2.2 / trùng host trong VNPay:ReturnUrl.
+    /// </summary>
+    private bool IsAllowedVnPayReturnUrlOverride(string url, out string? normalized)
+    {
+        normalized = null;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        const string expectedSuffix = "/api/payments/vnpay/return";
+        if (!path.EndsWith(expectedSuffix, StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (!IsSafeVnPayReturnHost(uri.Host)) return false;
+
+        normalized = url;
+        return true;
+    }
+
+    private bool IsSafeVnPayReturnHost(string host)
+    {
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(host, "10.0.2.2", StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (IPAddress.TryParse(host, out var ip))
+        {
+            if (IPAddress.IsLoopback(ip)) return true;
+            var bytes = ip.GetAddressBytes();
+            if (bytes.Length == 4 && IsPrivateIPv4(bytes.AsSpan())) return true;
+        }
+
+        if (Uri.TryCreate(_vnPaySettings.ReturnUrl, UriKind.Absolute, out var cfgUri)
+            && string.Equals(host, cfgUri.Host, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private static bool IsPrivateIPv4(ReadOnlySpan<byte> b)
+    {
+        if (b.Length != 4) return false;
+        if (b[0] == 10) return true;
+        if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return true;
+        if (b[0] == 192 && b[1] == 168) return true;
+        return false;
+    }
+
+    /// <summary>Chỉ cho phép deep link app (Expo / production scheme), tránh open-redirect.</summary>
+    private static bool IsAllowedClientReturnUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)) return false;
+        return uri.Scheme.Equals("ecommerce", StringComparison.OrdinalIgnoreCase)
+               || uri.Scheme.Equals("exp", StringComparison.OrdinalIgnoreCase)
+               || uri.Scheme.Equals("exps", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string HmacSHA256(string key, string data)

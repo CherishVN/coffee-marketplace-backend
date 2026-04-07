@@ -3,6 +3,20 @@ namespace ECommerceAPI.Application.DTOs.Payments;
 public class CreatePaymentDto
 {
     public Guid OrderId { get; set; }
+
+    /// <summary>
+    /// Deep link (vd. ecommerce:// hoặc exp://) — BE redirect sau khi xử lý VNPay return, dùng với in-app browser.
+    /// </summary>
+    public string? ClientReturnSuccessUrl { get; set; }
+
+    public string? ClientReturnFailureUrl { get; set; }
+
+    /// <summary>
+    /// (Tùy chọn) URL VNPay redirect về sau thanh toán — phải trỏ tới endpoint API /api/payments/vnpay/return.
+    /// Mobile/emulator: gửi host khớp API (vd. http://10.0.2.2:5153/...) vì localhost trong WebView là emulator.
+    /// Web: để trống để dùng cấu hình VNPay:ReturnUrl.
+    /// </summary>
+    public string? VnPayReturnUrlOverride { get; set; }
 }
 
 public class CreatePaymentResponseDto

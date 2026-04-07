@@ -5,7 +5,13 @@ namespace ECommerceAPI.Application.Interfaces;
 
 public interface IPaymentService
 {
-    Task<CreatePaymentResponseDto> CreateVNPayPaymentAsync(Guid orderId, Guid customerId, string ipAddress);
+    Task<CreatePaymentResponseDto> CreateVNPayPaymentAsync(
+        Guid orderId,
+        Guid customerId,
+        string ipAddress,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? vnPayReturnUrlOverride = null);
     Task<VNPayReturnDto> ProcessVNPayReturnAsync(IQueryCollection queryParams);
 
     Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId);
