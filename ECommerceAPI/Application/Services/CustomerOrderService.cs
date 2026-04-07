@@ -16,17 +16,20 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
     private readonly ISellerWalletReleaseService _walletRelease;
+    private readonly IOrderNotificationEmailComposer _orderEmailComposer;
 
     public CustomerOrderService(
         ApplicationDbContext context,
         IHubContext<OrderTrackingHub> hubContext,
         INotificationService notifications,
-        ISellerWalletReleaseService walletRelease)
+        ISellerWalletReleaseService walletRelease,
+        IOrderNotificationEmailComposer orderEmailComposer)
     {
         _context = context;
         _hubContext = hubContext;
         _notifications = notifications;
         _walletRelease = walletRelease;
+        _orderEmailComposer = orderEmailComposer;
     }
 
     public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
@@ -228,6 +231,10 @@ public class CustomerOrderService : ICustomerOrderService
         await NotifyStatusChanged(order, OrderStatus.Shipping, OrderStatus.Completed);
 
         var code = NotificationFormatting.ShortEntityId(order.Id);
+        var composed = await _orderEmailComposer.TryComposeAsync(
+            order.Id,
+            OrderStatus.Shipping,
+            OrderStatus.Completed);
         await _notifications.PublishAsync(
             order.CustomerId,
             nameof(NotificationType.Order),
@@ -235,7 +242,9 @@ public class CustomerOrderService : ICustomerOrderService
             $"Bạn đã xác nhận nhận hàng cho đơn #{code}.",
             "Order",
             order.Id,
-            queueEmail: true);
+            queueEmail: true,
+            emailHtmlBody: composed?.Html,
+            emailSubjectOverride: composed?.Subject);
 
         return new ConfirmOrderResponseDto
         {

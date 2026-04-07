@@ -124,6 +124,8 @@ public class NotificationService : INotificationService
         string? referenceType = null,
         Guid? referenceId = null,
         bool queueEmail = false,
+        string? emailHtmlBody = null,
+        string? emailSubjectOverride = null,
         CancellationToken cancellationToken = default)
     {
         var entity = new Notification
@@ -145,11 +147,21 @@ public class NotificationService : INotificationService
         if (!queueEmail)
             return;
 
-        var safe = WebUtility.HtmlEncode(content).Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace("\n", "<br/>", StringComparison.Ordinal);
-        var html = $"<html><body style=\"font-family:sans-serif\"><p>{safe}</p></body></html>";
+        var subject = string.IsNullOrWhiteSpace(emailSubjectOverride) ? title : emailSubjectOverride!;
+        string html;
+        if (!string.IsNullOrWhiteSpace(emailHtmlBody))
+        {
+            html = emailHtmlBody!;
+        }
+        else
+        {
+            var safe = WebUtility.HtmlEncode(content).Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace("\n", "<br/>", StringComparison.Ordinal);
+            html = $"<html><body style=\"font-family:sans-serif\"><p>{safe}</p></body></html>";
+        }
+
         await _notificationQueue.EnqueueEmailAsync(
-            new NotificationEmailJob(userId, title, html),
+            new NotificationEmailJob(userId, subject, html),
             cancellationToken);
     }
 }
