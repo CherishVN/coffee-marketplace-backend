@@ -2,6 +2,7 @@ using ECommerceAPI.Application.DTOs.Payments;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Text.Json;
 
 namespace ECommerceAPI.Controllers;
@@ -59,19 +60,17 @@ public class PaymentsController : ControllerBase
 
         var result = await _paymentService.ProcessVNPayReturnAsync(Request.Query);
 
-        var frontendUrl = _configuration["FrontendUrl"] ?? "http://localhost:3000";
+        var frontendUrl = _configuration["FrontendUrl"];
 
         if (result.Success)
-            return Redirect($"{frontendUrl}/payment/success?orderId={result.OrderId}&amount={result.Amount}");
+            return Redirect($"{frontendUrl}/payment/success?orderCode={result.OrderCode}&amount={result.Amount}");
         else
             return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}");
     }
 
-    /// <summary>
-    /// Tạo URL thanh toán MoMo cho một đơn hàng
-    /// </summary>
     [HttpPost("momo/create")]
     [Authorize]
+    [EnableRateLimiting("PaymentCreatePerUser")]
     public async Task<IActionResult> CreateMoMoPayment([FromBody] CreatePaymentDto dto)
     {
         var customerId = _userClaims.GetUserId();
@@ -101,19 +100,21 @@ public class PaymentsController : ControllerBase
     }
 
     /// <summary>
-    /// MoMo redirect về sau khi thanh toán (Return URL - trả JSON để test BE)
+    /// MoMo redirect về sau khi thanh toán (Return URL)
     /// </summary>
     [HttpGet("momo/return")]
     [AllowAnonymous]
-    public IActionResult MoMoReturn([FromQuery] string orderId, [FromQuery] int resultCode, [FromQuery] string? message)
+    public async Task<IActionResult> MoMoReturn()
     {
-        _logger.LogInformation("[MoMo Return] OrderId={OrderId}, ResultCode={Code}", orderId, resultCode);
+        _logger.LogInformation("[MoMo Return] Received: {QueryString}", Request.QueryString.Value);
+
+        var result = await _paymentService.ProcessMoMoReturnAsync(Request.Query);
 
         var frontendUrl = _configuration["FrontendUrl"];
 
-        if (resultCode == 0)
-            return Redirect($"{frontendUrl}/payment/success?orderId={orderId}");
+        if (result.Success)
+            return Redirect($"{frontendUrl}/payment/success?orderCode={result.OrderCode}&amount={result.Amount}");
         else
-            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(message ?? "Thanh toán thất bại")}");
+            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}");
     }
 }

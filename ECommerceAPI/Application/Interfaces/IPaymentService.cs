@@ -10,4 +10,5 @@ public interface IPaymentService
 
     Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId);
     Task<MoMoReturnDto> ProcessMoMoIpnAsync(MoMoIpnRequest request);
+    Task<MoMoReturnDto> ProcessMoMoReturnAsync(IQueryCollection queryParams);
 }

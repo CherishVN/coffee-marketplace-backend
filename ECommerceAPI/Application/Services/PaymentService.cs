@@ -18,6 +18,7 @@ namespace ECommerceAPI.Application.Services;
 
 public class PaymentService : IPaymentService
 {
+    private static readonly TimeSpan PaymentCreationRetryWindow = TimeSpan.FromSeconds(10);
     private readonly ApplicationDbContext _context;
     private readonly VNPaySettings _vnPaySettings;
     private readonly MoMoSettings _moMoSettings;
@@ -44,7 +45,7 @@ public class PaymentService : IPaymentService
         _notifications = notifications;
         _sellerWalletSettlement = sellerWalletSettlement;
         _memoryCache = memoryCache;
-        _httpClient = httpClientFactory.CreateClient();
+        _httpClient = httpClientFactory.CreateClient("MoMoGateway");
     }
 
     // ── 1. Tạo VNPay Payment URL ─────────────────────────────────────────────
@@ -298,10 +299,10 @@ public class PaymentService : IPaymentService
         }
     }
 
-    // ── 3. Tạo MoMo Payment URL ──────────────────────────────────────────────
     public async Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId)
     {
         var order = await _context.Orders
+            .AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
 
         if (order == null)
@@ -315,6 +316,24 @@ public class PaymentService : IPaymentService
 
         if (existingPaid)
             return new CreatePaymentResponseDto { Success = false, Message = "Đơn hàng đã được thanh toán" };
+
+        var threshold = DateTime.UtcNow.Subtract(PaymentCreationRetryWindow);
+        var latestPending = await _context.Payments
+            .Where(p => p.OrderId == orderId
+                        && p.Provider == "MOMO"
+                        && p.Status == (short)PaymentStatus.Pending
+                        && p.CreatedAt >= threshold)
+            .OrderByDescending(p => p.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (latestPending != null)
+        {
+            return new CreatePaymentResponseDto
+            {
+                Success = false,
+                Message = "Yêu cầu thanh toán đang được xử lý, vui lòng thử lại sau vài giây."
+            };
+        }
 
         var payment = new Payment
         {
@@ -365,14 +384,47 @@ public class PaymentService : IPaymentService
             signature
         };
 
-        var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
-        var response = await _httpClient.PostAsync(_moMoSettings.ApiUrl, content);
-        var responseBody = await response.Content.ReadAsStringAsync();
+        // Phase 2: gọi MoMo bên ngoài DB transaction.
+        string responseBody;
+        try
+        {
+            var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+            using var response = await _httpClient.PostAsync(_moMoSettings.ApiUrl, content);
+            responseBody = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var httpError = $"MoMo trả về HTTP {(int)response.StatusCode}";
+                await MarkPaymentCreationFailedAsync(payment.Id, httpError);
+                return new CreatePaymentResponseDto { Success = false, Message = httpError };
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            var timeoutMessage = "Kết nối MoMo bị timeout, vui lòng thử lại.";
+            await MarkPaymentCreationFailedAsync(payment.Id, timeoutMessage);
+            return new CreatePaymentResponseDto { Success = false, Message = timeoutMessage };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[MoMo] Create payment call failed for OrderId: {OrderId}", orderId);
+            await MarkPaymentCreationFailedAsync(payment.Id, "Không thể kết nối MoMo");
+            return new CreatePaymentResponseDto { Success = false, Message = "Không thể kết nối MoMo, vui lòng thử lại." };
+        }
 
         _logger.LogInformation("[MoMo] Response: {Body}", responseBody);
 
-        using var doc = JsonDocument.Parse(responseBody);
-        var root = doc.RootElement;
+        JsonElement root;
+        try
+        {
+            using var doc = JsonDocument.Parse(responseBody);
+            root = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            await MarkPaymentCreationFailedAsync(payment.Id, "Phản hồi MoMo không hợp lệ");
+            return new CreatePaymentResponseDto { Success = false, Message = "Phản hồi từ MoMo không hợp lệ." };
+        }
 
         if (root.TryGetProperty("resultCode", out var resultCodeProp) && resultCodeProp.GetInt32() == 0)
         {
@@ -388,7 +440,21 @@ public class PaymentService : IPaymentService
         }
 
         var errorMsg = root.TryGetProperty("message", out var msg) ? msg.GetString() : "Lỗi tạo thanh toán MoMo";
+        await MarkPaymentCreationFailedAsync(payment.Id, errorMsg ?? "Lỗi tạo thanh toán MoMo");
         return new CreatePaymentResponseDto { Success = false, Message = errorMsg };
+    }
+
+    private async Task MarkPaymentCreationFailedAsync(Guid paymentId, string reason)
+    {
+        var payment = await _context.Payments.FirstOrDefaultAsync(p => p.Id == paymentId);
+        if (payment == null || payment.Status != (short)PaymentStatus.Pending)
+            return;
+
+        payment.Status = (short)PaymentStatus.Failed;
+        payment.PaidAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        _logger.LogWarning("[MoMo] Marked payment {PaymentId} as failed. Reason: {Reason}", paymentId, reason);
     }
 
     // ── 4. Xử lý MoMo IPN Callback ───────────────────────────────────────────
@@ -396,30 +462,64 @@ public class PaymentService : IPaymentService
     {
         _logger.LogInformation("[MoMo IPN] Received: OrderId={OrderId}, ResultCode={Code}", request.OrderId, request.ResultCode);
 
-        var rawSignature = $"accessKey={_moMoSettings.AccessKey}" +
-                           $"&amount={request.Amount}" +
-                           $"&extraData={request.ExtraData}" +
-                           $"&message={request.Message}" +
-                           $"&orderId={request.OrderId}" +
-                           $"&orderInfo={request.OrderInfo}" +
-                           $"&orderType={request.OrderType}" +
-                           $"&partnerCode={request.PartnerCode}" +
-                           $"&payType={request.PayType}" +
-                           $"&requestId={request.RequestId}" +
-                           $"&responseTime={request.ResponseTime}" +
-                           $"&resultCode={request.ResultCode}" +
-                           $"&transId={request.TransId}";
-
-        var expectedSignature = HmacSHA256(_moMoSettings.SecretKey, rawSignature);
-        if (expectedSignature != request.Signature)
+        if (!IsMoMoSignatureValid(request))
         {
             _logger.LogWarning("[MoMo IPN] Invalid signature!");
             return new MoMoReturnDto { Success = false, Message = "Chữ ký không hợp lệ", ResultCode = -1 };
         }
 
-        if (!Guid.TryParse(request.OrderId, out var paymentId))
+        if (!TryParseMoMoPaymentId(request.OrderId, out var paymentId))
             return new MoMoReturnDto { Success = false, Message = "OrderId không hợp lệ", ResultCode = -1 };
 
+        return await HandleMoMoPaymentStateAsync(
+            paymentId,
+            request.ResultCode,
+            request.Message,
+            request.TransId > 0 ? request.TransId.ToString() : null);
+    }
+
+    public async Task<MoMoReturnDto> ProcessMoMoReturnAsync(IQueryCollection queryParams)
+    {
+        var orderId = queryParams["orderId"].ToString();
+        var message = queryParams["message"].ToString();
+        var resultCodeRaw = queryParams["resultCode"].ToString();
+
+        var resultCode = int.TryParse(resultCodeRaw, out var parsedResultCode) ? parsedResultCode : -1;
+
+        _logger.LogInformation("[MoMo Return] Received: OrderId={OrderId}, ResultCode={Code}", orderId, resultCode);
+
+        if (!TryParseMoMoPaymentId(orderId, out var paymentId))
+            return new MoMoReturnDto { Success = false, Message = "OrderId không hợp lệ", ResultCode = -1 };
+
+        var returnRequest = BuildMoMoRequestFromQuery(queryParams);
+
+        if (returnRequest is not null && !string.IsNullOrWhiteSpace(returnRequest.Signature))
+        {
+            if (!IsMoMoSignatureValid(returnRequest))
+            {
+                _logger.LogWarning("[MoMo Return] Invalid signature for OrderId={OrderId}", orderId);
+                return new MoMoReturnDto { Success = false, Message = "Chữ ký không hợp lệ", ResultCode = -1 };
+            }
+
+            return await HandleMoMoPaymentStateAsync(
+                paymentId,
+                returnRequest.ResultCode,
+                returnRequest.Message,
+                returnRequest.TransId > 0 ? returnRequest.TransId.ToString() : null);
+        }
+
+        // Fallback cho môi trường local khi NotifyUrl/IPN không gọi được từ MoMo.
+        _logger.LogWarning("[MoMo Return] Missing signature payload, fallback process by return params for PaymentId={PaymentId}", paymentId);
+
+        return await HandleMoMoPaymentStateAsync(
+            paymentId,
+            resultCode,
+            message,
+            queryParams["transId"].ToString());
+    }
+
+    private async Task<MoMoReturnDto> HandleMoMoPaymentStateAsync(Guid paymentId, int resultCode, string? message, string? providerRef)
+    {
         var payment = await _context.Payments
             .Include(p => p.Order)
                 .ThenInclude(o => o.OrderItems)
@@ -429,15 +529,43 @@ public class PaymentService : IPaymentService
             return new MoMoReturnDto { Success = false, Message = "Không tìm thấy thanh toán", ResultCode = -1 };
 
         if (payment.Status == (short)PaymentStatus.Paid)
-            return new MoMoReturnDto { Success = true, Message = "Đã xử lý trước đó", OrderId = payment.OrderId, PaymentId = payment.Id, Amount = payment.Amount };
+        {
+            return new MoMoReturnDto
+            {
+                Success = true,
+                Message = "Đã xử lý trước đó",
+                ResultCode = 0,
+                OrderId = payment.OrderId,
+                OrderCode = payment.Order.OrderCode,
+                PaymentId = payment.Id,
+                Amount = payment.Amount
+            };
+        }
+
+        if (payment.Status != (short)PaymentStatus.Pending)
+        {
+            return new MoMoReturnDto
+            {
+                Success = false,
+                Message = "Giao dịch đã được xử lý ở trạng thái khác",
+                ResultCode = resultCode,
+                OrderId = payment.OrderId,
+                OrderCode = payment.Order.OrderCode,
+                PaymentId = payment.Id,
+                Amount = payment.Amount
+            };
+        }
 
         var order = payment.Order;
 
-        if (request.ResultCode == 0)
+        if (resultCode == 0)
         {
             payment.Status = (short)PaymentStatus.Paid;
             payment.PaidAt = DateTime.UtcNow;
-            payment.ProviderRef = request.TransId.ToString();
+            if (!string.IsNullOrWhiteSpace(providerRef))
+            {
+                payment.ProviderRef = providerRef;
+            }
 
             order.Status = (short)OrderStatus.Confirmed;
             order.UpdatedAt = DateTime.UtcNow;
@@ -481,46 +609,129 @@ public class PaymentService : IPaymentService
                     queueEmail: true);
             }
 
-            _logger.LogInformation("[MoMo IPN] Payment SUCCESS for OrderId: {OrderId}", order.Id);
+            _logger.LogInformation("[MoMo] Payment SUCCESS for OrderId: {OrderId}", order.Id);
 
-            return new MoMoReturnDto { Success = true, Message = "Thanh toán thành công", ResultCode = 0, OrderId = order.Id, PaymentId = payment.Id, Amount = payment.Amount };
-        }
-        else
-        {
-            payment.Status = (short)PaymentStatus.Failed;
-            payment.PaidAt = DateTime.UtcNow;
-
-            order.Status = (short)OrderStatus.Cancelled;
-            order.UpdatedAt = DateTime.UtcNow;
-
-            foreach (var item in order.OrderItems)
+            return new MoMoReturnDto
             {
-                var inv = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
-                if (inv != null)
-                {
-                    inv.ReservedQuantity -= item.Quantity;
-                    if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
-                    inv.UpdatedAt = DateTime.UtcNow;
-                }
-            }
-
-            await _context.SaveChangesAsync();
-
-            var momoFail = order.OrderCode;
-            await _notifications.PublishAsync(
-                order.CustomerId,
-                nameof(NotificationType.Payment),
-                "Thanh toán MoMo không thành công",
-                $"Đơn #{momoFail} đã bị hủy do thanh toán thất bại (mã: {request.ResultCode}).",
-                "Order",
-                order.Id,
-                queueEmail: true);
-
-            _logger.LogWarning("[MoMo IPN] Payment FAILED for OrderId: {OrderId}, Code: {Code}", order.Id, request.ResultCode);
-
-            return new MoMoReturnDto { Success = false, Message = request.Message, ResultCode = request.ResultCode, OrderId = order.Id, PaymentId = payment.Id, Amount = payment.Amount };
+                Success = true,
+                Message = "Thanh toán thành công",
+                ResultCode = 0,
+                OrderId = order.Id,
+                OrderCode = order.OrderCode,
+                PaymentId = payment.Id,
+                Amount = payment.Amount
+            };
         }
+
+        payment.Status = (short)PaymentStatus.Failed;
+        payment.PaidAt = DateTime.UtcNow;
+
+        order.Status = (short)OrderStatus.Cancelled;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        foreach (var item in order.OrderItems)
+        {
+            var inv = await _context.Inventories
+                .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
+            if (inv != null)
+            {
+                inv.ReservedQuantity -= item.Quantity;
+                if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
+                inv.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+
+        var momoFail = order.OrderCode;
+        await _notifications.PublishAsync(
+            order.CustomerId,
+            nameof(NotificationType.Payment),
+            "Thanh toán MoMo không thành công",
+            $"Đơn #{momoFail} đã bị hủy do thanh toán thất bại (mã: {resultCode}).",
+            "Order",
+            order.Id,
+            queueEmail: true);
+
+        _logger.LogWarning("[MoMo] Payment FAILED for OrderId: {OrderId}, Code: {Code}", order.Id, resultCode);
+
+        return new MoMoReturnDto
+        {
+            Success = false,
+            Message = message,
+            ResultCode = resultCode,
+            OrderId = order.Id,
+            OrderCode = order.OrderCode,
+            PaymentId = payment.Id,
+            Amount = payment.Amount
+        };
+    }
+
+    private bool IsMoMoSignatureValid(MoMoIpnRequest request)
+    {
+        var rawSignature = $"accessKey={_moMoSettings.AccessKey}" +
+                           $"&amount={request.Amount}" +
+                           $"&extraData={request.ExtraData}" +
+                           $"&message={request.Message}" +
+                           $"&orderId={request.OrderId}" +
+                           $"&orderInfo={request.OrderInfo}" +
+                           $"&orderType={request.OrderType}" +
+                           $"&partnerCode={request.PartnerCode}" +
+                           $"&payType={request.PayType}" +
+                           $"&requestId={request.RequestId}" +
+                           $"&responseTime={request.ResponseTime}" +
+                           $"&resultCode={request.ResultCode}" +
+                           $"&transId={request.TransId}";
+
+        var expectedSignature = HmacSHA256(_moMoSettings.SecretKey, rawSignature);
+        return string.Equals(expectedSignature, request.Signature, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryParseMoMoPaymentId(string? orderId, out Guid paymentId)
+    {
+        return Guid.TryParse(orderId, out paymentId);
+    }
+
+    private MoMoIpnRequest? BuildMoMoRequestFromQuery(IQueryCollection queryParams)
+    {
+        var orderId = queryParams["orderId"].ToString();
+        if (string.IsNullOrWhiteSpace(orderId))
+            return null;
+
+        var resultCode = int.TryParse(queryParams["resultCode"], out var parsedResultCode)
+            ? parsedResultCode
+            : -1;
+
+        var amount = long.TryParse(queryParams["amount"], out var parsedAmount)
+            ? parsedAmount
+            : 0;
+
+        var transId = long.TryParse(queryParams["transId"], out var parsedTransId)
+            ? parsedTransId
+            : 0;
+
+        var responseTime = long.TryParse(queryParams["responseTime"], out var parsedResponseTime)
+            ? parsedResponseTime
+            : 0;
+
+        return new MoMoIpnRequest
+        {
+            PartnerCode = string.IsNullOrWhiteSpace(queryParams["partnerCode"])
+                ? _moMoSettings.PartnerCode
+                : queryParams["partnerCode"].ToString(),
+            OrderId = orderId,
+            RequestId = queryParams["requestId"].ToString(),
+            Amount = amount,
+            OrderInfo = queryParams["orderInfo"].ToString(),
+            OrderType = queryParams["orderType"].ToString(),
+            TransId = transId,
+            ResultCode = resultCode,
+            Message = queryParams["message"].ToString(),
+            PayType = queryParams["payType"].ToString(),
+            ResponseTime = responseTime,
+            ExtraData = queryParams["extraData"].ToString(),
+            Signature = queryParams["signature"].ToString()
+        };
     }
 
     private static string HmacSHA256(string key, string data)

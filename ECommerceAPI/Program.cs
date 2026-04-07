@@ -15,9 +15,12 @@ using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
 
 namespace ECommerceAPI
 {
@@ -69,6 +72,11 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddScoped<IUserAuthEmailResolver, SupabaseAuthEmailResolver>();
             builder.Services.AddHttpClient();
+            builder.Services.AddHttpClient("MoMoGateway", client =>
+            {
+                // Avoid hanging outbound payment calls for too long.
+                client.Timeout = TimeSpan.FromSeconds(10);
+            });
             builder.Services.AddScoped<ISellerService, SellerService>();
             builder.Services.AddScoped<ICustomerOrderService, CustomerOrderService>();
             builder.Services.AddScoped<IReviewService, ReviewService>();
@@ -149,6 +157,46 @@ namespace ECommerceAPI
             });
 
             builder.Services.AddAuthorization();
+            builder.Services.AddRateLimiter(options =>
+            {
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.OnRejected = async (context, cancellationToken) =>
+                {
+                    var retryAfterSeconds = 10;
+                    if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+                    {
+                        retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
+                    }
+
+                    context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    context.HttpContext.Response.ContentType = "application/json";
+                    context.HttpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString();
+
+                    await context.HttpContext.Response.WriteAsJsonAsync(new
+                    {
+                        success = false,
+                        message = $"Bạn thao tác quá nhanh. Vui lòng thử lại sau {retryAfterSeconds} giây."
+                    }, cancellationToken: cancellationToken);
+                };
+
+                options.AddPolicy("PaymentCreatePerUser", context =>
+                {
+                    var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                        ?? context.User.FindFirstValue("sub")
+                        ?? context.Connection.RemoteIpAddress?.ToString()
+                        ?? "anonymous";
+
+                    return RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey: userId,
+                        factory: _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 1,
+                            Window = TimeSpan.FromSeconds(10),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        });
+                });
+            });
             builder.Services.AddControllers();
             builder.Services.AddSignalR();
             builder.Services.AddEndpointsApiExplorer();
@@ -222,6 +270,7 @@ namespace ECommerceAPI
             }
             app.UseCors("AllowAll");
             app.UseAuthentication();
+            app.UseRateLimiter();
             app.UseMiddleware<UserSyncMiddleware>();
             app.UseAuthorization();
 
