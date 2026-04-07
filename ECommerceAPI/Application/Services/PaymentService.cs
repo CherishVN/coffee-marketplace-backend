@@ -19,7 +19,7 @@ namespace ECommerceAPI.Application.Services;
 
 public class PaymentService : IPaymentService
 {
-    private static readonly TimeSpan PaymentCreationRetryWindow = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PaymentCreationRetryWindow = TimeSpan.FromMinutes(1);
     private static readonly int PendingPaymentTimeoutMinutes = 100;
     private readonly ApplicationDbContext _context;
     private readonly VNPaySettings _vnPaySettings;

@@ -18,6 +18,7 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly ISellerWalletReleaseService _walletRelease;
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
+    private readonly ICustomerWalletService _customerWallet;
 
     public CustomerOrderService(
         ApplicationDbContext context,
@@ -25,7 +26,8 @@ public class CustomerOrderService : ICustomerOrderService
         INotificationService notifications,
         ISellerWalletReleaseService walletRelease,
         ISellerWalletReversalService walletReversal,
-        IOrderNotificationEmailComposer orderEmailComposer)
+        IOrderNotificationEmailComposer orderEmailComposer,
+        ICustomerWalletService customerWallet)
     {
         _context = context;
         _hubContext = hubContext;
@@ -33,6 +35,7 @@ public class CustomerOrderService : ICustomerOrderService
         _walletRelease = walletRelease;
         _walletReversal = walletReversal;
         _orderEmailComposer = orderEmailComposer;
+        _customerWallet = customerWallet;
     }
 
     public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
@@ -436,6 +439,7 @@ public class CustomerOrderService : ICustomerOrderService
         order.CancelReason = normalizedReason;
         order.UpdatedAt = now;
 
+        decimal paidAmount = 0;
         if (hasPaidPayment)
         {
             await _walletReversal.TryReverseSettlementForOrderAsync(
@@ -443,9 +447,26 @@ public class CustomerOrderService : ICustomerOrderService
                 string.IsNullOrWhiteSpace(normalizedReason)
                     ? "Customer huỷ đơn trước khi giao hàng"
                     : $"Customer huỷ đơn: {normalizedReason}");
+
+            paidAmount = order.Payments
+                .Where(p => p.Status == (short)PaymentStatus.Paid)
+                .Sum(p => p.Amount);
         }
 
         await _context.SaveChangesAsync();
+
+        if (paidAmount > 0)
+        {
+            var orderCode = string.IsNullOrWhiteSpace(order.OrderCode)
+                ? NotificationFormatting.ShortEntityId(order.Id)
+                : order.OrderCode;
+            await _customerWallet.CreditRefundAsync(
+                order.CustomerId,
+                paidAmount,
+                "Order",
+                order.Id,
+                $"Hoàn tiền đơn #{orderCode} bị huỷ");
+        }
 
         await NotifyStatusChanged(order, oldStatus, OrderStatus.Cancelled);
 

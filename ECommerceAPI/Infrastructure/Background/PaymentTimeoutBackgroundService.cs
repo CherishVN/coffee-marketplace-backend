@@ -10,7 +10,7 @@ namespace ECommerceAPI.Infrastructure.Background;
 /// </summary>
 public class PaymentTimeoutBackgroundService : BackgroundService
 {
-    private static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PaymentTimeoutBackgroundService> _logger;

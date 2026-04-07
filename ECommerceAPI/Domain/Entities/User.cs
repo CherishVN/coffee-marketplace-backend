@@ -57,6 +57,12 @@ public partial class User
 
     public virtual SellerWallet? SellerWallet { get; set; }
 
+    public virtual CustomerWallet? CustomerWallet { get; set; }
+
+    public virtual ICollection<CustomerWithdrawalRequest> CustomerWithdrawalRequestCustomers { get; set; } = new List<CustomerWithdrawalRequest>();
+
+    public virtual ICollection<CustomerWithdrawalRequest> CustomerWithdrawalRequestReviewedByNavigations { get; set; } = new List<CustomerWithdrawalRequest>();
+
     public virtual ICollection<SellerWithdrawalRequest> SellerWithdrawalRequestReviewedByNavigations { get; set; } = new List<SellerWithdrawalRequest>();
 
     public virtual ICollection<SellerWithdrawalRequest> SellerWithdrawalRequestSellers { get; set; } = new List<SellerWithdrawalRequest>();

@@ -80,6 +80,12 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<ProductMaterial> ProductMaterials { get; set; }
 
+    public virtual DbSet<CustomerWallet> CustomerWallets { get; set; }
+
+    public virtual DbSet<CustomerWalletLedger> CustomerWalletLedgers { get; set; }
+
+    public virtual DbSet<CustomerWithdrawalRequest> CustomerWithdrawalRequests { get; set; }
+
     public virtual DbSet<SellerWallet> SellerWallets { get; set; }
 
     public virtual DbSet<SellerWalletLedger> SellerWalletLedgers { get; set; }
@@ -1312,6 +1318,118 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.Product).WithMany(p => p.ProductVariants)
                 .HasForeignKey(d => d.ProductId)
                 .HasConstraintName("product_variants_product_id_fkey");
+        });
+
+        modelBuilder.Entity<CustomerWallet>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("customer_wallets_pkey");
+
+            entity.ToTable("customer_wallets");
+
+            entity.HasIndex(e => e.CustomerId, "customer_wallets_customer_id_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id");
+            entity.Property(e => e.AvailableBalance)
+                .HasPrecision(12, 2)
+                .HasDefaultValue(0m)
+                .HasColumnName("available_balance");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Customer).WithOne(p => p.CustomerWallet)
+                .HasForeignKey<CustomerWallet>(d => d.CustomerId)
+                .HasConstraintName("customer_wallets_customer_id_fkey");
+        });
+
+        modelBuilder.Entity<CustomerWalletLedger>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("customer_wallet_ledger_pkey");
+
+            entity.ToTable("customer_wallet_ledger");
+
+            entity.HasIndex(e => e.WalletId, "idx_customer_wallet_ledger_wallet_id");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.WalletId).HasColumnName("wallet_id");
+            entity.Property(e => e.Type).HasColumnName("type");
+            entity.Property(e => e.Amount)
+                .HasPrecision(12, 2)
+                .HasColumnName("amount");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.ReferenceType).HasColumnName("reference_type");
+            entity.Property(e => e.ReferenceId).HasColumnName("reference_id");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Wallet).WithMany(p => p.CustomerWalletLedgers)
+                .HasForeignKey(d => d.WalletId)
+                .HasConstraintName("customer_wallet_ledger_wallet_fkey");
+        });
+
+        modelBuilder.Entity<CustomerWithdrawalRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("customer_withdrawal_requests_pkey");
+
+            entity.ToTable("customer_withdrawal_requests");
+
+            entity.HasIndex(e => e.CustomerId, "idx_customer_withdrawal_requests_customer_id");
+            entity.HasIndex(e => e.Status, "idx_customer_withdrawal_requests_status")
+                .HasFilter("(status = 0)");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id");
+            entity.Property(e => e.WalletId).HasColumnName("wallet_id");
+            entity.Property(e => e.Amount)
+                .HasPrecision(12, 2)
+                .HasColumnName("amount");
+            entity.Property(e => e.Currency)
+                .HasDefaultValueSql("'VND'::text")
+                .HasColumnName("currency");
+            entity.Property(e => e.BankName).HasColumnName("bank_name");
+            entity.Property(e => e.BankAccountNumber).HasColumnName("bank_account_number");
+            entity.Property(e => e.BankAccountName).HasColumnName("bank_account_name");
+            entity.Property(e => e.Status)
+                .HasDefaultValue((short)0)
+                .HasColumnName("status");
+            entity.Property(e => e.RejectionReason).HasColumnName("rejection_reason");
+            entity.Property(e => e.AdminNote).HasColumnName("admin_note");
+            entity.Property(e => e.RequestedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("requested_at");
+            entity.Property(e => e.ReviewedAt).HasColumnName("reviewed_at");
+            entity.Property(e => e.ReviewedBy).HasColumnName("reviewed_by");
+            entity.Property(e => e.PaidAt).HasColumnName("paid_at");
+
+            entity.HasOne(d => d.Customer).WithMany(p => p.CustomerWithdrawalRequestCustomers)
+                .HasForeignKey(d => d.CustomerId)
+                .HasConstraintName("customer_withdrawal_requests_customer_id_fkey");
+
+            entity.HasOne(d => d.Wallet).WithMany(p => p.CustomerWithdrawalRequests)
+                .HasForeignKey(d => d.WalletId)
+                .HasConstraintName("customer_withdrawal_requests_wallet_id_fkey");
+
+            entity.HasOne(d => d.ReviewedByNavigation).WithMany(p => p.CustomerWithdrawalRequestReviewedByNavigations)
+                .HasForeignKey(d => d.ReviewedBy)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("customer_withdrawal_requests_reviewed_by_fkey");
         });
 
         modelBuilder.Entity<SellerWallet>(entity =>

@@ -89,6 +89,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<ISellerWalletSettlementService, SellerWalletSettlementService>();
             builder.Services.AddScoped<ISellerWalletReleaseService, SellerWalletReleaseService>();
             builder.Services.AddScoped<ISellerWalletReversalService, SellerWalletReversalService>();
+            builder.Services.AddScoped<ICustomerWalletService, CustomerWalletService>();
             builder.Services.AddScoped<IPaymentService, PaymentService>();
             builder.Services.AddScoped<IConversationService, ConversationService>();
             builder.Services.AddScoped<IMaterialAdminService, MaterialAdminService>();

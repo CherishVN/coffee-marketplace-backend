@@ -13,17 +13,20 @@ public class DisputeAdminService : IDisputeAdminService
     private readonly ILogger<DisputeAdminService> _logger;
     private readonly INotificationService _notifications;
     private readonly ISellerWalletReversalService _walletReversal;
+    private readonly ICustomerWalletService _customerWallet;
 
     public DisputeAdminService(
         ApplicationDbContext context,
         ILogger<DisputeAdminService> logger,
         INotificationService notifications,
-        ISellerWalletReversalService walletReversal)
+        ISellerWalletReversalService walletReversal,
+        ICustomerWalletService customerWallet)
     {
         _context = context;
         _logger = logger;
         _notifications = notifications;
         _walletReversal = walletReversal;
+        _customerWallet = customerWallet;
     }
 
     public async Task<DisputeListResponseDto> GetAllDisputesAsync(
@@ -214,6 +217,17 @@ public class DisputeAdminService : IDisputeAdminService
 
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
+
+            var approvedAmount = dispute.ApprovedAmount ?? dispute.RequestedAmount;
+            if (approvedAmount > 0)
+            {
+                await _customerWallet.CreditRefundAsync(
+                    dispute.CustomerId,
+                    approvedAmount,
+                    "Order",
+                    dispute.OrderId,
+                    $"Hoàn tiền khiếu nại đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}");
+            }
 
             _logger.LogInformation(
                 "Dispute approved and refunded: {DisputeId} by admin: {AdminId}. Amount: {Amount}", 
