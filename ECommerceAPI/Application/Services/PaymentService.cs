@@ -19,7 +19,7 @@ namespace ECommerceAPI.Application.Services;
 public class PaymentService : IPaymentService
 {
     private static readonly TimeSpan PaymentCreationRetryWindow = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan PendingPaymentTimeout = TimeSpan.FromMinutes(100);
+    private static readonly int PendingPaymentTimeoutMinutes = 100;
     private readonly ApplicationDbContext _context;
     private readonly VNPaySettings _vnPaySettings;
     private readonly MoMoSettings _moMoSettings;
@@ -186,6 +186,16 @@ public class PaymentService : IPaymentService
         // Idempotent: nếu đã xử lý rồi thì return luôn
         if (payment.Status == (short)PaymentStatus.Paid)
         {
+            if (!payment.TransactionId.HasValue || !payment.Order.TransactionId.HasValue)
+            {
+                await EnsureTransactionLinkedAsync(
+                    payment,
+                    payment.Order,
+                    payment.ProviderRef,
+                    payment.PaidAt ?? DateTime.UtcNow);
+                await _context.SaveChangesAsync();
+            }
+
             return new VNPayReturnDto
             {
                 Success = true,
@@ -223,6 +233,12 @@ public class PaymentService : IPaymentService
                     inv.UpdatedAt = DateTime.UtcNow;
                 }
             }
+
+            await EnsureTransactionLinkedAsync(
+                payment,
+                order,
+                transactionNo,
+                payment.PaidAt ?? DateTime.UtcNow);
 
             var settlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
 
@@ -281,7 +297,7 @@ public class PaymentService : IPaymentService
                 order.CustomerId,
                 nameof(NotificationType.Payment),
                 "Thanh toán chưa hoàn tất",
-                $"Đơn #{oidFail} chưa thanh toán thành công (mã: {responseCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeout.TotalMinutes:0} phút.",
+                $"Đơn #{oidFail} chưa thanh toán thành công (mã: {responseCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeoutMinutes} phút.",
                 "Order",
                 order.Id,
                 queueEmail: true);
@@ -543,6 +559,16 @@ public class PaymentService : IPaymentService
 
         if (payment.Status == (short)PaymentStatus.Paid)
         {
+            if (!payment.TransactionId.HasValue || !payment.Order.TransactionId.HasValue)
+            {
+                await EnsureTransactionLinkedAsync(
+                    payment,
+                    payment.Order,
+                    payment.ProviderRef,
+                    payment.PaidAt ?? DateTime.UtcNow);
+                await _context.SaveChangesAsync();
+            }
+
             return new MoMoReturnDto
             {
                 Success = true,
@@ -595,6 +621,12 @@ public class PaymentService : IPaymentService
                     inv.UpdatedAt = DateTime.UtcNow;
                 }
             }
+
+            await EnsureTransactionLinkedAsync(
+                payment,
+                order,
+                providerRef,
+                payment.PaidAt ?? DateTime.UtcNow);
 
             var momoSettlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
 
@@ -654,7 +686,7 @@ public class PaymentService : IPaymentService
             order.CustomerId,
             nameof(NotificationType.Payment),
             "Thanh toán MoMo chưa hoàn tất",
-            $"Đơn #{momoFail} chưa thanh toán thành công (mã: {resultCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeout.TotalMinutes:0} phút.",
+            $"Đơn #{momoFail} chưa thanh toán thành công (mã: {resultCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeoutMinutes} phút.",
             "Order",
             order.Id,
             queueEmail: true);
@@ -675,93 +707,78 @@ public class PaymentService : IPaymentService
 
     public async Task<int> ExpireStalePendingPaymentsAsync(CancellationToken cancellationToken = default)
     {
-        var cutoff = DateTime.UtcNow.Subtract(PendingPaymentTimeout);
-
-        var staleOrderIds = await _context.Orders
-            .Where(o => o.Status == (short)OrderStatus.PendingPayment)
-            .Where(o => o.Payments.Any(p => p.Status == (short)PaymentStatus.Pending && p.CreatedAt <= cutoff))
-            .Where(o => !o.Payments.Any(p => p.Status == (short)PaymentStatus.Pending && p.CreatedAt > cutoff))
-            .Select(o => o.Id)
+        // Dùng NOW() của PostgreSQL — tránh mọi vấn đề timezone của C#
+        // Điều kiện: đơn PendingPayment, tạo quá hạn, chưa có payment Paid,
+        //            và không có payment Pending nào còn mới hơn cutoff
+        var cancelledIds = await _context.Database
+            .SqlQueryRaw<Guid>($"""
+                UPDATE orders
+                SET status         = 7,
+                    cancel_reason  = 'Hết hạn thanh toán sau {PendingPaymentTimeoutMinutes} phút',
+                    updated_at     = NOW()
+                WHERE status = 0
+                  AND created_at <= NOW() - ({PendingPaymentTimeoutMinutes} * INTERVAL '1 minute')
+                  AND NOT EXISTS (
+                        SELECT 1 FROM payments
+                        WHERE order_id = orders.id AND status = 1
+                  )
+                  AND NOT EXISTS (
+                        SELECT 1 FROM payments
+                        WHERE order_id = orders.id
+                          AND status = 0
+                          AND created_at > NOW() - ({PendingPaymentTimeoutMinutes} * INTERVAL '1 minute')
+                  )
+                RETURNING id AS "Value"
+                """)
             .ToListAsync(cancellationToken);
 
-        if (staleOrderIds.Count == 0)
-            return 0;
+        if (cancelledIds.Count == 0) return 0;
 
-        var expiredCount = 0;
+        var idArray = cancelledIds.ToArray();
 
-        foreach (var orderId in staleOrderIds)
+        // Huỷ các payment Pending của những đơn vừa hết hạn
+        await _context.Database.ExecuteSqlRawAsync(
+            "UPDATE payments SET status = 4, paid_at = NOW() WHERE order_id = ANY({0}) AND status = 0",
+            new object[] { idArray }, cancellationToken);
+
+        // Hoàn trả reserved_quantity theo từng (product, variant)
+        var items = await _context.OrderItems
+            .Where(i => cancelledIds.Contains(i.OrderId))
+            .GroupBy(i => new { i.ProductId, i.VariantId })
+            .Select(g => new { g.Key.ProductId, g.Key.VariantId, Qty = g.Sum(i => i.Quantity) })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in items)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            await _context.Inventories
+                .Where(inv => inv.ProductId == item.ProductId && inv.VariantId == item.VariantId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(inv => inv.ReservedQuantity,
+                        inv => inv.ReservedQuantity - item.Qty < 0 ? 0 : inv.ReservedQuantity - item.Qty)
+                    .SetProperty(inv => inv.UpdatedAt, DateTime.UtcNow),
+                    cancellationToken);
+        }
 
-            var order = await _context.Orders
-                .Include(o => o.OrderItems)
-                .Include(o => o.Payments)
-                .FirstOrDefaultAsync(o => o.Id == orderId, cancellationToken);
+        // Gửi notification cho từng khách
+        var orders = await _context.Orders
+            .Where(o => cancelledIds.Contains(o.Id))
+            .Select(o => new { o.Id, o.CustomerId, o.OrderCode })
+            .ToListAsync(cancellationToken);
 
-            if (order == null || order.Status != (short)OrderStatus.PendingPayment)
-                continue;
-
-            var hasAnyPaidPayment = order.Payments.Any(p => p.Status == (short)PaymentStatus.Paid);
-            if (hasAnyPaidPayment)
-                continue;
-
-            var pendingPayments = order.Payments
-                .Where(p => p.Status == (short)PaymentStatus.Pending)
-                .ToList();
-
-            if (pendingPayments.Count == 0)
-                continue;
-
-            var hasActivePending = pendingPayments.Any(p => p.CreatedAt > cutoff);
-            if (hasActivePending)
-                continue;
-
-            var now = DateTime.UtcNow;
-
-            foreach (var payment in pendingPayments)
-            {
-                payment.Status = (short)PaymentStatus.Cancelled;
-                payment.PaidAt = now;
-            }
-
-            order.Status = (short)OrderStatus.Cancelled;
-            order.CancelReason = $"Hết hạn thanh toán sau {PendingPaymentTimeout.TotalMinutes:0} phút";
-            order.UpdatedAt = now;
-
-            foreach (var item in order.OrderItems)
-            {
-                var inv = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId, cancellationToken);
-
-                if (inv != null)
-                {
-                    inv.ReservedQuantity -= item.Quantity;
-                    if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
-                    inv.UpdatedAt = now;
-                }
-            }
-
-            await _context.SaveChangesAsync(cancellationToken);
-
-            var orderCode = order.OrderCode;
+        foreach (var o in orders)
+        {
             await _notifications.PublishAsync(
-                order.CustomerId,
+                o.CustomerId,
                 nameof(NotificationType.Payment),
                 "Đơn hàng đã hết hạn thanh toán",
-                $"Đơn #{orderCode} đã tự động hủy do quá thời gian thanh toán {PendingPaymentTimeout.TotalMinutes:0} phút.",
+                $"Đơn #{o.OrderCode} đã tự động hủy do quá thời gian thanh toán {PendingPaymentTimeoutMinutes} phút.",
                 "Order",
-                order.Id,
+                o.Id,
                 queueEmail: true);
-
-            expiredCount++;
         }
 
-        if (expiredCount > 0)
-        {
-            _logger.LogInformation("[Payment Timeout] Expired {Count} stale pending order(s)", expiredCount);
-        }
-
-        return expiredCount;
+        _logger.LogInformation("[Payment Timeout] Auto-cancelled {Count} stale pending order(s)", cancelledIds.Count);
+        return cancelledIds.Count;
     }
 
     private bool IsMoMoSignatureValid(MoMoIpnRequest request)
@@ -845,6 +862,72 @@ public class PaymentService : IPaymentService
             .OrderBy(p => p.CreatedAt)
             .Select(p => p.Provider)
             .FirstOrDefaultAsync();
+    }
+
+    private async Task EnsureTransactionLinkedAsync(
+        Payment payment,
+        Order order,
+        string? providerRef,
+        DateTime paidAtUtc)
+    {
+        Transaction? transaction = null;
+
+        if (payment.TransactionId.HasValue)
+        {
+            transaction = await _context.Transactions
+                .FirstOrDefaultAsync(t => t.Id == payment.TransactionId.Value);
+        }
+
+        if (transaction == null && order.TransactionId.HasValue)
+        {
+            transaction = await _context.Transactions
+                .FirstOrDefaultAsync(t => t.Id == order.TransactionId.Value);
+
+            if (transaction != null)
+            {
+                payment.TransactionId = transaction.Id;
+            }
+        }
+
+        var normalizedCurrency = string.IsNullOrWhiteSpace(payment.Currency)
+            ? "VND"
+            : payment.Currency;
+        var normalizedProvider = string.IsNullOrWhiteSpace(payment.Provider)
+            ? "UNKNOWN"
+            : payment.Provider;
+
+        if (transaction == null)
+        {
+            transaction = new Transaction
+            {
+                Id = Guid.NewGuid(),
+                CustomerId = order.CustomerId,
+                Amount = payment.Amount,
+                Currency = normalizedCurrency,
+                Provider = normalizedProvider,
+                ProviderRef = providerRef,
+                Status = (short)PaymentStatus.Paid,
+                CreatedAt = payment.CreatedAt == default ? paidAtUtc : payment.CreatedAt,
+                PaidAt = paidAtUtc
+            };
+
+            _context.Transactions.Add(transaction);
+        }
+        else
+        {
+            transaction.Amount = payment.Amount;
+            transaction.Currency = normalizedCurrency;
+            transaction.Provider = normalizedProvider;
+            if (!string.IsNullOrWhiteSpace(providerRef))
+            {
+                transaction.ProviderRef = providerRef;
+            }
+            transaction.Status = (short)PaymentStatus.Paid;
+            transaction.PaidAt ??= paidAtUtc;
+        }
+
+        payment.TransactionId = transaction.Id;
+        order.TransactionId = transaction.Id;
     }
 
 }
