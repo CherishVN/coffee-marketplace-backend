@@ -190,6 +190,28 @@ public class UserProfileService : IUserProfileService
         };
 
         _context.Shops.Add(shop);
+
+        // Lưu hồ sơ xác minh nếu có
+        if (dto.Documents != null && dto.Documents.Count > 0)
+        {
+            var allowedDocTypes = new[] { "cccd_front", "cccd_back", "business_license", "tax_cert" };
+            foreach (var doc in dto.Documents)
+            {
+                if (!allowedDocTypes.Contains(doc.DocType)) continue;
+                if (string.IsNullOrWhiteSpace(doc.FileUrl)) continue;
+
+                _context.ShopDocuments.Add(new ShopDocument
+                {
+                    Id = Guid.NewGuid(),
+                    ShopId = shop.Id,
+                    DocType = doc.DocType,
+                    FileUrl = doc.FileUrl,
+                    Status = 0, // Pending review
+                    SubmittedAt = DateTime.UtcNow,
+                });
+            }
+        }
+
         await _context.SaveChangesAsync();
 
         return new ServiceResponse
