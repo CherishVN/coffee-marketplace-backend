@@ -159,7 +159,7 @@ public class UserProfileService : IUserProfileService
         }
 
         var seqValue = await _context.Database
-            .SqlQueryRaw<long>("SELECT nextval('shops_code_seq')")
+            .SqlQueryRaw<long>("SELECT nextval('shops_code_seq') AS \"Value\"")
             .FirstAsync();
         var shopCode = $"SH-{DateTime.UtcNow:yyyyMM}-{seqValue:D5}";
 
