@@ -1583,6 +1583,13 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.SuspensionReason).HasColumnName("suspension_reason");
             entity.Property(e => e.SuspendedAt).HasColumnName("suspended_at");
             entity.Property(e => e.SuspendedBy).HasColumnName("suspended_by");
+            entity.Property(e => e.Phone).HasColumnName("phone");
+            entity.Property(e => e.AddressLine).HasColumnName("address_line");
+            entity.Property(e => e.WardCode).HasColumnName("ward_code");
+            entity.Property(e => e.DistrictId).HasColumnName("district_id");
+            entity.Property(e => e.ProvinceId).HasColumnName("province_id");
+            entity.Property(e => e.City).HasColumnName("city");
+            entity.Property(e => e.GhnShopId).HasColumnName("ghn_shop_id");
             entity.Property(e => e.Slug).HasColumnName("slug");
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)

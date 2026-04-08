@@ -67,6 +67,13 @@ public class SellerService : ISellerService
                 Slug = shop.Slug,
                 Description = shop.Description,
                 LogoUrl = shop.LogoUrl,
+                Phone = shop.Phone,
+                AddressLine = shop.AddressLine,
+                WardCode = shop.WardCode,
+                DistrictId = shop.DistrictId,
+                ProvinceId = shop.ProvinceId,
+                City = shop.City,
+                GhnShopId = shop.GhnShopId,
                 Status = shop.Status,
                 VerificationStatus = shop.VerificationStatus,
                 CreatedAt = shop.CreatedAt
@@ -96,6 +103,27 @@ public class SellerService : ISellerService
 
         if (dto.LogoUrl != null)
             shop.LogoUrl = dto.LogoUrl;
+
+        if (dto.Phone != null)
+            shop.Phone = dto.Phone;
+
+        if (dto.AddressLine != null)
+            shop.AddressLine = dto.AddressLine;
+
+        if (dto.WardCode != null)
+            shop.WardCode = dto.WardCode;
+
+        if (dto.DistrictId.HasValue)
+            shop.DistrictId = dto.DistrictId;
+
+        if (dto.ProvinceId.HasValue)
+            shop.ProvinceId = dto.ProvinceId;
+
+        if (dto.City != null)
+            shop.City = dto.City;
+
+        if (dto.GhnShopId.HasValue)
+            shop.GhnShopId = dto.GhnShopId;
 
         shop.UpdatedAt = DateTime.UtcNow;
 
@@ -866,6 +894,7 @@ public class SellerService : ISellerService
                 CustomerPhone = o.Customer.Phone,
                 TotalAmount = o.Total,
                 Status = o.Status,
+                CancelReason = o.CancelReason,
                 ShippingAddress = o.ShippingAddress != null 
                     ? $"{o.ShippingAddress.AddressLine1}, {o.ShippingAddress.Ward}, {o.ShippingAddress.District}, {o.ShippingAddress.City}"
                     : o.ShipAddress,
@@ -968,6 +997,7 @@ public class SellerService : ISellerService
                 CustomerPhone = order.Customer.Phone,
                 TotalAmount = order.Total,
                 Status = order.Status,
+                CancelReason = order.CancelReason,
                 ShippingAddress = order.ShippingAddress != null 
                     ? $"{order.ShippingAddress.AddressLine1}, {order.ShippingAddress.Ward}, {order.ShippingAddress.District}, {order.ShippingAddress.City}"
                     : order.ShipAddress,

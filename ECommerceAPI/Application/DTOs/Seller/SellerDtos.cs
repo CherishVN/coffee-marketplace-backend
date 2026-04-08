@@ -9,6 +9,13 @@ public class UpdateShopDto
     public string? Name { get; set; }
     public string? Description { get; set; }
     public string? LogoUrl { get; set; }
+    public string? Phone { get; set; }
+    public string? AddressLine { get; set; }
+    public string? WardCode { get; set; }
+    public int? DistrictId { get; set; }
+    public int? ProvinceId { get; set; }
+    public string? City { get; set; }
+    public int? GhnShopId { get; set; }
 }
 
 // Product Management DTOs
@@ -68,6 +75,13 @@ public class ShopDto
     public string Slug { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? LogoUrl { get; set; }
+    public string? Phone { get; set; }
+    public string? AddressLine { get; set; }
+    public string? WardCode { get; set; }
+    public int? DistrictId { get; set; }
+    public int? ProvinceId { get; set; }
+    public string? City { get; set; }
+    public int? GhnShopId { get; set; }
     public short Status { get; set; }
     public short VerificationStatus { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -122,6 +136,7 @@ public class OrderDto
     public string? CustomerPhone { get; set; }
     public decimal TotalAmount { get; set; }
     public short Status { get; set; }
+    public string? CancelReason { get; set; }
     public string? ShippingAddress { get; set; }
     public decimal ProviderShippingFee { get; set; }
     public string? ShippingProvider { get; set; }
@@ -157,6 +172,34 @@ public class UpdateShopDtoValidator : AbstractValidator<UpdateShopDto>
         RuleFor(x => x.Description)
             .MaximumLength(2000).WithMessage("Mô tả không được vượt quá 2000 ký tự")
             .When(x => !string.IsNullOrEmpty(x.Description));
+
+        RuleFor(x => x.Phone)
+            .Matches(@"^(0|\+84)[0-9]{9,10}$").WithMessage("Số điện thoại không hợp lệ")
+            .When(x => !string.IsNullOrEmpty(x.Phone));
+
+        RuleFor(x => x.AddressLine)
+            .MaximumLength(500).WithMessage("Địa chỉ không được vượt quá 500 ký tự")
+            .When(x => !string.IsNullOrEmpty(x.AddressLine));
+
+        RuleFor(x => x.WardCode)
+            .MaximumLength(50).WithMessage("Mã phường/xã không được vượt quá 50 ký tự")
+            .When(x => !string.IsNullOrEmpty(x.WardCode));
+
+        RuleFor(x => x.City)
+            .MaximumLength(100).WithMessage("Tên thành phố không được vượt quá 100 ký tự")
+            .When(x => !string.IsNullOrEmpty(x.City));
+
+        RuleFor(x => x.DistrictId)
+            .GreaterThan(0).WithMessage("district_id phải lớn hơn 0")
+            .When(x => x.DistrictId.HasValue);
+
+        RuleFor(x => x.ProvinceId)
+            .GreaterThan(0).WithMessage("province_id phải lớn hơn 0")
+            .When(x => x.ProvinceId.HasValue);
+
+        RuleFor(x => x.GhnShopId)
+            .GreaterThan(0).WithMessage("ghn_shop_id phải lớn hơn 0")
+            .When(x => x.GhnShopId.HasValue);
     }
 }
 

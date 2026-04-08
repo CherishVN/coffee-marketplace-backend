@@ -7,6 +7,9 @@ using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ECommerceAPI.Application.Services;
 
@@ -19,6 +22,8 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly ICustomerWalletService _customerWallet;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
 
     public CustomerOrderService(
         ApplicationDbContext context,
@@ -27,7 +32,9 @@ public class CustomerOrderService : ICustomerOrderService
         ISellerWalletReleaseService walletRelease,
         ISellerWalletReversalService walletReversal,
         IOrderNotificationEmailComposer orderEmailComposer,
-        ICustomerWalletService customerWallet)
+        ICustomerWalletService customerWallet,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
     {
         _context = context;
         _hubContext = hubContext;
@@ -36,6 +43,8 @@ public class CustomerOrderService : ICustomerOrderService
         _walletReversal = walletReversal;
         _orderEmailComposer = orderEmailComposer;
         _customerWallet = customerWallet;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
     }
 
     public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
@@ -409,6 +418,15 @@ public class CustomerOrderService : ICustomerOrderService
             };
         }
 
+        if (!pendingOnly && oldStatus == OrderStatus.Processing)
+        {
+            var ghnCancel = await CancelGhnOrderIfRequiredAsync(order);
+            if (!ghnCancel.Success)
+            {
+                return ghnCancel;
+            }
+        }
+
         var now = DateTime.UtcNow;
         var hasPaidPayment = order.Payments.Any(p => p.Status == (short)PaymentStatus.Paid);
 
@@ -487,6 +505,117 @@ public class CustomerOrderService : ICustomerOrderService
             emailSubjectOverride: composed?.Subject);
 
         return new ServiceResponse { Success = true, Message = "Đơn hàng đã được huỷ" };
+    }
+
+    private async Task<ServiceResponse> CancelGhnOrderIfRequiredAsync(Order order)
+    {
+        if (!string.Equals(order.ShippingProvider, "GHN", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ServiceResponse { Success = true };
+        }
+
+        var trackingCode = order.TrackingCode?.Trim();
+        if (string.IsNullOrWhiteSpace(trackingCode))
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = "Không thể huỷ đơn GHN vì thiếu mã vận đơn (tracking code)."
+            };
+        }
+
+        var ghnToken = (_configuration["GHN:Token"] ?? _configuration["NEXT_PUBLIC_GHN_TOKEN"])?.Trim();
+        var ghnShopId = (_configuration["GHN:ShopId"] ?? _configuration["NEXT_PUBLIC_GHN_SHOP_ID"])?.Trim();
+        var ghnBaseUrl = (_configuration["GHN:BaseUrl"] ?? "https://dev-online-gateway.ghn.vn").TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(ghnToken) || string.IsNullOrWhiteSpace(ghnShopId))
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = "Thiếu cấu hình GHN (Token/ShopId), không thể huỷ vận đơn."
+            };
+        }
+
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{ghnBaseUrl}/shiip/public-api/v2/switch-status/cancel");
+
+        request.Headers.TryAddWithoutValidation("Token", ghnToken);
+        request.Headers.TryAddWithoutValidation("ShopId", ghnShopId);
+        request.Content = JsonContent.Create(new { order_codes = new[] { trackingCode } });
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request);
+        }
+        catch (Exception ex)
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = $"Không thể kết nối GHN để huỷ vận đơn: {ex.Message}"
+            };
+        }
+
+        var responseText = await response.Content.ReadAsStringAsync();
+        GhnCancelResponse? ghn;
+        try
+        {
+            ghn = JsonSerializer.Deserialize<GhnCancelResponse>(
+                responseText,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            ghn = null;
+        }
+
+        if (!response.IsSuccessStatusCode || ghn?.Code != 200)
+        {
+            var message = ghn?.Message;
+            if (string.IsNullOrWhiteSpace(message))
+                message = $"GHN trả về HTTP {(int)response.StatusCode}.";
+
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = $"Huỷ vận đơn GHN thất bại: {message}"
+            };
+        }
+
+        var item = ghn.Data?.FirstOrDefault(x => string.Equals(x.OrderCode, trackingCode, StringComparison.OrdinalIgnoreCase));
+        if (item is null || !item.Result)
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = $"Huỷ vận đơn GHN thất bại: {item?.Message ?? "Không nhận được kết quả huỷ hợp lệ."}"
+            };
+        }
+
+        return new ServiceResponse { Success = true };
+    }
+
+    private sealed class GhnCancelResponse
+    {
+        public int Code { get; set; }
+        public string? Message { get; set; }
+        public List<GhnCancelOrderResult>? Data { get; set; }
+    }
+
+    private sealed class GhnCancelOrderResult
+    {
+        [JsonPropertyName("order_code")]
+        public string? OrderCode { get; set; }
+
+        [JsonPropertyName("result")]
+        public bool Result { get; set; }
+
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
     }
 
     private async Task NotifyStatusChanged(Order order, OrderStatus oldStatus, OrderStatus newStatus)

@@ -12,6 +12,12 @@ public class RegisterSellerDto
 {
     public string ShopName { get; set; } = string.Empty;
     public string? ShopDescription { get; set; }
+    public string? Phone { get; set; }
+    public string? AddressLine { get; set; }
+    public string? WardCode { get; set; }
+    public int? DistrictId { get; set; }
+    public int? ProvinceId { get; set; }
+    public string? City { get; set; }
     public string? BusinessLicenseNumber { get; set; }
     public string? TaxCode { get; set; }
     public string BusinessType { get; set; } = string.Empty;
@@ -89,6 +95,30 @@ public class RegisterSellerDtoValidator : AbstractValidator<RegisterSellerDto>
         RuleFor(x => x.ShopDescription)
             .MaximumLength(2000).WithMessage("Mô tả shop không được vượt quá 2000 ký tự")
             .When(x => !string.IsNullOrEmpty(x.ShopDescription));
+
+        RuleFor(x => x.Phone)
+            .NotEmpty().WithMessage("Số điện thoại không được để trống")
+            .Matches(@"^(0|\+84)[0-9]{9,10}$").WithMessage("Số điện thoại không hợp lệ");
+
+        RuleFor(x => x.AddressLine)
+            .NotEmpty().WithMessage("Địa chỉ không được để trống")
+            .MaximumLength(500).WithMessage("Địa chỉ không được vượt quá 500 ký tự");
+
+        RuleFor(x => x.WardCode)
+            .NotEmpty().WithMessage("Mã phường/xã không được để trống")
+            .MaximumLength(50).WithMessage("Mã phường/xã không được vượt quá 50 ký tự");
+
+        RuleFor(x => x.City)
+            .NotEmpty().WithMessage("Tên thành phố không được để trống")
+            .MaximumLength(100).WithMessage("Tên thành phố không được vượt quá 100 ký tự");
+
+        RuleFor(x => x.DistrictId)
+            .NotNull().WithMessage("district_id không được để trống")
+            .GreaterThan(0).WithMessage("district_id phải lớn hơn 0");
+
+        RuleFor(x => x.ProvinceId)
+            .NotNull().WithMessage("province_id không được để trống")
+            .GreaterThan(0).WithMessage("province_id phải lớn hơn 0");
 
         RuleFor(x => x.BusinessType)
             .NotEmpty().WithMessage("Loại hình kinh doanh không được để trống")

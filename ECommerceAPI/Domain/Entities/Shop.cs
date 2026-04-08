@@ -41,6 +41,20 @@ public partial class Shop
 
     public string? CoverUrl { get; set; }
 
+    public string? Phone { get; set; }
+
+    public string? AddressLine { get; set; }
+
+    public string? WardCode { get; set; }
+
+    public int? DistrictId { get; set; }
+
+    public int? ProvinceId { get; set; }
+
+    public string? City { get; set; }
+
+    public int? GhnShopId { get; set; }
+
     public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();

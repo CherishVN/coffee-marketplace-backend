@@ -3,16 +3,29 @@ using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ECommerceAPI.Application.Services;
 
 public class SellerApprovalService : ISellerApprovalService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<SellerApprovalService> _logger;
 
-    public SellerApprovalService(ApplicationDbContext context)
+    public SellerApprovalService(
+        ApplicationDbContext context,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        ILogger<SellerApprovalService> logger)
     {
         _context = context;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<ShopListResponseDto> GetPendingShopsAsync(int page, int pageSize, short? verificationStatus)
@@ -92,6 +105,35 @@ public class SellerApprovalService : ISellerApprovalService
                 Success = false,
                 Message = "Chỉ có thể duyệt shop đang chờ xử lý"
             };
+        }
+
+        if (string.IsNullOrWhiteSpace(shop.Phone)
+            || string.IsNullOrWhiteSpace(shop.AddressLine)
+            || string.IsNullOrWhiteSpace(shop.WardCode)
+            || !shop.DistrictId.HasValue
+            || !shop.ProvinceId.HasValue
+            || string.IsNullOrWhiteSpace(shop.City))
+        {
+            return new ShopResponseDto
+            {
+                Success = false,
+                Message = "Shop thiếu thông tin liên hệ/địa chỉ. Vui lòng cập nhật trước khi phê duyệt."
+            };
+        }
+
+        if (!shop.GhnShopId.HasValue || shop.GhnShopId.Value <= 0)
+        {
+            var createGhnResult = await CreateGhnShopAsync(shop);
+            if (!createGhnResult.Success)
+            {
+                return new ShopResponseDto
+                {
+                    Success = false,
+                    Message = createGhnResult.ErrorMessage
+                };
+            }
+
+            shop.GhnShopId = createGhnResult.ShopId;
         }
 
         shop.VerificationStatus = 1;
@@ -249,6 +291,13 @@ public class SellerApprovalService : ISellerApprovalService
             Slug = s.Slug,
             Description = s.Description,
             LogoUrl = s.LogoUrl,
+            Phone = s.Phone,
+            AddressLine = s.AddressLine,
+            WardCode = s.WardCode,
+            DistrictId = s.DistrictId,
+            ProvinceId = s.ProvinceId,
+            City = s.City,
+            GhnShopId = s.GhnShopId,
             Status = s.Status,
             StatusName = GetStatusName(s.Status),
             VerificationStatus = s.VerificationStatus,
@@ -492,5 +541,97 @@ public class SellerApprovalService : ISellerApprovalService
             2 => "Rejected",
             _ => "Unknown"
         };
+    }
+
+    private async Task<(bool Success, int? ShopId, string ErrorMessage)> CreateGhnShopAsync(Shop shop)
+    {
+        var ghnToken = (_configuration["GHN:Token"])?.Trim();
+        var ghnBaseUrl = (_configuration["GHN:BaseUrl"]).TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(ghnToken))
+        {
+            return (false, null, "Thiếu cấu hình GHN Token, không thể tạo cửa hàng trên GHN.");
+        }
+
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{ghnBaseUrl}/shiip/public-api/v2/shop/register");
+
+        request.Headers.TryAddWithoutValidation("Token", ghnToken);
+        request.Content = JsonContent.Create(new
+        {
+            district_id = shop.DistrictId!.Value,
+            ward_code = shop.WardCode,
+            name = shop.Name,
+            phone = shop.Phone,
+            address = shop.AddressLine
+        });
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to call GHN create-store API for shop {ShopId}", shop.Id);
+            return (false, null, $"Không thể kết nối GHN để tạo cửa hàng: {ex.Message}");
+        }
+
+        var responseText = await response.Content.ReadAsStringAsync();
+        GhnCreateShopResponse? ghnResponse;
+        try
+        {
+            ghnResponse = JsonSerializer.Deserialize<GhnCreateShopResponse>(
+                responseText,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            ghnResponse = null;
+        }
+
+        if (!response.IsSuccessStatusCode || ghnResponse?.Code != 200 || ghnResponse.Data?.ShopId is null || ghnResponse.Data.ShopId <= 0)
+        {
+            var message = ghnResponse?.CodeMessageValue
+                ?? ghnResponse?.CodeMessage
+                ?? ghnResponse?.Message;
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                message = $"GHN trả về HTTP {(int)response.StatusCode}";
+            }
+
+            _logger.LogWarning(
+                "GHN create-store failed for shop {ShopId}. StatusCode={StatusCode}, Response={Response}",
+                shop.Id,
+                (int)response.StatusCode,
+                responseText);
+
+            return (false, null, $"Tạo cửa hàng GHN thất bại: {message}");
+        }
+
+        return (true, ghnResponse.Data.ShopId, string.Empty);
+    }
+
+    private sealed class GhnCreateShopResponse
+    {
+        public int Code { get; set; }
+        public string? Message { get; set; }
+
+        [JsonPropertyName("code_message")]
+        public string? CodeMessage { get; set; }
+
+        [JsonPropertyName("code_message_value")]
+        public string? CodeMessageValue { get; set; }
+
+        public GhnCreateShopData? Data { get; set; }
+    }
+
+    private sealed class GhnCreateShopData
+    {
+        [JsonPropertyName("shop_id")]
+        public int ShopId { get; set; }
     }
 }

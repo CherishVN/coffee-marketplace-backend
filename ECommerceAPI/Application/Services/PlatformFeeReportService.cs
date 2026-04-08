@@ -100,6 +100,7 @@ public class PlatformFeeReportService : IPlatformFeeReportService
             {
                 Id = r.Id,
                 OrderId = r.OrderId,
+                OrderCode = r.Order.OrderCode,
                 PaymentId = r.PaymentId,
                 ShopId = r.ShopId,
                 ShopName = r.Shop.Name,

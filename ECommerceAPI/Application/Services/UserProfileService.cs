@@ -68,6 +68,13 @@ public class UserProfileService : IUserProfileService
                 Id = shop.Id,
                 Name = shop.Name,
                 Description = shop.Description,
+                Phone = shop.Phone,
+                AddressLine = shop.AddressLine,
+                WardCode = shop.WardCode,
+                DistrictId = shop.DistrictId,
+                ProvinceId = shop.ProvinceId,
+                City = shop.City,
+                GhnShopId = shop.GhnShopId,
                 Status = shop.Status,
                 VerificationStatus = shop.VerificationStatus
             } : null
@@ -158,6 +165,12 @@ public class UserProfileService : IUserProfileService
             Name = dto.ShopName,
             Slug = slug,
             Description = dto.ShopDescription,
+            Phone = dto.Phone,
+            AddressLine = dto.AddressLine,
+            WardCode = dto.WardCode,
+            DistrictId = dto.DistrictId,
+            ProvinceId = dto.ProvinceId,
+            City = dto.City,
             Status = 0, // Inactive until approved
             VerificationStatus = 0, // Pending
             CreatedAt = DateTime.UtcNow,

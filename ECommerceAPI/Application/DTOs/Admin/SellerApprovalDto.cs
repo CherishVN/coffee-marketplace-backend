@@ -11,6 +11,13 @@ public class ShopVerificationDto
     public string Slug { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? LogoUrl { get; set; }
+    public string? Phone { get; set; }
+    public string? AddressLine { get; set; }
+    public string? WardCode { get; set; }
+    public int? DistrictId { get; set; }
+    public int? ProvinceId { get; set; }
+    public string? City { get; set; }
+    public int? GhnShopId { get; set; }
     public short Status { get; set; }
     public string StatusName { get; set; } = string.Empty;
     public short VerificationStatus { get; set; }

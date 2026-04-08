@@ -33,6 +33,13 @@ public class ShopInfoDto
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Phone { get; set; }
+    public string? AddressLine { get; set; }
+    public string? WardCode { get; set; }
+    public int? DistrictId { get; set; }
+    public int? ProvinceId { get; set; }
+    public string? City { get; set; }
+    public int? GhnShopId { get; set; }
     public short Status { get; set; }
     public short VerificationStatus { get; set; }
 }

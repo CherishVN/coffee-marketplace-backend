@@ -17,6 +17,7 @@ public class PlatformFeeRecordDto
 {
     public Guid Id { get; set; }
     public Guid OrderId { get; set; }
+    public string? OrderCode { get; set; }
     public Guid? PaymentId { get; set; }
     public Guid ShopId { get; set; }
     public string? ShopName { get; set; }
