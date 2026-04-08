@@ -148,6 +148,7 @@ public class CartService : ICartService
             Id = existingItem.Id,
             ProductId = dto.ProductId,
             ProductName = product.Name,
+            ProductSlug = product.Slug,
             ProductImage = product.ProductImages.OrderBy(i => i.SortOrder).FirstOrDefault()?.ImageUrl,
             VariantId = dto.VariantId,
             VariantName = variant?.VariantName,
@@ -339,12 +340,13 @@ public class CartService : ICartService
                 Id = ci.Id,
                 ProductId = ci.ProductId,
                 ProductName = ci.ProductName,
+                ProductSlug = ci.Product.Slug,
                 ProductImage = ci.Product.ProductImages.OrderBy(i => i.SortOrder).FirstOrDefault()?.ImageUrl,
                 VariantId = ci.VariantId,
                 VariantName = ci.Variant?.VariantName,
                 UnitPrice = ci.UnitPrice,
                 Quantity = ci.Quantity,
-                StockAvailable = 0 // Loaded separately nếu cần
+                StockAvailable = 0
             }).ToList()
         };
     }

@@ -48,6 +48,7 @@ public class CartItemDto
     public Guid Id { get; set; }
     public Guid ProductId { get; set; }
     public string ProductName { get; set; } = null!;
+    public string? ProductSlug { get; set; }
     public string? ProductImage { get; set; }
     public Guid? VariantId { get; set; }
     public string? VariantName { get; set; }
