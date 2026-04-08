@@ -179,20 +179,6 @@ public class UserProfileService : IUserProfileService
 
         _context.Shops.Add(shop);
 
-        // Note: ShopDocument entity chỉ có DocType, FileUrl, Status
-        // Business info sẽ được store ở table khác hoặc mở rộng ShopDocument entity
-        // Tạm thời lưu thông tin business info vào shop description
-        var businessInfo = $@"
-Business License: {dto.BusinessLicenseNumber}
-Tax Code: {dto.TaxCode}
-Business Type: {dto.BusinessType}
-Bank: {dto.BankName}
-Account Number: {dto.BankAccountNumber}
-Account Name: {dto.BankAccountName}
-";
-
-        shop.Description = (shop.Description ?? "") + "\n\n" + businessInfo;
-
         await _context.SaveChangesAsync();
 
         return new ServiceResponse
