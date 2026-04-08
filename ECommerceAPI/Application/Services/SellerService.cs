@@ -924,6 +924,9 @@ public class SellerService : ISellerService
                 EstimatedDeliveryDate = o.EstimatedDeliveryDate,
                 ActualDeliveryDate = o.ActualDeliveryDate,
                 CreatedAt = o.CreatedAt,
+                ShopGhnShopId = shop.GhnShopId,
+                ShopFromDistrictId = shop.DistrictId,
+                ShopFromWardCode = shop.WardCode,
                 Items = o.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,
@@ -1027,6 +1030,9 @@ public class SellerService : ISellerService
                 EstimatedDeliveryDate = order.EstimatedDeliveryDate,
                 ActualDeliveryDate = order.ActualDeliveryDate,
                 CreatedAt = order.CreatedAt,
+                ShopGhnShopId = shop.GhnShopId,
+                ShopFromDistrictId = shop.DistrictId,
+                ShopFromWardCode = shop.WardCode,
                 Items = order.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,

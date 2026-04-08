@@ -525,17 +525,28 @@ public class CustomerOrderService : ICustomerOrderService
         }
 
         var ghnToken = (_configuration["GHN:Token"] ?? _configuration["NEXT_PUBLIC_GHN_TOKEN"])?.Trim();
-        var ghnShopId = (_configuration["GHN:ShopId"] ?? _configuration["NEXT_PUBLIC_GHN_SHOP_ID"])?.Trim();
         var ghnBaseUrl = (_configuration["GHN:BaseUrl"] ?? "https://dev-online-gateway.ghn.vn").TrimEnd('/');
 
-        if (string.IsNullOrWhiteSpace(ghnToken) || string.IsNullOrWhiteSpace(ghnShopId))
+        if (string.IsNullOrWhiteSpace(ghnToken))
         {
             return new ServiceResponse
             {
                 Success = false,
-                Message = "Thiếu cấu hình GHN (Token/ShopId), không thể huỷ vận đơn."
+                Message = "Thiếu cấu hình GHN (Token), không thể huỷ vận đơn."
             };
         }
+
+        var shop = await _context.Shops.FirstOrDefaultAsync(s => s.Id == order.ShopId);
+        if (shop?.GhnShopId == null)
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = "Shop chưa đăng ký GHN Shop ID, không thể huỷ vận đơn."
+            };
+        }
+
+        var ghnShopId = shop.GhnShopId.Value.ToString();
 
         var client = _httpClientFactory.CreateClient();
         using var request = new HttpRequestMessage(

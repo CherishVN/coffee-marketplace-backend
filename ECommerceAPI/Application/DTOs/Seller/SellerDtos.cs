@@ -148,6 +148,10 @@ public class OrderDto
     public DateTimeOffset? ActualDeliveryDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<OrderItemDto>? Items { get; set; }
+
+    public int? ShopGhnShopId { get; set; }
+    public int? ShopFromDistrictId { get; set; }
+    public string? ShopFromWardCode { get; set; }
 }
 
 public class OrderItemDto

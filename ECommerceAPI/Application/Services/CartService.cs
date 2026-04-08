@@ -24,6 +24,9 @@ public class CartService : ICartService
                 .ThenInclude(ci => ci.Product)
                     .ThenInclude(p => p.ProductImages)
             .Include(c => c.CartItems)
+                .ThenInclude(ci => ci.Product)
+                    .ThenInclude(p => p.Shop)
+            .Include(c => c.CartItems)
                 .ThenInclude(ci => ci.Variant)
             .FirstOrDefaultAsync(c => c.CustomerId == customerId && c.Status == 0);
 
@@ -346,7 +349,12 @@ public class CartService : ICartService
                 VariantName = ci.Variant?.VariantName,
                 UnitPrice = ci.UnitPrice,
                 Quantity = ci.Quantity,
-                StockAvailable = 0
+                StockAvailable = 0,
+                ShopId = ci.Product.ShopId,
+                ShopName = ci.Product.Shop?.Name,
+                GhnShopId = ci.Product.Shop?.GhnShopId,
+                FromDistrictId = ci.Product.Shop?.DistrictId,
+                FromWardCode = ci.Product.Shop?.WardCode,
             }).ToList()
         };
     }

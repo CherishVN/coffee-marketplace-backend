@@ -56,6 +56,12 @@ public class CartItemDto
     public int Quantity { get; set; }
     public decimal LineTotal => UnitPrice * Quantity;
     public int StockAvailable { get; set; }
+
+    public Guid? ShopId { get; set; }
+    public string? ShopName { get; set; }
+    public int? GhnShopId { get; set; }
+    public int? FromDistrictId { get; set; }
+    public string? FromWardCode { get; set; }
 }
 
 public class CheckoutResponseDto
