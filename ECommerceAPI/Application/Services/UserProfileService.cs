@@ -77,6 +77,7 @@ public class UserProfileService : IUserProfileService
                 GhnShopId = shop.GhnShopId,
                 Status = shop.Status,
                 VerificationStatus = shop.VerificationStatus,
+                RejectionReason = shop.RejectionReason,
                 BusinessType = shop.BusinessType,
                 BusinessLicenseNumber = shop.BusinessLicenseNumber,
                 TaxCode = shop.TaxCode,
@@ -142,21 +143,79 @@ public class UserProfileService : IUserProfileService
             };
         }
 
-        if (user.ShopOwners.Any())
+        var existingShopForUser = user.ShopOwners.FirstOrDefault();
+
+        if (existingShopForUser != null)
         {
-            return new ServiceResponse
+            // Nếu bị từ chối (VerificationStatus = 2) → cho phép nộp lại
+            if (existingShopForUser.VerificationStatus != 2)
             {
-                Success = false,
-                Message = "Bạn đã có shop rồi"
-            };
+                var statusMsg = existingShopForUser.VerificationStatus == 0
+                    ? "Đơn đăng ký của bạn đang chờ admin duyệt."
+                    : "Bạn đã là seller rồi.";
+                return new ServiceResponse { Success = false, Message = statusMsg };
+            }
+
+            // Resubmit: cập nhật shop cũ và đặt lại trạng thái pending
+            var slug = GenerateSlug(dto.ShopName);
+            var slugConflict = await _context.Shops
+                .FirstOrDefaultAsync(s => s.Slug == slug && s.Id != existingShopForUser.Id);
+            if (slugConflict != null)
+                slug = $"{slug}-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
+
+            existingShopForUser.Name = dto.ShopName;
+            existingShopForUser.Slug = slug;
+            existingShopForUser.Description = dto.ShopDescription;
+            existingShopForUser.Phone = dto.Phone;
+            existingShopForUser.AddressLine = dto.AddressLine;
+            existingShopForUser.WardCode = dto.WardCode;
+            existingShopForUser.DistrictId = dto.DistrictId;
+            existingShopForUser.ProvinceId = dto.ProvinceId;
+            existingShopForUser.City = dto.City;
+            existingShopForUser.BusinessType = dto.BusinessType;
+            existingShopForUser.BusinessLicenseNumber = dto.BusinessLicenseNumber;
+            existingShopForUser.TaxCode = dto.TaxCode;
+            existingShopForUser.BankName = dto.BankName;
+            existingShopForUser.BankAccountNumber = dto.BankAccountNumber;
+            existingShopForUser.BankAccountName = dto.BankAccountName;
+            existingShopForUser.VerificationStatus = 0; // Pending again
+            existingShopForUser.RejectionReason = null;
+            existingShopForUser.UpdatedAt = DateTime.UtcNow;
+
+            // Xóa tài liệu cũ và thêm tài liệu mới
+            var oldDocs = await _context.ShopDocuments
+                .Where(d => d.ShopId == existingShopForUser.Id)
+                .ToListAsync();
+            _context.ShopDocuments.RemoveRange(oldDocs);
+
+            if (dto.Documents != null && dto.Documents.Count > 0)
+            {
+                var allowedDocTypes = new[] { "cccd_front", "cccd_back", "business_license", "tax_cert" };
+                foreach (var doc in dto.Documents)
+                {
+                    if (!allowedDocTypes.Contains(doc.DocType)) continue;
+                    if (string.IsNullOrWhiteSpace(doc.FileUrl)) continue;
+                    _context.ShopDocuments.Add(new ShopDocument
+                    {
+                        Id = Guid.NewGuid(),
+                        ShopId = existingShopForUser.Id,
+                        DocType = doc.DocType,
+                        FileUrl = doc.FileUrl,
+                        Status = 0,
+                        SubmittedAt = DateTime.UtcNow,
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            return new ServiceResponse { Success = true, Message = "Đã gửi lại đơn đăng ký. Vui lòng chờ admin phê duyệt." };
         }
 
-        var slug = GenerateSlug(dto.ShopName);
-        var existingShop = await _context.Shops.FirstOrDefaultAsync(s => s.Slug == slug);
-        if (existingShop != null)
-        {
-            slug = $"{slug}-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
-        }
+        // ── Tạo shop mới ──────────────────────────────────────────────────────
+        var newSlug = GenerateSlug(dto.ShopName);
+        var existingSlug = await _context.Shops.FirstOrDefaultAsync(s => s.Slug == newSlug);
+        if (existingSlug != null)
+            newSlug = $"{newSlug}-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
 
         var seqValue = await _context.Database
             .SqlQueryRaw<long>("SELECT nextval('shops_code_seq') AS \"Value\"")
@@ -169,7 +228,7 @@ public class UserProfileService : IUserProfileService
             ShopCode = shopCode,
             OwnerId = userId,
             Name = dto.ShopName,
-            Slug = slug,
+            Slug = newSlug,
             Description = dto.ShopDescription,
             Phone = dto.Phone,
             AddressLine = dto.AddressLine,
@@ -183,15 +242,14 @@ public class UserProfileService : IUserProfileService
             BankName = dto.BankName,
             BankAccountNumber = dto.BankAccountNumber,
             BankAccountName = dto.BankAccountName,
-            Status = 0, // Inactive until approved
-            VerificationStatus = 0, // Pending
+            Status = 0,
+            VerificationStatus = 0,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         _context.Shops.Add(shop);
 
-        // Lưu hồ sơ xác minh nếu có
         if (dto.Documents != null && dto.Documents.Count > 0)
         {
             var allowedDocTypes = new[] { "cccd_front", "cccd_back", "business_license", "tax_cert" };
@@ -199,14 +257,13 @@ public class UserProfileService : IUserProfileService
             {
                 if (!allowedDocTypes.Contains(doc.DocType)) continue;
                 if (string.IsNullOrWhiteSpace(doc.FileUrl)) continue;
-
                 _context.ShopDocuments.Add(new ShopDocument
                 {
                     Id = Guid.NewGuid(),
                     ShopId = shop.Id,
                     DocType = doc.DocType,
                     FileUrl = doc.FileUrl,
-                    Status = 0, // Pending review
+                    Status = 0,
                     SubmittedAt = DateTime.UtcNow,
                 });
             }

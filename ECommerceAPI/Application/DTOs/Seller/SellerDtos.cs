@@ -60,6 +60,15 @@ public class UpdateInventoryDto
     public int Quantity { get; set; }
 }
 
+public class UpdateProductVariantDto
+{
+    public string? VariantName { get; set; }
+    public string? Sku { get; set; }
+    public decimal? Price { get; set; }
+    public string? Attributes { get; set; }
+    public bool? IsActive { get; set; }
+}
+
 // Order Management DTOs
 public class SellerUpdateOrderStatusDto
 {

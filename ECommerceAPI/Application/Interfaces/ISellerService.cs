@@ -23,7 +23,10 @@ public interface ISellerService
 
     /// <summary>Thêm biến thể sau khi đã tạo sản phẩm (kèm dòng tồn kho).</summary>
     Task<ServiceResponse<ProductVariantDetailDto>> AddProductVariantAsync(Guid userId, Guid productId, ProductVariantDto dto);
-    
+
+    /// <summary>Cập nhật thông tin biến thể (tên, SKU, giá, attributes, trạng thái).</summary>
+    Task<ServiceResponse> UpdateProductVariantAsync(Guid userId, Guid productId, Guid variantId, UpdateProductVariantDto dto);
+
     // Inventory Management
     Task<ServiceResponse> UpdateInventoryAsync(Guid userId, Guid productId, UpdateInventoryDto dto);
     
