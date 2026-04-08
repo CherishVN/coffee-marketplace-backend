@@ -24,6 +24,16 @@ public class RegisterSellerDto
     public string? BankName { get; set; }
     public string? BankAccountNumber { get; set; }
     public string? BankAccountName { get; set; }
+    /// <summary>Hồ sơ xác minh đã upload lên Supabase Storage</summary>
+    public List<ShopDocumentInputDto>? Documents { get; set; }
+}
+
+public class ShopDocumentInputDto
+{
+    /// <summary>cccd_front | cccd_back | business_license | tax_cert</summary>
+    public string DocType { get; set; } = string.Empty;
+    /// <summary>Public URL của file đã upload lên Supabase Storage</summary>
+    public string FileUrl { get; set; } = string.Empty;
 }
 
 public class AddAddressDto

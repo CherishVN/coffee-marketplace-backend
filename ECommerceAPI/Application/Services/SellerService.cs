@@ -810,6 +810,43 @@ public class SellerService : ISellerService
         };
     }
 
+    public async Task<ServiceResponse> UpdateProductVariantAsync(Guid userId, Guid productId, Guid variantId, UpdateProductVariantDto dto)
+    {
+        var shop = await _context.Shops.FirstOrDefaultAsync(s => s.OwnerId == userId);
+        if (shop == null)
+            return new ServiceResponse { Success = false, Message = "Bạn chưa có shop" };
+
+        var product = await _context.Products
+            .FirstOrDefaultAsync(p => p.Id == productId && p.ShopId == shop.Id);
+        if (product == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy sản phẩm" };
+
+        var variant = await _context.ProductVariants
+            .FirstOrDefaultAsync(v => v.Id == variantId && v.ProductId == productId);
+        if (variant == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy biến thể" };
+
+        if (!string.IsNullOrWhiteSpace(dto.VariantName))
+            variant.VariantName = dto.VariantName.Trim();
+
+        if (dto.Sku != null)
+            variant.Sku = string.IsNullOrWhiteSpace(dto.Sku) ? null : dto.Sku.Trim();
+
+        if (dto.Price.HasValue)
+            variant.Price = dto.Price.Value <= 0 ? null : dto.Price.Value;
+
+        if (dto.Attributes != null)
+            variant.Attributes = NormalizeVariantAttributesForJsonb(dto.Attributes);
+
+        if (dto.IsActive.HasValue)
+            variant.IsActive = dto.IsActive.Value;
+
+        product.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return new ServiceResponse { Success = true, Message = "Đã cập nhật biến thể" };
+    }
+
     public async Task<ServiceResponse> UpdateInventoryAsync(Guid userId, Guid productId, UpdateInventoryDto dto)
     {
         var shop = await _context.Shops
