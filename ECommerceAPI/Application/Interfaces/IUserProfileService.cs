@@ -42,6 +42,12 @@ public class ShopInfoDto
     public int? GhnShopId { get; set; }
     public short Status { get; set; }
     public short VerificationStatus { get; set; }
+    public string? BusinessType { get; set; }
+    public string? BusinessLicenseNumber { get; set; }
+    public string? TaxCode { get; set; }
+    public string? BankName { get; set; }
+    public string? BankAccountNumber { get; set; }
+    public string? BankAccountName { get; set; }
 }
 
 public class AddressDto

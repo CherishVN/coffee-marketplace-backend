@@ -1590,6 +1590,12 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.ProvinceId).HasColumnName("province_id");
             entity.Property(e => e.City).HasColumnName("city");
             entity.Property(e => e.GhnShopId).HasColumnName("ghn_shop_id");
+            entity.Property(e => e.BusinessType).HasColumnName("business_type");
+            entity.Property(e => e.BusinessLicenseNumber).HasColumnName("business_license_number");
+            entity.Property(e => e.TaxCode).HasColumnName("tax_code");
+            entity.Property(e => e.BankName).HasColumnName("bank_name");
+            entity.Property(e => e.BankAccountNumber).HasColumnName("bank_account_number");
+            entity.Property(e => e.BankAccountName).HasColumnName("bank_account_name");
             entity.Property(e => e.Slug).HasColumnName("slug");
             entity.Property(e => e.Status)
                 .HasDefaultValue((short)1)
