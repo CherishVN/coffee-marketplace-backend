@@ -55,6 +55,18 @@ public partial class Shop
 
     public int? GhnShopId { get; set; }
 
+    public string? BusinessType { get; set; }
+
+    public string? BusinessLicenseNumber { get; set; }
+
+    public string? TaxCode { get; set; }
+
+    public string? BankName { get; set; }
+
+    public string? BankAccountNumber { get; set; }
+
+    public string? BankAccountName { get; set; }
+
     public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();

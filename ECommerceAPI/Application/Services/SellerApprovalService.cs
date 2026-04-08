@@ -16,19 +16,22 @@ public class SellerApprovalService : ISellerApprovalService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SellerApprovalService> _logger;
+    private readonly INotificationService _notificationService;
 
     public SellerApprovalService(
         ApplicationDbContext context,
         IUserAuthEmailResolver authEmailResolver,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<SellerApprovalService> logger)
+        ILogger<SellerApprovalService> logger,
+        INotificationService notificationService)
     {
         _context = context;
         _authEmailResolver = authEmailResolver;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _notificationService = notificationService;
     }
 
     public async Task<ShopListResponseDto> GetPendingShopsAsync(int page, int pageSize, short? verificationStatus)
@@ -203,6 +206,35 @@ public class SellerApprovalService : ISellerApprovalService
 
         await SaveChangesWithAdminContextAsync(adminId);
 
+        // Gửi in-app notification + email cho seller
+        try
+        {
+            var emailHtml = $"""
+                <html><body style="font-family:sans-serif;color:#333">
+                  <h2 style="color:#e87f19">🎉 Chúc mừng! Shop của bạn đã được duyệt</h2>
+                  <p>Shop <strong>{shop.Name}</strong> đã được phê duyệt thành công.</p>
+                  <p>Bạn có thể bắt đầu đăng sản phẩm và bán hàng ngay bây giờ.</p>
+                  <p style="color:#e87f19;font-weight:bold">⚠️ Lưu ý: Vui lòng đăng xuất và đăng nhập lại để hệ thống cập nhật quyền Seller.</p>
+                  {(string.IsNullOrWhiteSpace(dto.Note) ? "" : $"<p>Ghi chú từ admin: {dto.Note}</p>")}
+                </body></html>
+                """;
+
+            await _notificationService.PublishAsync(
+                userId: shop.OwnerId,
+                type: "Shop",
+                title: "Shop của bạn đã được duyệt! 🎉",
+                content: $"Shop \"{shop.Name}\" đã được phê duyệt. Đăng xuất và đăng nhập lại để sử dụng tính năng Seller.",
+                referenceType: "shop",
+                referenceId: shop.Id,
+                queueEmail: true,
+                emailHtmlBody: emailHtml,
+                emailSubjectOverride: $"[EcomViet] Shop {shop.Name} đã được duyệt");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Không thể gửi notification duyệt shop cho seller {SellerId}", shop.OwnerId);
+        }
+
         var updatedShop = await _context.Shops
             .Include(s => s.Owner)
             .Include(s => s.ShopDocuments)
@@ -276,6 +308,24 @@ public class SellerApprovalService : ISellerApprovalService
 
         await SaveChangesWithAdminContextAsync(adminId);
 
+        // Gửi notification từ chối cho seller
+        try
+        {
+            await _notificationService.PublishAsync(
+                userId: shop.OwnerId,
+                type: "Shop",
+                title: "Yêu cầu mở shop bị từ chối",
+                content: $"Shop \"{shop.Name}\" chưa được duyệt. Lý do: {dto.Reason}. Vui lòng điều chỉnh thông tin và gửi lại.",
+                referenceType: "shop",
+                referenceId: shop.Id,
+                queueEmail: true,
+                emailSubjectOverride: $"[EcomViet] Yêu cầu mở shop {shop.Name} bị từ chối");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Không thể gửi notification từ chối shop cho seller {SellerId}", shop.OwnerId);
+        }
+
         var updatedShop = await _context.Shops
             .Include(s => s.Owner)
             .Include(s => s.ShopDocuments)
@@ -314,6 +364,12 @@ public class SellerApprovalService : ISellerApprovalService
             ProvinceId = s.ProvinceId,
             City = s.City,
             GhnShopId = s.GhnShopId,
+            BusinessType = s.BusinessType,
+            BusinessLicenseNumber = s.BusinessLicenseNumber,
+            TaxCode = s.TaxCode,
+            BankName = s.BankName,
+            BankAccountNumber = s.BankAccountNumber,
+            BankAccountName = s.BankAccountName,
             Status = s.Status,
             StatusName = GetStatusName(s.Status),
             VerificationStatus = s.VerificationStatus,

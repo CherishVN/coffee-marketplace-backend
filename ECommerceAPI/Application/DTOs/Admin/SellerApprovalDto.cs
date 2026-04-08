@@ -18,6 +18,12 @@ public class ShopVerificationDto
     public int? ProvinceId { get; set; }
     public string? City { get; set; }
     public int? GhnShopId { get; set; }
+    public string? BusinessType { get; set; }
+    public string? BusinessLicenseNumber { get; set; }
+    public string? TaxCode { get; set; }
+    public string? BankName { get; set; }
+    public string? BankAccountNumber { get; set; }
+    public string? BankAccountName { get; set; }
     public short Status { get; set; }
     public string StatusName { get; set; } = string.Empty;
     public short VerificationStatus { get; set; }
