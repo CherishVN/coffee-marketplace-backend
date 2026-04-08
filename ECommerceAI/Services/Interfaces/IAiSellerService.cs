@@ -15,6 +15,12 @@ public interface IAiSellerService
     Task<bool> SaveTagSuggestionFeedbackAsync(SaveSuggestionFeedbackDto dto, Guid sellerId);
 
     /// <summary>
+    /// Lưu phản hồi của seller sau khi chọn materials từ gợi ý AI.
+    /// Chỉ hoạt động khi suggest-materials đã được gọi kèm productId (logId có giá trị).
+    /// </summary>
+    Task<bool> SaveMaterialSuggestionFeedbackAsync(SaveMaterialFeedbackDto dto, Guid sellerId);
+
+    /// <summary>
     /// Lấy lịch sử gợi ý tags của seller (không bao gồm các bản ghi đang pending).
     /// </summary>
     Task<TagSuggestionLogResponse> GetTagSuggestionLogsAsync(Guid sellerId, int page, int pageSize);

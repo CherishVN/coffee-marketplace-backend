@@ -108,6 +108,29 @@ public class AiSellerService : IAiSellerService
         var tags = await _context.Tags.OrderBy(t => t.Name).ToListAsync();
         var tagList = string.Join(", ", tags.Select(t => $"{t.Name}(ID:{t.Id})"));
 
+        // Lịch sử lựa chọn của seller để AI học theo thói quen
+        var recentChosen = await _context.AiTagSuggestions
+            .Where(s => s.SellerId == sellerId && (s.Action == "accepted" || s.Action == "modified"))
+            .OrderByDescending(s => s.CreatedAt)
+            .Take(5)
+            .ToListAsync();
+
+        var historyHint = string.Empty;
+        if (recentChosen.Any())
+        {
+            var allChosen = recentChosen
+                .SelectMany(s =>
+                {
+                    try { return JsonSerializer.Deserialize<List<string>>(s.ChosenTags.RootElement.GetRawText()) ?? new(); }
+                    catch { return new List<string>(); }
+                })
+                .GroupBy(t => t)
+                .OrderByDescending(g => g.Count())
+                .Take(10)
+                .Select(g => g.Key);
+            historyHint = $"\nSeller này thường chọn các tags: {string.Join(", ", allChosen)}. Ưu tiên gợi ý các tags tương tự nếu phù hợp.";
+        }
+
         var tagJsonExample = """{"suggestions":[{"tagId":1,"tagName":"Tên tag","confidenceScore":0.95}]}""";
         var userMessage = $"""
             Gợi ý tags phù hợp cho sản phẩm sau (chọn tối đa 10 tags):
@@ -115,7 +138,7 @@ public class AiSellerService : IAiSellerService
             Tên: {request.Title}
             Mô tả: {request.Description ?? "Không có"}
             
-            Tags có trong hệ thống: {tagList}
+            Tags có trong hệ thống: {tagList}{historyHint}
             
             Trả về JSON theo format: {tagJsonExample}
             """;
@@ -256,6 +279,28 @@ public class AiSellerService : IAiSellerService
 
         var materialList = string.Join(", ", materials.Select(m => $"{m.Name}(ID:{m.Id})"));
 
+        // Lịch sử lựa chọn của seller để AI học theo thói quen
+        var recentChosen = await _context.AiMaterialSuggestions
+            .Where(s => s.SellerId == sellerId && (s.Action == "accepted" || s.Action == "modified")
+                        && s.ChosenMaterialIds != null && s.ChosenMaterialIds.Length > 0)
+            .OrderByDescending(s => s.CreatedAt)
+            .Take(5)
+            .ToListAsync();
+
+        var historyHint = string.Empty;
+        if (recentChosen.Any())
+        {
+            var materialById = materials.ToDictionary(m => m.Id, m => m.Name);
+            var frequentIds = recentChosen
+                .SelectMany(s => s.ChosenMaterialIds!)
+                .GroupBy(id => id)
+                .OrderByDescending(g => g.Count())
+                .Take(5)
+                .Select(g => materialById.TryGetValue(g.Key, out var name) ? name : null)
+                .OfType<string>();
+            historyHint = $"\nSeller này thường chọn các chất liệu: {string.Join(", ", frequentIds)}. Ưu tiên gợi ý các chất liệu tương tự nếu phù hợp.";
+        }
+
         var matJsonExample = """{"suggestions":[{"materialId":"uuid-here","materialName":"Tên chất liệu","confidenceScore":0.95}]}""";
         var userMessage = $"""
             Gợi ý chất liệu (materials) phù hợp cho sản phẩm sau:
@@ -263,7 +308,7 @@ public class AiSellerService : IAiSellerService
             Tên: {request.Title}
             Mô tả: {request.Description ?? "Không có"}
             
-            Materials có trong hệ thống: {materialList}
+            Materials có trong hệ thống: {materialList}{historyHint}
             
             Trả về JSON theo format: {matJsonExample}
             
@@ -273,13 +318,59 @@ public class AiSellerService : IAiSellerService
         try
         {
             var raw = await _gemini.GenerateAsync(_sellerPrompt.Value, userMessage);
-            return ParseJsonResponse<SuggestMaterialsResponseDto>(raw, "SuggestMaterials") ?? new SuggestMaterialsResponseDto();
+            var result = ParseJsonResponse<SuggestMaterialsResponseDto>(raw, "SuggestMaterials") ?? new SuggestMaterialsResponseDto();
+
+            // Lưu log gợi ý nếu seller đã có product
+            if (request.ProductId.HasValue)
+            {
+                try
+                {
+                    var suggestedJson = JsonSerializer.Serialize(
+                        result.Suggestions.Select(s => new { materialId = s.MaterialId, materialName = s.MaterialName, score = s.ConfidenceScore }));
+
+                    var log = new AiMaterialSuggestion
+                    {
+                        Id = Guid.NewGuid(),
+                        ProductId = request.ProductId.Value,
+                        SellerId = sellerId,
+                        SuggestedMaterials = JsonDocument.Parse(suggestedJson),
+                        ChosenMaterialIds = Array.Empty<Guid>(),
+                        Action = ActionPending,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    _context.AiMaterialSuggestions.Add(log);
+                    await _context.SaveChangesAsync();
+                    result.LogId = log.Id;
+                }
+                catch (Exception saveEx)
+                {
+                    _logger.LogWarning(saveEx, "Không thể lưu lịch sử gợi ý material cho product {ProductId}", request.ProductId);
+                }
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Material suggestion failed for seller {SellerId}", sellerId);
             return new SuggestMaterialsResponseDto();
         }
+    }
+
+    // ── Lưu phản hồi sau khi seller chọn materials ───────────────────────────
+    public async Task<bool> SaveMaterialSuggestionFeedbackAsync(SaveMaterialFeedbackDto dto, Guid sellerId)
+    {
+        var log = await _context.AiMaterialSuggestions
+            .FirstOrDefaultAsync(s => s.Id == dto.LogId && s.SellerId == sellerId);
+
+        if (log == null) return false;
+
+        log.ChosenMaterialIds = dto.ChosenMaterialIds?.ToArray() ?? Array.Empty<Guid>();
+        log.Action = dto.Action;
+
+        await _context.SaveChangesAsync();
+        return true;
     }
 
     public async Task<AnalyzeImageResponseDto> AnalyzeImageAsync(AnalyzeImageRequestDto request, Guid sellerId)

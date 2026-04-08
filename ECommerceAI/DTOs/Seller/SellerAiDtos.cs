@@ -121,6 +121,14 @@ public class SaveSuggestionFeedbackDto
     public string Action { get; set; } = "accepted";  // accepted | rejected | modified
 }
 
+public class SaveMaterialFeedbackDto
+{
+    public Guid LogId { get; set; }
+    /// <summary>Các materialId seller đã giữ lại sau khi chỉnh sửa gợi ý</summary>
+    public List<Guid>? ChosenMaterialIds { get; set; }
+    public string Action { get; set; } = "accepted";  // accepted | rejected | modified
+}
+
 // ── Tag Suggestion Log ────────────────────────────────────────────────────────
 
 /// <summary>Item trong suggest_tags JSONB: {"tag": "vải cotton", "confidence": 0.95}</summary>

@@ -567,19 +567,18 @@ public class SellerService : ISellerService
             }
         }
 
-        // Add materials (skip for now - need Material entity with Guid)
-        // if (dto.MaterialIds != null && dto.MaterialIds.Any())
-        // {
-        //     foreach (var materialId in dto.MaterialIds)
-        //     {
-        //         var productMaterial = new ProductMaterial
-        //         {
-        //             ProductId = product.Id,
-        //             MaterialId = materialId
-        //         };
-        //         _context.Set<ProductMaterial>().Add(productMaterial);
-        //     }
-        // }
+        // Add materials
+        if (dto.MaterialIds != null && dto.MaterialIds.Any())
+        {
+            foreach (var materialId in dto.MaterialIds)
+            {
+                _context.Set<ProductMaterial>().Add(new ProductMaterial
+                {
+                    ProductId = product.Id,
+                    MaterialId = materialId
+                });
+            }
+        }
 
         await _context.SaveChangesAsync();
 
@@ -652,6 +651,26 @@ public class SellerService : ISellerService
                     SortOrder = order++,
                     CreatedAt = DateTime.UtcNow
                 });
+            }
+        }
+
+        if (dto.TagIds != null)
+        {
+            var existingTags = await _context.Set<ProductTag>().Where(t => t.ProductId == product.Id).ToListAsync();
+            _context.Set<ProductTag>().RemoveRange(existingTags);
+            foreach (var tagId in dto.TagIds)
+            {
+                _context.Set<ProductTag>().Add(new ProductTag { ProductId = product.Id, TagId = tagId });
+            }
+        }
+
+        if (dto.MaterialIds != null)
+        {
+            var existingMaterials = await _context.Set<ProductMaterial>().Where(m => m.ProductId == product.Id).ToListAsync();
+            _context.Set<ProductMaterial>().RemoveRange(existingMaterials);
+            foreach (var materialId in dto.MaterialIds)
+            {
+                _context.Set<ProductMaterial>().Add(new ProductMaterial { ProductId = product.Id, MaterialId = materialId });
             }
         }
 

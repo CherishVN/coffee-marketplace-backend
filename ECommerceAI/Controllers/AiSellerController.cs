@@ -64,6 +64,21 @@ public class AiSellerController : ControllerBase
         return Ok(new { message = "Đã lưu phản hồi thành công" });
     }
 
+    /// <summary>
+    /// Lưu phản hồi sau khi seller chọn materials từ gợi ý AI.
+    /// Gọi endpoint này sau khi đã có logId từ suggest-materials (chỉ khi gọi suggest-materials kèm productId).
+    /// </summary>
+    [HttpPost("material-feedback")]
+    public async Task<IActionResult> SaveMaterialFeedback([FromBody] SaveMaterialFeedbackDto dto)
+    {
+        var sellerId = GetUserId();
+        var success = await _sellerService.SaveMaterialSuggestionFeedbackAsync(dto, sellerId);
+        if (!success)
+            return NotFound(new { message = "Không tìm thấy bản ghi gợi ý. Hãy chắc chắn suggest-materials được gọi kèm productId." });
+
+        return Ok(new { message = "Đã lưu phản hồi thành công" });
+    }
+
     /// <summary>Lấy lịch sử gợi ý tags của seller (không gồm pending)</summary>
     [HttpGet("tag-suggestions")]
     public async Task<IActionResult> GetTagSuggestions([FromQuery] int page = 1, [FromQuery] int pageSize = 20)

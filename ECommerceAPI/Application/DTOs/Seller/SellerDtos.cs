@@ -30,7 +30,7 @@ public class CreateProductDto
     public List<ProductVariantDto>? Variants { get; set; }
     public List<string>? ImageUrls { get; set; }
     public List<long>? TagIds { get; set; }
-    public List<long>? MaterialIds { get; set; }
+    public List<Guid>? MaterialIds { get; set; }
 }
 
 public class UpdateProductDto
@@ -41,6 +41,8 @@ public class UpdateProductDto
     public decimal? BasePrice { get; set; }
     public short? Status { get; set; }
     public List<string>? ImageUrls { get; set; }
+    public List<long>? TagIds { get; set; }
+    public List<Guid>? MaterialIds { get; set; }
 }
 
 public class ProductVariantDto
