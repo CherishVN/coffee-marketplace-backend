@@ -34,8 +34,9 @@ public class UserRoleSyncMiddleware
                 {
                     var roleCode = await dbContext.Database
                         .SqlQueryRaw<string>(
-                            "SELECT r.code AS \"Value\" FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = {0} ORDER BY r.code LIMIT 1",
+                            "SELECT r.code AS \"Value\" FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = {0}",
                             userId)
+                        .OrderBy(x => x)
                         .FirstOrDefaultAsync();
 
                     if (roleCode != null && context.User.Identity is ClaimsIdentity identity)

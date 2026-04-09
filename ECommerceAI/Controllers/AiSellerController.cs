@@ -89,6 +89,25 @@ public class AiSellerController : ControllerBase
     }
 
     /// <summary>
+    /// Phân tích sản phẩm (text-only) — trả về category + tags + materials trong 1 lần gọi Gemini.
+    /// Thay thế cho việc gọi riêng suggest-category → suggest-tags → suggest-materials (3 calls → 1 call).
+    /// </summary>
+    [HttpPost("analyze-product")]
+    public async Task<IActionResult> AnalyzeProduct([FromBody] AnalyzeProductRequestDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Title))
+            return BadRequest(new { message = "Tên sản phẩm là bắt buộc." });
+
+        var sellerId = GetUserId();
+        var result = await _sellerService.AnalyzeProductAsync(dto, sellerId);
+
+        if (!result.Success)
+            return BadRequest(new { message = result.ErrorMessage });
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Phân tích ảnh sản phẩm bằng Gemini Vision.
     /// Trả về: đánh giá chất lượng ảnh, gợi ý category/tags/materials, đề xuất cải thiện.
     /// </summary>

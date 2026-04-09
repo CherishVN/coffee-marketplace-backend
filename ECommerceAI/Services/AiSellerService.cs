@@ -16,7 +16,7 @@ public class AiSellerService : IAiSellerService
     private const int MaxPromptTags = 200;
     private const int MaxPromptMaterials = 150;
 
-    /// <summary>Parse JSON từ Gemini: model trả camelCase (categoryId, tagName, …). SnakeCaseLower sẽ không map → toàn 0/rỗng.</summary>
+    /// <summary>Parse JSON từ Gemini khi model trả camelCase (suggest-* endpoints).</summary>
     private static readonly JsonSerializerOptions _jsonReadOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -25,9 +25,19 @@ public class AiSellerService : IAiSellerService
         Converters = { new SafeNullableGuidConverter() }
     };
 
+    /// <summary>Parse JSON từ Gemini JSON-mode — Gemini trả snake_case theo schema, cần SnakeCaseLower để map đúng property.</summary>
+    private static readonly JsonSerializerOptions _jsonSnakeReadOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        Converters = { new SafeNullableGuidConverter() }
+    };
+
     private static readonly Lazy<string> _sellerPrompt = new(() => LoadPromptFromFile("SellerSuggestPrompt.txt", DefaultSystemPrompt));
     private static readonly Lazy<string> _imagePrompt = new(() => LoadPromptFromFile("ImageAnalysisPrompt.txt", DefaultSystemPrompt));
     private static readonly object _analyzeImageSchema = BuildAnalyzeImageSchema();
+    private static readonly object _analyzeProductSchema = BuildAnalyzeProductSchema();
 
     private readonly AiDbContext _context;
     private readonly GeminiClientService _gemini;
@@ -38,6 +48,44 @@ public class AiSellerService : IAiSellerService
         _context = context;
         _gemini = gemini;
         _logger = logger;
+    }
+
+    // ── Candidate loading (full catalog for prompt) ─────────────────────────
+    private sealed record CandidateSet(
+        Dictionary<long, CategoryCandidate> CatById,
+        List<CategoryCandidate> PromptCats,
+        List<TagCandidate> PromptTags,
+        List<MaterialCandidate> PromptMats);
+
+    /// <summary>
+    /// Loads every active category, every tag, and every active material for the AI prompt so the
+    /// model can always pick from the full catalog (no RAG truncation).
+    /// </summary>
+    private async Task<CandidateSet> GetPromptCandidatesAsync()
+    {
+        var allCats = await _context.Categories
+            .Where(c => c.IsActive)
+            .Select(c => new CategoryCandidate(c.Id, c.Name, c.Level, c.ParentId))
+            .ToListAsync();
+        var catById = allCats.ToDictionary(c => c.Id);
+
+        var promptCats = allCats
+            .OrderByDescending(c => c.Level)
+            .ThenBy(c => c.Name)
+            .ToList();
+
+        var promptTags = await _context.Tags
+            .OrderBy(t => t.Name)
+            .Select(t => new TagCandidate(t.Id, t.Name))
+            .ToListAsync();
+
+        var promptMats = await _context.Materials
+            .Where(m => m.IsActive)
+            .OrderBy(m => m.Name)
+            .Select(m => new MaterialCandidate(m.Id, m.Name))
+            .ToListAsync();
+
+        return new CandidateSet(catById, promptCats, promptTags, promptMats);
     }
 
     // ── Gợi ý Category ─────────────────────────────────────────────────────────────
@@ -381,43 +429,24 @@ public class AiSellerService : IAiSellerService
         if (request.ImageUrls.Count > 3)
             request.ImageUrls = request.ImageUrls.Take(3).ToList();
 
-        var categories = await _context.Categories
-            .Where(c => c.IsActive)
-            .OrderBy(c => c.Level).ThenBy(c => c.Name)
-            .Take(MaxPromptCategories)
-            .Select(c => new { c.Id, c.Name, c.Level, c.ParentId })
-            .ToListAsync();
+        var candidates = await GetPromptCandidatesAsync();
+        var catById2 = candidates.CatById;
 
-        var tags = await _context.Tags
-            .OrderBy(t => t.Name)
-            .Take(MaxPromptTags)
-            .Select(t => new { t.Id, t.Name })
-            .ToListAsync();
-
-        var materials = await _context.Materials
-            .Where(m => m.IsActive)
-            .OrderBy(m => m.Name)
-            .Take(MaxPromptMaterials)
-            .Select(m => new { m.Id, m.Name })
-            .ToListAsync();
-
-        var catById2 = categories.ToDictionary(c => c.Id);
         string BuildImagePath(long id)
         {
             var parts = new List<string>();
-            var cur = catById2.GetValueOrDefault(id);
-            while (cur != null)
+            var curId = (long?)id;
+            while (curId.HasValue && catById2.TryGetValue(curId.Value, out var cat))
             {
-                parts.Insert(0, cur.Name);
-                cur = cur.ParentId.HasValue
-                    ? catById2.GetValueOrDefault(cur.ParentId.Value)
-                    : null;
+                parts.Insert(0, cat.Name);
+                curId = cat.ParentId;
             }
             return string.Join(" > ", parts);
         }
-        var categoryList = string.Join("\n", categories.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
-        var tagList = string.Join(", ", tags.Select(t => $"{t.Name}(ID:{t.Id})"));
-        var materialList = string.Join(", ", materials.Select(m => $"{m.Name}(ID:{m.Id})"));
+
+        var categoryList = string.Join("\n", candidates.PromptCats.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
+        var tagList = string.Join(", ", candidates.PromptTags.Select(t => $"{t.Name}(ID:{t.Id})"));
+        var materialList = string.Join(", ", candidates.PromptMats.Select(m => $"{m.Name}(ID:{m.Id})"));
 
         var imagePrompt = _imagePrompt.Value;
 
@@ -490,7 +519,8 @@ public class AiSellerService : IAiSellerService
             if (raw.StartsWith("⚠️"))
                 return new AnalyzeImageResponseDto { Success = false, ErrorMessage = raw };
 
-            var result = ParseJsonResponse<AnalyzeImageResponseDto>(raw, "AnalyzeImage");
+            // JSON mode trả snake_case theo schema → phải dùng _jsonSnakeReadOptions để map đúng
+            var result = ParseJsonResponseSnake<AnalyzeImageResponseDto>(raw, "AnalyzeImage");
             if (result == null)
             {
                 _logger.LogWarning("AnalyzeImage parse failed. Raw snippet: {Raw}", raw.Length > 400 ? raw[..400] : raw);
@@ -498,6 +528,29 @@ public class AiSellerService : IAiSellerService
             }
 
             result = NormalizeAnalyzeImageResult(result);
+
+            // Post-validate within the candidate set that was shown to the model
+            var validCatIds2 = new HashSet<long>(candidates.PromptCats.Select(c => c.Id));
+            var validTagIds2 = new HashSet<long>(candidates.PromptTags.Select(t => t.Id));
+            var validMatIds2 = new HashSet<Guid>(candidates.PromptMats.Select(m => m.Id));
+
+            var catByPath2 = candidates.PromptCats
+                .GroupBy(c => BuildImagePath(c.Id).Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var catByName2 = candidates.PromptCats
+                .GroupBy(c => c.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var tagByName2 = candidates.PromptTags
+                .GroupBy(t => t.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var matByName2 = candidates.PromptMats
+                .GroupBy(m => m.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+            result.SuggestedCategories = RecoverAndValidateCategories(result.SuggestedCategories, validCatIds2, catByPath2, catByName2, 3);
+            result.SuggestedTags = RecoverAndValidateTags(result.SuggestedTags, validTagIds2, tagByName2, 8);
+            result.SuggestedMaterials = RecoverAndValidateMaterials(result.SuggestedMaterials, validMatIds2, matByName2, 3);
+
             result.Success = true;
             return result;
         }
@@ -505,6 +558,96 @@ public class AiSellerService : IAiSellerService
         {
             _logger.LogError(ex, "Image analysis failed for seller {SellerId}", sellerId);
             return new AnalyzeImageResponseDto { Success = false, ErrorMessage = "Đã xảy ra lỗi khi phân tích ảnh." };
+        }
+    }
+
+    // ── Phân tích sản phẩm (text-only, 1 Gemini call) ────────────────────────────
+    public async Task<AnalyzeProductResponseDto> AnalyzeProductAsync(AnalyzeProductRequestDto request, Guid sellerId)
+    {
+        var candidates = await GetPromptCandidatesAsync();
+        var catById = candidates.CatById;
+
+        string BuildPath(long id)
+        {
+            var parts = new List<string>();
+            var curId = (long?)id;
+            while (curId.HasValue && catById.TryGetValue(curId.Value, out var cat))
+            {
+                parts.Insert(0, cat.Name);
+                curId = cat.ParentId;
+            }
+            return string.Join(" > ", parts);
+        }
+
+        var catLines = string.Join("\n", candidates.PromptCats.Select(c => $"ID:{c.Id} | {BuildPath(c.Id)} | Cấp {c.Level}"));
+        var tagLines = string.Join("\n", candidates.PromptTags.Select(t => $"ID:{t.Id} | {t.Name}"));
+        var matLines = string.Join("\n", candidates.PromptMats.Select(m => $"ID:{m.Id} | {m.Name}"));
+
+        var categoryHint = string.Empty;
+        if (request.CategoryId.HasValue && catById.TryGetValue(request.CategoryId.Value, out var hintCat))
+            categoryHint = $"\nNgười dùng đã chọn category: {BuildPath(hintCat.Id)} — dùng đây làm ngữ cảnh để chọn tags và materials phù hợp.\n";
+
+        var userMessage = $"""
+            Phân tích sản phẩm dưới đây và trả về category, tags, materials phù hợp nhất.
+
+            Tên sản phẩm: {request.Title}
+            Mô tả: {request.Description ?? "Không có"}
+            {categoryHint}
+            === DANH SÁCH CATEGORY (sắp theo cấp sâu nhất trước) ===
+            {catLines}
+
+            === DANH SÁCH TAGS ===
+            {tagLines}
+
+            === DANH SÁCH MATERIALS ===
+            {matLines}
+
+            Yêu cầu trả về:
+            - categories: top 3 category phù hợp, ưu tiên leaf node (cấp sâu nhất), chỉ dùng ID từ danh sách, confidenceScore 0.0–1.0
+            - tags: tối đa 10 tags mô tả chính xác sản phẩm, chỉ dùng ID từ danh sách
+            - materials: tối đa 5 chất liệu khi biết chắc chắn sản phẩm có chất liệu đó, chỉ dùng ID từ danh sách (GUID)
+            """;
+
+        try
+        {
+            var raw = await _gemini.GenerateJsonAsync(_sellerPrompt.Value, userMessage, _analyzeProductSchema);
+
+            if (raw.StartsWith("⚠️"))
+                return new AnalyzeProductResponseDto { Success = false, ErrorMessage = raw };
+
+            var result = ParseJsonResponseSnake<AnalyzeProductResponseDto>(raw, "AnalyzeProduct");
+            if (result == null)
+                return new AnalyzeProductResponseDto { Success = false, ErrorMessage = "Không thể xử lý phản hồi từ AI. Vui lòng thử lại." };
+
+            // Post-validate within the candidate set that was shown to the model
+            var validCatIds = new HashSet<long>(candidates.PromptCats.Select(c => c.Id));
+            var validTagIds = new HashSet<long>(candidates.PromptTags.Select(t => t.Id));
+            var validMatIds = new HashSet<Guid>(candidates.PromptMats.Select(m => m.Id));
+
+            var catByPath = candidates.PromptCats
+                .GroupBy(c => BuildPath(c.Id).Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var catByName = candidates.PromptCats
+                .GroupBy(c => c.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var tagByName = candidates.PromptTags
+                .GroupBy(t => t.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var matByName = candidates.PromptMats
+                .GroupBy(m => m.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+            result.Categories = RecoverAndValidateCategories(result.Categories, validCatIds, catByPath, catByName, 3);
+            result.Tags = RecoverAndValidateTags(result.Tags, validTagIds, tagByName, 10);
+            result.Materials = RecoverAndValidateMaterials(result.Materials, validMatIds, matByName, 5);
+
+            result.Success = true;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AnalyzeProduct failed for seller {SellerId}", sellerId);
+            return new AnalyzeProductResponseDto { Success = false, ErrorMessage = "Đã xảy ra lỗi khi phân tích. Vui lòng thử lại." };
         }
     }
 
@@ -518,6 +661,21 @@ public class AiSellerService : IAiSellerService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "{Operation} JSON parse failed. Raw snippet: {Raw}", operation, raw.Length > 400 ? raw[..400] : raw);
+            return default;
+        }
+    }
+
+    /// <summary>Parse JSON từ Gemini JSON-mode (snake_case schema).</summary>
+    private T? ParseJsonResponseSnake<T>(string raw, string operation)
+    {
+        try
+        {
+            // JSON-mode của Gemini trả ra JSON thuần, không cần normalize
+            return JsonSerializer.Deserialize<T>(raw, _jsonSnakeReadOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "{Operation} JSON-mode parse failed. Raw snippet: {Raw}", operation, raw.Length > 400 ? raw[..400] : raw);
             return default;
         }
     }
@@ -558,6 +716,95 @@ public class AiSellerService : IAiSellerService
         }
 
         return text.Trim();
+    }
+
+    // ── Post-validation helpers: recover hallucinated IDs by matching on name ────
+
+    private static List<CategorySuggestionItem> RecoverAndValidateCategories(
+        IEnumerable<CategorySuggestionItem> raw,
+        HashSet<long> validIds,
+        Dictionary<string, long> byPath,
+        Dictionary<string, long> byName,
+        int maxCount = 3)
+    {
+        var result = new List<CategorySuggestionItem>();
+        var seen = new HashSet<long>();
+
+        foreach (var c in raw.OrderByDescending(x => x.ConfidenceScore))
+        {
+            if (!validIds.Contains(c.CategoryId))
+            {
+                var path = (c.CategoryPath ?? string.Empty).Trim().ToLowerInvariant();
+                var name = (c.CategoryName ?? string.Empty).Trim().ToLowerInvariant();
+
+                if (path.Length > 0 && byPath.TryGetValue(path, out var recoveredByPath))
+                    c.CategoryId = recoveredByPath;
+                else if (name.Length > 0 && byName.TryGetValue(name, out var recoveredByName))
+                    c.CategoryId = recoveredByName;
+                else
+                    continue;
+            }
+
+            if (!seen.Add(c.CategoryId)) continue;
+            result.Add(c);
+            if (result.Count >= maxCount) break;
+        }
+
+        return result;
+    }
+
+    private static List<TagSuggestionItem> RecoverAndValidateTags(
+        IEnumerable<TagSuggestionItem> raw,
+        HashSet<long> validIds,
+        Dictionary<string, long> byName,
+        int maxCount = 10)
+    {
+        var result = new List<TagSuggestionItem>();
+        var seen = new HashSet<long>();
+
+        foreach (var t in raw.OrderByDescending(x => x.ConfidenceScore))
+        {
+            var id = t.TagId ?? 0;
+            if (!validIds.Contains(id))
+            {
+                var name = (t.TagName ?? string.Empty).Trim().ToLowerInvariant();
+                if (name.Length == 0 || !byName.TryGetValue(name, out id)) continue;
+                t.TagId = id;
+            }
+
+            if (!seen.Add(id)) continue;
+            result.Add(t);
+            if (result.Count >= maxCount) break;
+        }
+
+        return result;
+    }
+
+    private static List<MaterialSuggestionItem> RecoverAndValidateMaterials(
+        IEnumerable<MaterialSuggestionItem> raw,
+        HashSet<Guid> validIds,
+        Dictionary<string, Guid> byName,
+        int maxCount = 5)
+    {
+        var result = new List<MaterialSuggestionItem>();
+        var seen = new HashSet<Guid>();
+
+        foreach (var m in raw.OrderByDescending(x => x.ConfidenceScore))
+        {
+            var id = m.MaterialId ?? Guid.Empty;
+            if (id == Guid.Empty || !validIds.Contains(id))
+            {
+                var name = (m.MaterialName ?? string.Empty).Trim().ToLowerInvariant();
+                if (name.Length == 0 || !byName.TryGetValue(name, out id)) continue;
+                m.MaterialId = id;
+            }
+
+            if (!seen.Add(id)) continue;
+            result.Add(m);
+            if (result.Count >= maxCount) break;
+        }
+
+        return result;
     }
 
     private static AnalyzeImageResponseDto NormalizeAnalyzeImageResult(AnalyzeImageResponseDto result)
@@ -682,6 +929,69 @@ public class AiSellerService : IAiSellerService
                 summary = new { type = "STRING" }
             },
             required = new[] { "quality", "suggested_categories", "suggested_tags", "suggested_materials", "improvements", "summary" }
+        };
+    }
+
+    /// <summary>
+    /// Schema cho AnalyzeProductAsync (JSON mode, text-only).
+    /// Properties dùng PascalCase C# → SnakeCaseLower serializer trong GeminiClientService sẽ serialize thành snake_case khi gửi lên API.
+    /// Response được parse với _jsonSnakeReadOptions (SnakeCaseLower).
+    /// </summary>
+    private static object BuildAnalyzeProductSchema()
+    {
+        return new
+        {
+            Type = "OBJECT",
+            Properties = new
+            {
+                Categories = new
+                {
+                    Type = "ARRAY",
+                    Items = new
+                    {
+                        Type = "OBJECT",
+                        Properties = new
+                        {
+                            CategoryId = new { Type = "INTEGER" },
+                            CategoryName = new { Type = "STRING" },
+                            CategoryPath = new { Type = "STRING" },
+                            ConfidenceScore = new { Type = "NUMBER" }
+                        },
+                        Required = new[] { "category_id", "category_name", "category_path", "confidence_score" }
+                    }
+                },
+                Tags = new
+                {
+                    Type = "ARRAY",
+                    Items = new
+                    {
+                        Type = "OBJECT",
+                        Properties = new
+                        {
+                            TagId = new { Type = "INTEGER" },
+                            TagName = new { Type = "STRING" },
+                            ConfidenceScore = new { Type = "NUMBER" }
+                        },
+                        Required = new[] { "tag_id", "tag_name", "confidence_score" }
+                    }
+                },
+                Materials = new
+                {
+                    Type = "ARRAY",
+                    Items = new
+                    {
+                        Type = "OBJECT",
+                        Properties = new
+                        {
+                            MaterialId = new { Type = "STRING" },
+                            MaterialName = new { Type = "STRING" },
+                            ConfidenceScore = new { Type = "NUMBER" }
+                        },
+                        Required = new[] { "material_id", "material_name", "confidence_score" }
+                    }
+                }
+            },
+            Required = new[] { "categories", "tags", "materials" }
         };
     }
 

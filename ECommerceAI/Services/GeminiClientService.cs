@@ -19,7 +19,7 @@ public class GeminiClientService
     {
         _logger = logger;
         _apiKey = config["Gemini:ApiKey"] ?? throw new InvalidOperationException("Gemini:ApiKey is missing");
-        _modelName = config["Gemini:Model"] ?? "gemini-2.0-flash";
+        _modelName = config["Gemini:Model"];
         _http = httpClientFactory.CreateClient("GeminiClient");
     }
 
@@ -30,6 +30,26 @@ public class GeminiClientService
         {
             system_instruction = new { parts = new[] { new { text = systemPrompt } } },
             contents = new[] { new { role = "user", parts = new[] { new { text = userMessage } } } }
+        };
+
+        return await CallApiAsync(body);
+    }
+
+    /// <summary>
+    /// Gọi Gemini với JSON mode (text-only) — đảm bảo output là JSON hợp lệ theo schema.
+    /// Schema dùng PascalCase C# properties; _jsonOpts sẽ serialize thành snake_case khi gửi lên API.
+    /// </summary>
+    public async Task<string> GenerateJsonAsync(string systemPrompt, string userMessage, object responseSchema)
+    {
+        var body = new
+        {
+            system_instruction = new { parts = new[] { new { text = systemPrompt } } },
+            contents = new[] { new { role = "user", parts = new[] { new { text = userMessage } } } },
+            generation_config = new
+            {
+                response_mime_type = "application/json",
+                response_schema = responseSchema
+            }
         };
 
         return await CallApiAsync(body);

@@ -69,6 +69,25 @@ public class MaterialSuggestionItem
     public decimal ConfidenceScore { get; set; }
 }
 
+// ── Unified Product Analysis (text-only, single Gemini call) ─────────────────
+
+public class AnalyzeProductRequestDto
+{
+    public string Title { get; set; } = null!;
+    public string? Description { get; set; }
+    /// <summary>Category ID đã chọn (tuỳ chọn) — dùng làm ngữ cảnh để cải thiện độ chính xác tag/material.</summary>
+    public long? CategoryId { get; set; }
+}
+
+public class AnalyzeProductResponseDto
+{
+    public List<CategorySuggestionItem> Categories { get; set; } = new();
+    public List<TagSuggestionItem> Tags { get; set; } = new();
+    public List<MaterialSuggestionItem> Materials { get; set; } = new();
+    public bool Success { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
 // ── Image Analysis ────────────────────────────────────────────────────────────
 
 public class AnalyzeImageRequestDto

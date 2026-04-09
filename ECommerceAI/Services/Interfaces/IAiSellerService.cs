@@ -26,4 +26,10 @@ public interface IAiSellerService
     Task<TagSuggestionLogResponse> GetTagSuggestionLogsAsync(Guid sellerId, int page, int pageSize);
 
     Task<AnalyzeImageResponseDto> AnalyzeImageAsync(AnalyzeImageRequestDto request, Guid sellerId);
+
+    /// <summary>
+    /// Phân tích sản phẩm (text-only) — trả về category + tags + materials trong 1 lần gọi Gemini.
+    /// Kết quả được post-validate: chỉ trả về IDs thực sự tồn tại trong DB.
+    /// </summary>
+    Task<AnalyzeProductResponseDto> AnalyzeProductAsync(AnalyzeProductRequestDto request, Guid sellerId);
 }
