@@ -66,6 +66,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IDisputeAdminService, DisputeAdminService>();
             builder.Services.AddScoped<IDashboardService, DashboardService>();
             builder.Services.AddScoped<IPlatformFeeReportService, PlatformFeeReportService>();
+            builder.Services.AddScoped<IPlatformFeeConfigService, PlatformFeeConfigService>();
             builder.Services.AddScoped<IOrderAdminService, OrderAdminService>();
             builder.Services.AddScoped<IUserProfileService, UserProfileService>();
             builder.Services.AddSingleton<IOtpService, OtpService>();

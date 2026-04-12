@@ -68,6 +68,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<PlatformFeeRecord> PlatformFeeRecords { get; set; }
 
+    public virtual DbSet<PlatformFeeConfig> PlatformFeeConfigs { get; set; }
+
     public virtual DbSet<Product> Products { get; set; }
 
     public virtual DbSet<ProductImage> ProductImages { get; set; }
@@ -1103,6 +1105,33 @@ public partial class ApplicationDbContext : DbContext
                 .HasForeignKey(d => d.SellerId)
                 .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("platform_fee_records_seller_id_fkey");
+        });
+
+        modelBuilder.Entity<PlatformFeeConfig>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("platform_fee_configs_pkey");
+
+            entity.ToTable("platform_fee_configs");
+
+            entity.HasIndex(e => e.CreatedAt, "idx_platform_fee_configs_created_at");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.CommissionPercent)
+                .HasPrecision(5, 2)
+                .HasColumnName("commission_percent");
+            entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Admin)
+                .WithMany()
+                .HasForeignKey(d => d.ChangedBy)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("platform_fee_configs_changed_by_fkey");
         });
 
         modelBuilder.Entity<Product>(entity =>

@@ -1,5 +1,26 @@
 namespace ECommerceAPI.Application.DTOs.Admin;
 
+public class PlatformFeeConfigDto
+{
+    public Guid Id { get; set; }
+    public decimal CommissionPercent { get; set; }
+    public Guid ChangedBy { get; set; }
+    public string? ChangedByName { get; set; }
+    public string? Note { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class UpdatePlatformFeeConfigRequest
+{
+    /// <summary>Tỷ lệ phí sàn mới (0–100).</summary>
+    public decimal CommissionPercent { get; set; }
+
+    /// <summary>Ghi chú lý do thay đổi (tuỳ chọn).</summary>
+    public string? Note { get; set; }
+}
+
+
+
 public class PlatformFeeSummaryDto
 {
     /// <summary>Tổng phí sàn (VND) trong khoảng lọc.</summary>

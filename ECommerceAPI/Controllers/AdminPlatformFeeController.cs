@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -10,10 +12,14 @@ namespace ECommerceAPI.Controllers;
 public class AdminPlatformFeeController : ControllerBase
 {
     private readonly IPlatformFeeReportService _platformFeeReportService;
+    private readonly IPlatformFeeConfigService _platformFeeConfigService;
 
-    public AdminPlatformFeeController(IPlatformFeeReportService platformFeeReportService)
+    public AdminPlatformFeeController(
+        IPlatformFeeReportService platformFeeReportService,
+        IPlatformFeeConfigService platformFeeConfigService)
     {
         _platformFeeReportService = platformFeeReportService;
+        _platformFeeConfigService = platformFeeConfigService;
     }
 
     /// <summary>
@@ -43,5 +49,51 @@ public class AdminPlatformFeeController : ControllerBase
         if (!result.Success)
             return BadRequest(result);
         return Ok(new { success = true, data = result });
+    }
+
+    /// <summary>
+    /// Lấy cấu hình phí sàn đang áp dụng.
+    /// </summary>
+    [HttpGet("settings")]
+    public async Task<IActionResult> GetSettings()
+    {
+        var current = await _platformFeeConfigService.GetCurrentAsync();
+        return Ok(new { success = true, data = current });
+    }
+
+    /// <summary>
+    /// Cập nhật tỷ lệ phí sàn. Lưu lịch sử thay đổi.
+    /// </summary>
+    [HttpPut("settings")]
+    public async Task<IActionResult> UpdateSettings([FromBody] UpdatePlatformFeeConfigRequest request)
+    {
+        if (request.CommissionPercent < 0 || request.CommissionPercent > 100)
+            return BadRequest(new { success = false, message = "CommissionPercent phải trong khoảng 0–100." });
+
+        var adminId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var result = await _platformFeeConfigService.UpdateAsync(request, adminId);
+        return Ok(new { success = true, data = result });
+    }
+
+    /// <summary>
+    /// Lịch sử thay đổi tỷ lệ phí sàn (phân trang).
+    /// </summary>
+    [HttpGet("settings/history")]
+    public async Task<IActionResult> GetSettingsHistory(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        var (items, total) = await _platformFeeConfigService.GetHistoryAsync(page, pageSize);
+        return Ok(new
+        {
+            success = true,
+            data = new
+            {
+                items,
+                totalCount = total,
+                page,
+                pageSize
+            }
+        });
     }
 }
