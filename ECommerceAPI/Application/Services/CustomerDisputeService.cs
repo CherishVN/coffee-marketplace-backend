@@ -24,6 +24,18 @@ public class CustomerDisputeService : ICustomerDisputeService
         DisputeStatus.Cancelled
     ];
 
+    // Statuses where customer is allowed to cancel:
+    //   Pending       — chưa ai xử lý, huỷ thoải mái
+    //   WaitingSeller — admin đang chờ seller, customer đã tự dàn xếp được
+    //   WaitingCustomer — admin chờ phản hồi thêm từ customer, customer chủ động đóng
+    // KHÔNG cho huỷ khi UnderReview vì admin đang bỏ công xử lý
+    private static readonly DisputeStatus[] CustomerCancellableStatuses =
+    [
+        DisputeStatus.Pending,
+        DisputeStatus.WaitingSeller,
+        DisputeStatus.WaitingCustomer
+    ];
+
     public CustomerDisputeService(ApplicationDbContext context, INotificationService notifications)
     {
         _context = context;
@@ -198,9 +210,10 @@ public class CustomerDisputeService : ICustomerDisputeService
             return Fail("Không tìm thấy khiếu nại");
         }
 
-        if (FinalStatuses.Contains((DisputeStatus)dispute.Status))
+        if (!CustomerCancellableStatuses.Contains((DisputeStatus)dispute.Status))
         {
-            return Fail("Không thể hủy khiếu nại đã được xử lý");
+            return Fail("Không thể hủy khiếu nại ở trạng thái này. " +
+                "Chỉ được hủy khi đang Chờ xử lý, Chờ seller phản hồi hoặc Chờ phản hồi từ bạn.");
         }
 
         dispute.Status = (short)DisputeStatus.Cancelled;
