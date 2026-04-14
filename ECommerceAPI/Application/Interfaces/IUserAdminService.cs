@@ -9,5 +9,11 @@ public interface IUserAdminService
     Task<UserResponseDto> UpdateUserAsync(Guid userId, UpdateUserDto dto, Guid editorId);
     Task<UserResponseDto> SuspendUserAsync(Guid userId, SuspendUserDto dto, Guid adminId);
     Task<UserResponseDto> UnsuspendUserAsync(Guid userId, Guid adminId);
+    Task<UserResponseDto> UpdateUserAccountStatusAsync(Guid userId, UpdateUserAccountStatusDto dto, Guid adminId);
     Task<AuditLogResponseDto> GetUserAuditLogsAsync(Guid userId);
+    Task<UserAddressesResponseDto> GetUserAddressesAsync(Guid userId);
+    Task<UserWalletDetailResponseDto> GetUserWalletDetailsAsync(Guid userId);
+    Task<UserProductReviewsResponseDto> GetUserProductReviewsAsync(Guid userId, int page, int pageSize);
+    Task<UserShopReviewsResponseDto> GetUserShopReviewsAsync(Guid userId, int page, int pageSize);
+    Task<SimpleMessageResponseDto> SendPasswordResetEmailAsync(Guid userId);
 }

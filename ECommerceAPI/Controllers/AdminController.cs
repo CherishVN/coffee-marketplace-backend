@@ -74,4 +74,65 @@ public class AdminController : ControllerBase
         var result = await _userAdminService.GetUserAuditLogsAsync(userId);
         return Ok(result);
     }
+
+    [HttpGet("{userId}/addresses")]
+    public async Task<IActionResult> GetUserAddresses(Guid userId)
+    {
+        var result = await _userAdminService.GetUserAddressesAsync(userId);
+        if (!result.Success)
+            return NotFound(result);
+        return Ok(result);
+    }
+
+    [HttpGet("{userId}/wallet")]
+    public async Task<IActionResult> GetUserWallet(Guid userId)
+    {
+        var result = await _userAdminService.GetUserWalletDetailsAsync(userId);
+        if (!result.Success)
+            return NotFound(result);
+        return Ok(result);
+    }
+
+    [HttpGet("{userId}/reviews/products")]
+    public async Task<IActionResult> GetUserProductReviews(
+        Guid userId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
+    {
+        var result = await _userAdminService.GetUserProductReviewsAsync(userId, page, pageSize);
+        if (!result.Success)
+            return NotFound(result);
+        return Ok(result);
+    }
+
+    [HttpGet("{userId}/reviews/shops")]
+    public async Task<IActionResult> GetUserShopReviews(
+        Guid userId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10)
+    {
+        var result = await _userAdminService.GetUserShopReviewsAsync(userId, page, pageSize);
+        if (!result.Success)
+            return NotFound(result);
+        return Ok(result);
+    }
+
+    [HttpPut("{userId}/account-status")]
+    public async Task<IActionResult> UpdateAccountStatus(Guid userId, [FromBody] UpdateUserAccountStatusDto dto)
+    {
+        var adminId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var result = await _userAdminService.UpdateUserAccountStatusAsync(userId, dto, adminId);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
+
+    [HttpPost("{userId}/send-password-reset")]
+    public async Task<IActionResult> SendPasswordReset(Guid userId)
+    {
+        var result = await _userAdminService.SendPasswordResetEmailAsync(userId);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
 }

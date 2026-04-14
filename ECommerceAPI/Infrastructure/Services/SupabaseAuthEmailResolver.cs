@@ -1,5 +1,7 @@
-using System.Text.Json;
+using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -9,7 +11,19 @@ namespace ECommerceAPI.Infrastructure.Services;
 
 public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
 {
-    private sealed record AuthUserCacheItem(string? Email, string? AvatarUrl);
+    private static readonly object FailedSentinel = new();
+
+    private sealed class AuthSnapshot
+    {
+        public string? Email { get; init; }
+        public string? AvatarUrl { get; init; }
+        public DateTime? LastSignInAt { get; init; }
+        public DateTime? AuthUserCreatedAt { get; init; }
+        public DateTime? EmailConfirmedAt { get; init; }
+        public string? AuthPhone { get; init; }
+        public string? AuthDisplayName { get; init; }
+        public List<string> Providers { get; init; } = new();
+    }
 
     private static readonly TimeSpan SuccessTtl = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan EmptyTtl = TimeSpan.FromMinutes(2);
@@ -33,30 +47,59 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
 
     public async Task<string?> GetEmailByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var authUser = await GetAuthUserAsync(userId, cancellationToken);
-        return authUser.Email;
+        var s = await LoadSnapshotAsync(userId, cancellationToken);
+        return s?.Email;
     }
 
     public async Task<string?> GetAvatarUrlByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var authUser = await GetAuthUserAsync(userId, cancellationToken);
-        return authUser.AvatarUrl;
+        var s = await LoadSnapshotAsync(userId, cancellationToken);
+        return s?.AvatarUrl;
     }
 
-    private async Task<(string? Email, string? AvatarUrl)> GetAuthUserAsync(Guid userId, CancellationToken cancellationToken)
+    public async Task<SupabaseAuthEnrichmentDto?> GetSupabaseAuthEnrichmentAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var s = await LoadSnapshotAsync(userId, cancellationToken);
+        if (s is null)
+            return null;
+
+        return new SupabaseAuthEnrichmentDto
+        {
+            Email = s.Email,
+            AvatarUrl = s.AvatarUrl,
+            Details = new SupabaseAuthInfoDto
+            {
+                LastSignInAt = s.LastSignInAt,
+                AuthUserCreatedAt = s.AuthUserCreatedAt,
+                EmailConfirmedAt = s.EmailConfirmedAt,
+                AuthPhone = s.AuthPhone,
+                AuthDisplayName = s.AuthDisplayName,
+                Providers = s.Providers.ToList(),
+            },
+        };
+    }
+
+    private async Task<AuthSnapshot?> LoadSnapshotAsync(Guid userId, CancellationToken cancellationToken)
     {
         var cacheKey = $"supabase-auth-user:{userId}";
-        if (_memoryCache.TryGetValue<AuthUserCacheItem>(cacheKey, out var cached)
-            && cached is not null)
+        if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is not null)
         {
-            return (cached.Email, cached.AvatarUrl);
+            if (ReferenceEquals(cachedObj, FailedSentinel))
+                return null;
+            if (cachedObj is AuthSnapshot cachedSnap)
+                return cachedSnap;
         }
 
         var supabaseUrl = _configuration["Supabase:Url"];
         var serviceRoleKey = _configuration["Supabase:ServiceRoleKey"];
 
         if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(serviceRoleKey))
-            return CacheAndReturnEmpty(cacheKey);
+        {
+            _memoryCache.Set(cacheKey, FailedSentinel, EmptyTtl);
+            return null;
+        }
 
         using var http = _httpClientFactory.CreateClient();
         http.DefaultRequestHeaders.Add("apikey", serviceRoleKey);
@@ -72,7 +115,8 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
                 "Supabase admin user lookup failed for {UserId}. Status: {Status}",
                 userId,
                 response.StatusCode);
-            return CacheAndReturnEmpty(cacheKey);
+            _memoryCache.Set(cacheKey, FailedSentinel, EmptyTtl);
+            return null;
         }
 
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -80,14 +124,38 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
 
         var root = doc.RootElement;
         if (root.TryGetProperty("user", out var userElement) && userElement.ValueKind == JsonValueKind.Object)
-        {
             root = userElement;
-        }
 
         string? email = null;
-        if (root.TryGetProperty("email", out var emailElement) && emailElement.ValueKind == JsonValueKind.String)
+        if (root.TryGetProperty("email", out var emailEl) && emailEl.ValueKind == JsonValueKind.String)
+            email = emailEl.GetString();
+
+        string? phone = null;
+        if (root.TryGetProperty("phone", out var phoneEl) && phoneEl.ValueKind == JsonValueKind.String)
+            phone = phoneEl.GetString();
+
+        var lastSignIn = ParseIsoDate(root, "last_sign_in_at");
+        var createdAt = ParseIsoDate(root, "created_at");
+        var emailConfirmed = ParseIsoDate(root, "email_confirmed_at");
+
+        var providers = new List<string>();
+        if (root.TryGetProperty("identities", out var idents) && idents.ValueKind == JsonValueKind.Array)
         {
-            email = emailElement.GetString();
+            foreach (var id in idents.EnumerateArray())
+            {
+                if (id.TryGetProperty("provider", out var p) && p.ValueKind == JsonValueKind.String)
+                {
+                    var pv = p.GetString();
+                    if (!string.IsNullOrWhiteSpace(pv) && !providers.Contains(pv, StringComparer.OrdinalIgnoreCase))
+                        providers.Add(pv);
+                }
+            }
+        }
+
+        string? displayName = null;
+        if (root.TryGetProperty("user_metadata", out var meta) && meta.ValueKind == JsonValueKind.Object)
+        {
+            displayName = FirstString(meta, "full_name", "name", "display_name", "fullName");
         }
 
         string? avatarUrl = null;
@@ -99,9 +167,7 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
             {
                 var metadataBucket = bucketElement.GetString();
                 if (!string.IsNullOrWhiteSpace(metadataBucket))
-                {
                     avatarBucket = metadataBucket;
-                }
             }
 
             if (metadataElement.TryGetProperty("avatar_storage_path", out var storagePathElement)
@@ -120,20 +186,56 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
             }
         }
 
-        var item = new AuthUserCacheItem(email, avatarUrl);
-        var ttl = string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(avatarUrl)
+        var snapshot = new AuthSnapshot
+        {
+            Email = email,
+            AvatarUrl = avatarUrl,
+            LastSignInAt = lastSignIn,
+            AuthUserCreatedAt = createdAt,
+            EmailConfirmedAt = emailConfirmed,
+            AuthPhone = phone,
+            AuthDisplayName = displayName,
+            Providers = providers,
+        };
+
+        var ttl = string.IsNullOrWhiteSpace(email) && string.IsNullOrWhiteSpace(avatarUrl) && providers.Count == 0
             ? EmptyTtl
             : SuccessTtl;
-
-        _memoryCache.Set(cacheKey, item, ttl);
-        return (item.Email, item.AvatarUrl);
+        _memoryCache.Set(cacheKey, snapshot, ttl);
+        return snapshot;
     }
 
-    private (string? Email, string? AvatarUrl) CacheAndReturnEmpty(string cacheKey)
+    private static DateTime? ParseIsoDate(JsonElement root, string name)
     {
-        var empty = new AuthUserCacheItem(null, null);
-        _memoryCache.Set(cacheKey, empty, EmptyTtl);
-        return (empty.Email, empty.AvatarUrl);
+        if (!root.TryGetProperty(name, out var el))
+            return null;
+        if (el.ValueKind == JsonValueKind.Null || el.ValueKind == JsonValueKind.Undefined)
+            return null;
+        if (el.ValueKind != JsonValueKind.String)
+            return null;
+        var s = el.GetString();
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+        if (!DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
+            return null;
+        return dt.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+            : dt.ToUniversalTime();
+    }
+
+    private static string? FirstString(JsonElement obj, params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            if (obj.TryGetProperty(k, out var el) && el.ValueKind == JsonValueKind.String)
+            {
+                var s = el.GetString();
+                if (!string.IsNullOrWhiteSpace(s))
+                    return s;
+            }
+        }
+
+        return null;
     }
 
     private async Task<string?> CreateSignedAvatarUrlAsync(
@@ -149,9 +251,7 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
             var normalizedPath = storagePath.Trim().Trim('/');
 
             if (normalizedPath.StartsWith($"{normalizedBucket}/", StringComparison.OrdinalIgnoreCase))
-            {
                 normalizedPath = normalizedPath[(normalizedBucket.Length + 1)..];
-            }
 
             var encodedPath = Uri.EscapeDataString(normalizedPath).Replace("%2F", "/");
             using var body = new StringContent(
@@ -165,9 +265,7 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
                 cancellationToken);
 
             if (!response.IsSuccessStatusCode)
-            {
                 return null;
-            }
 
             var payload = await response.Content.ReadAsStringAsync(cancellationToken);
             using var doc = JsonDocument.Parse(payload);
@@ -187,7 +285,7 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
         }
         catch
         {
-            // Ignore and return null so UI falls back to initials/avatar placeholder.
+            // Ignore
         }
 
         return null;

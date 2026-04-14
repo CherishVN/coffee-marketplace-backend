@@ -42,7 +42,8 @@ public class DisputeAdminService : IDisputeAdminService
         int page, 
         int pageSize, 
         short? status = null,
-        short? type = null)
+        short? type = null,
+        Guid? customerId = null)
     {
         try
         {
@@ -59,6 +60,11 @@ public class DisputeAdminService : IDisputeAdminService
             if (type.HasValue)
             {
                 query = query.Where(d => d.Type == type.Value);
+            }
+
+            if (customerId.HasValue)
+            {
+                query = query.Where(d => d.CustomerId == customerId.Value);
             }
 
             var totalCount = await query.CountAsync();

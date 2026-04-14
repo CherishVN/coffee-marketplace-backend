@@ -26,9 +26,10 @@ public class AdminDisputeController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] short? status = null,
-        [FromQuery] short? type = null)
+        [FromQuery] short? type = null,
+        [FromQuery] Guid? customerId = null)
     {
-        var result = await _disputeAdminService.GetAllDisputesAsync(page, pageSize, status, type);
+        var result = await _disputeAdminService.GetAllDisputesAsync(page, pageSize, status, type, customerId);
         return Ok(result);
     }
 

@@ -5,6 +5,7 @@ public class AdminUserDto
     public Guid Id { get; set; }
     public string UserCode { get; set; } = string.Empty;
     public string? Email { get; set; }
+    public string? AvatarUrl { get; set; }
     public string? FullName { get; set; }
     public string? Phone { get; set; }
     public string Role { get; set; } = string.Empty;
@@ -16,6 +17,8 @@ public class AdminUserDto
     public Guid? SuspendedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    public SupabaseAuthInfoDto? Supabase { get; set; }
 }
 
 public class UpdateUserDto

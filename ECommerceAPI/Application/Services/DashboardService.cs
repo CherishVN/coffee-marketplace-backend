@@ -50,13 +50,16 @@ public class DashboardService : IDashboardService
                 })
                 .FirstOrDefaultAsync();
 
-            // 2) Shop Stats — single query
+            // 2) Shop Stats — single query (bỏ shop bị từ chối duyệt: VerificationStatus = Rejected)
             var shopStats = await _context.Shops
+                .Where(s => s.VerificationStatus != (short)ShopVerificationStatus.Rejected)
                 .GroupBy(_ => 1)
                 .Select(g => new
                 {
                     Total = g.Count(),
-                    Active = g.Count(s => s.Status == (short)ShopStatus.Active),
+                    Active = g.Count(s =>
+                        s.Status == (short)ShopStatus.Active &&
+                        s.VerificationStatus == (short)ShopVerificationStatus.Verified),
                     PendingVerification = g.Count(s => s.VerificationStatus == (short)ShopVerificationStatus.Pending),
                     Suspended = g.Count(s => s.Status == (short)ShopStatus.Suspended),
                     NewThisMonth = g.Count(s => s.CreatedAt >= startOfMonth),
@@ -89,8 +92,11 @@ public class DashboardService : IDashboardService
                     Processing = g.Count(o =>
                         o.Status == (short)OrderStatus.Processing ||
                         o.Status == (short)OrderStatus.Shipping),
+                    Confirmed = g.Count(o => o.Status == (short)OrderStatus.Confirmed),
+                    Delivered = g.Count(o => o.Status == (short)OrderStatus.Delivered),
                     Completed = g.Count(o => o.Status == (short)OrderStatus.Completed),
                     Cancelled = g.Count(o => o.Status == (short)OrderStatus.Cancelled),
+                    Refunded = g.Count(o => o.Status == (short)OrderStatus.Refunded),
                     TodayOrders = g.Count(o => o.CreatedAt >= startOfToday),
                     ThisMonthOrders = g.Count(o => o.CreatedAt >= startOfMonth),
                 })
@@ -179,8 +185,11 @@ public class DashboardService : IDashboardService
                     Total = orderStats?.Total ?? 0,
                     Pending = orderStats?.Pending ?? 0,
                     Processing = orderStats?.Processing ?? 0,
+                    Confirmed = orderStats?.Confirmed ?? 0,
+                    Delivered = orderStats?.Delivered ?? 0,
                     Completed = orderStats?.Completed ?? 0,
                     Cancelled = orderStats?.Cancelled ?? 0,
+                    Refunded = orderStats?.Refunded ?? 0,
                     TodayOrders = orderStats?.TodayOrders ?? 0,
                     ThisMonthOrders = orderStats?.ThisMonthOrders ?? 0
                 },

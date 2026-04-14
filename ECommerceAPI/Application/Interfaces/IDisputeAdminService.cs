@@ -8,7 +8,8 @@ public interface IDisputeAdminService
         int page, 
         int pageSize, 
         short? status = null,
-        short? type = null);
+        short? type = null,
+        Guid? customerId = null);
         
     Task<DisputeResponseDto> GetDisputeByIdAsync(Guid disputeId);
     Task<DisputeResponseDto> ApproveRefundAsync(Guid disputeId, ApproveRefundDto dto, Guid adminId);
