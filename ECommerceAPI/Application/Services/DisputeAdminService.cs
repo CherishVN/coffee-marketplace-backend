@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
@@ -9,6 +10,14 @@ namespace ECommerceAPI.Application.Services;
 
 public class DisputeAdminService : IDisputeAdminService
 {
+    private static readonly DisputeStatus[] FinalStatuses =
+    [
+        DisputeStatus.Resolved,
+        DisputeStatus.Rejected,
+        DisputeStatus.Refunded,
+        DisputeStatus.Cancelled
+    ];
+
     private readonly ApplicationDbContext _context;
     private readonly ILogger<DisputeAdminService> _logger;
     private readonly INotificationService _notifications;
@@ -109,52 +118,62 @@ public class DisputeAdminService : IDisputeAdminService
     {
         try
         {
-            var dispute = await _context.Disputes
+            var raw = await _context.Disputes
                 .Include(d => d.Customer)
                 .Include(d => d.Shop)
                 .Include(d => d.Order)
                 .Where(d => d.Id == disputeId)
-                .Select(d => new DisputeAdminDto
+                .Select(d => new
                 {
-                    Id = d.Id,
-                    OrderId = d.OrderId,
-                    CustomerId = d.CustomerId,
+                    d.Id, d.OrderId, d.CustomerId,
                     CustomerName = d.Customer.FullName ?? "N/A",
-                    ShopId = d.ShopId,
+                    d.ShopId,
                     ShopName = d.Shop.Name,
-                    Type = d.Type,
-                    TypeName = ((DisputeType)d.Type).ToString(),
-                    Status = d.Status,
-                    StatusName = ((DisputeStatus)d.Status).ToString(),
-                    Title = d.Title,
-                    Reason = d.Reason,
-                    RequestedAmount = d.RequestedAmount,
-                    ApprovedAmount = d.ApprovedAmount,
-                    SellerResponse = d.SellerResponse,
-                    SellerRespondedAt = d.SellerRespondedAt,
-                    Resolution = d.Resolution,
-                    AdminNote = d.AdminNote,
-                    ResolvedBy = d.ResolvedBy,
-                    ResolvedAt = d.ResolvedAt,
-                    CreatedAt = d.CreatedAt,
-                    UpdatedAt = d.UpdatedAt
+                    d.Type, d.Status, d.Title, d.Reason,
+                    d.RequestedAmount, d.ApprovedAmount,
+                    d.SellerResponse, d.SellerRespondedAt,
+                    d.Resolution, d.AdminNote,
+                    d.ResolvedBy, d.ResolvedAt,
+                    d.CreatedAt, d.UpdatedAt,
+                    d.EvidenceUrls,
+                    d.SellerEvidenceUrls,
+                    d.CustomerNote,
                 })
                 .FirstOrDefaultAsync();
 
-            if (dispute == null)
-            {
-                return new DisputeResponseDto
-                {
-                    Success = false,
-                    Message = "Không tìm thấy khiếu nại"
-                };
-            }
+            if (raw == null)
+                return new DisputeResponseDto { Success = false, Message = "Không tìm thấy khiếu nại" };
 
-            return new DisputeResponseDto
+            var dispute = new DisputeAdminDto
             {
-                Success = true,
-                Dispute = dispute
+                Id = raw.Id,
+                OrderId = raw.OrderId,
+                CustomerId = raw.CustomerId,
+                CustomerName = raw.CustomerName,
+                ShopId = raw.ShopId,
+                ShopName = raw.ShopName,
+                Type = raw.Type,
+                TypeName = ((DisputeType)raw.Type).ToString(),
+                Status = raw.Status,
+                StatusName = ((DisputeStatus)raw.Status).ToString(),
+                Title = raw.Title,
+                Reason = raw.Reason,
+                RequestedAmount = raw.RequestedAmount,
+                ApprovedAmount = raw.ApprovedAmount,
+                SellerResponse = raw.SellerResponse,
+                SellerRespondedAt = raw.SellerRespondedAt,
+                Resolution = raw.Resolution,
+                AdminNote = raw.AdminNote,
+                ResolvedBy = raw.ResolvedBy,
+                ResolvedAt = raw.ResolvedAt,
+                CreatedAt = raw.CreatedAt,
+                UpdatedAt = raw.UpdatedAt,
+                EvidenceUrls = TryDeserializeUrls(raw.EvidenceUrls),
+                SellerEvidenceUrls = TryDeserializeUrls(raw.SellerEvidenceUrls),
+                CustomerNote = raw.CustomerNote,
             };
+
+            return new DisputeResponseDto { Success = true, Dispute = dispute };
         }
         catch (Exception ex)
         {
@@ -172,8 +191,20 @@ public class DisputeAdminService : IDisputeAdminService
         ApproveRefundDto dto, 
         Guid adminId)
     {
-        using var transaction = await _context.Database.BeginTransactionAsync();
-        
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            return await ApproveRefundInternalAsync(disputeId, dto, adminId, transaction);
+        });
+    }
+
+    private async Task<DisputeResponseDto> ApproveRefundInternalAsync(
+        Guid disputeId,
+        ApproveRefundDto dto,
+        Guid adminId,
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction)
+    {
         try
         {
             var dispute = await _context.Disputes
@@ -348,5 +379,87 @@ public class DisputeAdminService : IDisputeAdminService
                 Message = "Có lỗi xảy ra khi từ chối khiếu nại"
             };
         }
+    }
+
+    public async Task<DisputeResponseDto> RequestSellerResponseAsync(
+        Guid disputeId, RequestResponseDto dto, Guid adminId)
+    {
+        try
+        {
+            var dispute = await _context.Disputes
+                .Include(d => d.Shop)
+                .FirstOrDefaultAsync(d => d.Id == disputeId);
+
+            if (dispute == null)
+                return new DisputeResponseDto { Success = false, Message = "Không tìm thấy khiếu nại" };
+
+            if (FinalStatuses.Contains((DisputeStatus)dispute.Status))
+                return new DisputeResponseDto { Success = false, Message = "Khiếu nại đã kết thúc" };
+
+            dispute.Status = (short)DisputeStatus.WaitingSeller;
+            if (dto.AdminNote != null) dispute.AdminNote = dto.AdminNote;
+            dispute.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+            var noteText = string.IsNullOrWhiteSpace(dto.AdminNote) ? "" : $" Yêu cầu: {dto.AdminNote}";
+            await _notifications.PublishAsync(
+                dispute.Shop.OwnerId,
+                nameof(NotificationType.Dispute),
+                "Yêu cầu phản hồi khiếu nại",
+                $"Admin yêu cầu bạn phản hồi khiếu nại liên quan đơn #{orderRef}.{noteText}",
+                "Dispute", dispute.Id, queueEmail: true);
+
+            return new DisputeResponseDto { Success = true, Message = "Đã yêu cầu seller phản hồi" };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error requesting seller response: {DisputeId}", disputeId);
+            return new DisputeResponseDto { Success = false, Message = "Có lỗi xảy ra" };
+        }
+    }
+
+    public async Task<DisputeResponseDto> RequestCustomerResponseAsync(
+        Guid disputeId, RequestResponseDto dto, Guid adminId)
+    {
+        try
+        {
+            var dispute = await _context.Disputes
+                .FirstOrDefaultAsync(d => d.Id == disputeId);
+
+            if (dispute == null)
+                return new DisputeResponseDto { Success = false, Message = "Không tìm thấy khiếu nại" };
+
+            if (FinalStatuses.Contains((DisputeStatus)dispute.Status))
+                return new DisputeResponseDto { Success = false, Message = "Khiếu nại đã kết thúc" };
+
+            dispute.Status = (short)DisputeStatus.WaitingCustomer;
+            if (dto.AdminNote != null) dispute.AdminNote = dto.AdminNote;
+            dispute.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+            var noteText = string.IsNullOrWhiteSpace(dto.AdminNote) ? "" : $" Yêu cầu: {dto.AdminNote}";
+            await _notifications.PublishAsync(
+                dispute.CustomerId,
+                nameof(NotificationType.Dispute),
+                "Cần bổ sung thông tin khiếu nại",
+                $"Admin yêu cầu bạn bổ sung thông tin khiếu nại đơn #{orderRef}.{noteText}",
+                "Dispute", dispute.Id, queueEmail: true);
+
+            return new DisputeResponseDto { Success = true, Message = "Đã yêu cầu customer bổ sung" };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error requesting customer response: {DisputeId}", disputeId);
+            return new DisputeResponseDto { Success = false, Message = "Có lỗi xảy ra" };
+        }
+    }
+
+    private static List<string> TryDeserializeUrls(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new List<string>();
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
+        catch { return new List<string>(); }
     }
 }

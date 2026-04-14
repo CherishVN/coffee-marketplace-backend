@@ -24,12 +24,21 @@ public class DisputeAdminDto
     public DateTime? ResolvedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public List<string> EvidenceUrls { get; set; } = new();
+    public List<string> SellerEvidenceUrls { get; set; } = new();
+    public string? CustomerNote { get; set; }
 }
 
 public class ApproveRefundDto
 {
     public decimal? ApprovedAmount { get; set; }
     public string Resolution { get; set; } = string.Empty;
+    public string? AdminNote { get; set; }
+}
+
+public class RequestResponseDto
+{
+    /// <summary>Tin nhắn/hướng dẫn gửi kèm cho bên được yêu cầu phản hồi</summary>
     public string? AdminNote { get; set; }
 }
 

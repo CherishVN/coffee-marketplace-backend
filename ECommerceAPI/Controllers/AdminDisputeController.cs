@@ -69,4 +69,30 @@ public class AdminDisputeController : ControllerBase
             return BadRequest(result);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Yêu cầu seller phản hồi (set WaitingSeller)
+    /// </summary>
+    [HttpPost("{disputeId}/request-seller-response")]
+    public async Task<IActionResult> RequestSellerResponse(Guid disputeId, [FromBody] RequestResponseDto dto)
+    {
+        var adminId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var result = await _disputeAdminService.RequestSellerResponseAsync(disputeId, dto, adminId);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Yêu cầu customer bổ sung (set WaitingCustomer)
+    /// </summary>
+    [HttpPost("{disputeId}/request-customer-response")]
+    public async Task<IActionResult> RequestCustomerResponse(Guid disputeId, [FromBody] RequestResponseDto dto)
+    {
+        var adminId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var result = await _disputeAdminService.RequestCustomerResponseAsync(disputeId, dto, adminId);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
 }

@@ -140,6 +140,14 @@ public class CustomerDisputeService : ICustomerDisputeService
         }
 
         dispute.EvidenceUrls = JsonSerializer.Serialize(dto.EvidenceUrls);
+        if (dto.CustomerNote != null)
+            dispute.CustomerNote = dto.CustomerNote.Trim();
+
+        // Nếu admin đang chờ customer phản hồi → tự động chuyển về UnderReview sau khi customer submit
+        var wasWaitingCustomer = (DisputeStatus)dispute.Status == DisputeStatus.WaitingCustomer;
+        if (wasWaitingCustomer)
+            dispute.Status = (short)DisputeStatus.UnderReview;
+
         dispute.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -147,7 +155,9 @@ public class CustomerDisputeService : ICustomerDisputeService
         return new CustomerDisputeResponseDto
         {
             Success = true,
-            Message = "Cập nhật bằng chứng thành công",
+            Message = wasWaitingCustomer
+                ? "Đã gửi phản hồi. Admin sẽ xem xét và liên hệ lại với bạn."
+                : "Cập nhật bằng chứng thành công",
             Dispute = MapToDto(dispute, dispute.Shop.Name)
         };
     }
@@ -264,7 +274,8 @@ public class CustomerDisputeService : ICustomerDisputeService
             SellerRespondedAt = dispute.SellerRespondedAt,
             CreatedAt = dispute.CreatedAt,
             UpdatedAt = dispute.UpdatedAt,
-            CanUpdateEvidence = !isFinal
+            CanUpdateEvidence = !isFinal,
+            CustomerNote = dispute.CustomerNote
         };
     }
 

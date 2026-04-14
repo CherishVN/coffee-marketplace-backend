@@ -120,22 +120,24 @@ public class SellerDisputeService : ISellerDisputeService
         if (dto.EvidenceUrls != null && dto.EvidenceUrls.Count > 0)
             dispute.SellerEvidenceUrls = JsonSerializer.Serialize(dto.EvidenceUrls);
 
-        // Chuyển trạng thái sang WaitingCustomer nếu đang ở WaitingSeller hoặc Pending/UnderReview
+        // Sau khi seller phản hồi → trả về UnderReview để admin xem xét quyết định
         if (dispute.Status == (short)DisputeStatus.WaitingSeller ||
             dispute.Status == (short)DisputeStatus.Pending ||
-            dispute.Status == (short)DisputeStatus.UnderReview)
+            dispute.Status == (short)DisputeStatus.UnderReview ||
+            dispute.Status == (short)DisputeStatus.WaitingCustomer)
         {
-            dispute.Status = (short)DisputeStatus.WaitingCustomer;
+            dispute.Status = (short)DisputeStatus.UnderReview;
         }
 
         await _context.SaveChangesAsync();
 
         var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+        // Thông báo cho customer biết seller đã có phản hồi
         await _notifications.PublishAsync(
             dispute.CustomerId,
             nameof(NotificationType.Dispute),
             "Shop đã phản hồi khiếu nại",
-            $"Shop đã phản hồi khiếu nại của bạn liên quan đơn #{orderRef}.",
+            $"Shop đã phản hồi khiếu nại của bạn liên quan đơn #{orderRef}. Admin đang xem xét.",
             "Dispute",
             dispute.Id,
             queueEmail: true);
@@ -174,7 +176,9 @@ public class SellerDisputeService : ISellerDisputeService
             SellerRespondedAt = dispute.SellerRespondedAt,
             CreatedAt = dispute.CreatedAt,
             UpdatedAt = dispute.UpdatedAt,
-            CanRespond = !isFinal
+            CanRespond = !isFinal,
+            CustomerNote = dispute.CustomerNote,
+            AdminNote = dispute.AdminNote
         };
     }
 

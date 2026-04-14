@@ -26,6 +26,8 @@ public class SellerDisputeDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public bool CanRespond { get; set; }
+    public string? CustomerNote { get; set; }
+    public string? AdminNote { get; set; }
 }
 
 public class SellerDisputeListResponseDto

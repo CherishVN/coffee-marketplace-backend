@@ -659,6 +659,7 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("seller_evidence_urls");
             entity.Property(e => e.SellerRespondedAt).HasColumnName("seller_responded_at");
             entity.Property(e => e.Resolution).HasColumnName("resolution");
+            entity.Property(e => e.CustomerNote).HasColumnName("customer_note");
             entity.Property(e => e.AdminNote).HasColumnName("admin_note");
             entity.Property(e => e.ResolvedBy).HasColumnName("resolved_by");
             entity.Property(e => e.ResolvedAt).HasColumnName("resolved_at");

@@ -16,6 +16,8 @@ public class CreateDisputeDto
 public class UpdateEvidenceDto
 {
     public List<string> EvidenceUrls { get; set; } = new();
+    /// <summary>Phản hồi bổ sung bằng chữ khi admin yêu cầu thêm thông tin</summary>
+    public string? CustomerNote { get; set; }
 }
 
 public class CustomerDisputeDto
@@ -40,6 +42,7 @@ public class CustomerDisputeDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public bool CanUpdateEvidence { get; set; }
+    public string? CustomerNote { get; set; }
 }
 
 public class CustomerDisputeListResponseDto
@@ -96,5 +99,9 @@ public class UpdateEvidenceDtoValidator : AbstractValidator<UpdateEvidenceDto>
             .NotNull().WithMessage("Danh sách bằng chứng không được null")
             .Must(urls => urls.Count <= 10)
             .WithMessage("Tối đa 10 file bằng chứng");
+
+        RuleFor(x => x.CustomerNote)
+            .MaximumLength(2000).WithMessage("Phản hồi bổ sung không được vượt quá 2000 ký tự")
+            .When(x => x.CustomerNote != null);
     }
 }
