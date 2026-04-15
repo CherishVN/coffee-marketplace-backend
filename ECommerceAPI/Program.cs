@@ -282,6 +282,11 @@ namespace ECommerceAPI
 
             app.MapControllers();
             app.MapHub<OrderTrackingHub>("/hubs/order-tracking");
+            if (enableSwagger)
+            {
+                app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
+            }
+
             app.Run();
         }
     }
