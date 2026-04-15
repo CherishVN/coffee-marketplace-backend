@@ -76,12 +76,13 @@ jobs:
             ENV_VARS="${ENV_VARS},MoMo__NotifyUrl=${API_URL}/api/payments/momo/ipn"
           fi
 
+          # --update-env-vars: merge keys; --set-env-vars would replace ALL env vars and wipe Console config.
           gcloud run deploy ${{ env.API_SERVICE }} \
             --image "${IMAGE}" \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars "${ENV_VARS}" \
+            --update-env-vars "${ENV_VARS}" \
             --quiet
 
       - name: Build and push AI image
