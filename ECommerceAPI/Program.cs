@@ -268,6 +268,21 @@ namespace ECommerceAPI
             {
                 app.UseSwagger();
                 app.UseSwaggerUI();
+                // Redirect GET / -> Swagger (middleware: reliable hơn MapGet sau MapControllers trên Cloud Run)
+                app.Use(async (context, next) =>
+                {
+                    if (HttpMethods.IsGet(context.Request.Method))
+                    {
+                        var path = context.Request.Path.Value ?? string.Empty;
+                        if (path is "/" or "")
+                        {
+                            context.Response.Redirect("/swagger/index.html");
+                            return;
+                        }
+                    }
+
+                    await next();
+                });
             }
 
             if (!app.Environment.IsDevelopment())
@@ -282,11 +297,6 @@ namespace ECommerceAPI
 
             app.MapControllers();
             app.MapHub<OrderTrackingHub>("/hubs/order-tracking");
-            if (enableSwagger)
-            {
-                app.MapGet("/", () => Results.Redirect("/swagger/index.html"));
-            }
-
             app.Run();
         }
     }

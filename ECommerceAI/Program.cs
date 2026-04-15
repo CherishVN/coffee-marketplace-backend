@@ -121,6 +121,20 @@ if (enableSwagger)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+    app.Use(async (context, next) =>
+    {
+        if (HttpMethods.IsGet(context.Request.Method))
+        {
+            var path = context.Request.Path.Value ?? string.Empty;
+            if (path is "/" or "")
+            {
+                context.Response.Redirect("/swagger/index.html");
+                return;
+            }
+        }
+
+        await next();
+    });
 }
 
 app.UseMiddleware<InternalApiKeyMiddleware>();
