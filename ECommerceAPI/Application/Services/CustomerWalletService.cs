@@ -151,6 +151,8 @@ public class CustomerWalletService : ICustomerWalletService
             if (hasPending)
                 return new CustomerWithdrawalResponseDto { Success = false, Message = "Bạn đã có một yêu cầu rút tiền đang chờ xử lý" };
 
+            var snapshotBalance = wallet.AvailableBalance;
+
             wallet.AvailableBalance -= dto.Amount;
             wallet.UpdatedAt = DateTime.UtcNow;
 
@@ -166,6 +168,7 @@ public class CustomerWalletService : ICustomerWalletService
                 BankAccountNumber = dto.BankAccountNumber,
                 BankAccountName = dto.BankAccountName,
                 Status = 0,
+                WalletBalanceAtRequest = snapshotBalance,
                 RequestedAt = DateTime.UtcNow
             });
 
@@ -238,7 +241,7 @@ public class CustomerWalletService : ICustomerWalletService
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
-        var items = raw.Select(r => MapToDto(r, r.Customer?.FullName, r.Wallet?.AvailableBalance)).ToList();
+        var items = raw.Select(r => MapToDto(r, r.Customer?.FullName, r.WalletBalanceAtRequest ?? r.Wallet?.AvailableBalance)).ToList();
 
         return new CustomerWithdrawalListResponseDto
         {

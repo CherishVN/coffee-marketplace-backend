@@ -14,6 +14,8 @@ public partial class CustomerWithdrawalRequest
     /// <summary>0 = Pending, 1 = Approved, 2 = Rejected, 3 = Paid</summary>
     public short Status { get; set; }
 
+    public decimal? WalletBalanceAtRequest { get; set; }
+
     public string? RejectionReason { get; set; }
     public string? AdminNote { get; set; }
     public DateTime RequestedAt { get; set; }

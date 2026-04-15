@@ -260,6 +260,7 @@ public class SellerService : ISellerService
             BankAccountNumber = dto.BankAccountNumber,
             BankAccountName = dto.BankAccountName,
             Status = 0, // Pending
+            WalletBalanceAtRequest = wallet.AvailableBalance,
             RequestedAt = DateTime.UtcNow
         };
 

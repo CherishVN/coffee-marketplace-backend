@@ -30,6 +30,7 @@ public class WithdrawAdminService : IWithdrawAdminService
         var query = _context.SellerWithdrawalRequests
             .Include(r => r.Seller)
             .Include(r => r.ReviewedByNavigation)
+            .Include(r => r.Wallet)
             .AsQueryable();
 
         if (status.HasValue)
@@ -37,12 +38,13 @@ public class WithdrawAdminService : IWithdrawAdminService
 
         var totalCount = await query.CountAsync();
 
-        var requests = await query
+        var raw = await query
             .OrderByDescending(r => r.RequestedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(r => MapToDto(r))
             .ToListAsync();
+
+        var requests = raw.Select(r => MapToDto(r, r.WalletBalanceAtRequest ?? r.Wallet?.AvailableBalance)).ToList();
 
         return new WithdrawListResponseDto
         {
@@ -263,7 +265,7 @@ public class WithdrawAdminService : IWithdrawAdminService
         };
     }
 
-    private static WithdrawRequestDto MapToDto(SellerWithdrawalRequest r)
+    private static WithdrawRequestDto MapToDto(SellerWithdrawalRequest r, decimal? availableBalance = null)
     {
         return new WithdrawRequestDto
         {
@@ -272,6 +274,7 @@ public class WithdrawAdminService : IWithdrawAdminService
             SellerName = r.Seller?.FullName,
             Amount = r.Amount,
             Currency = r.Currency,
+            AvailableBalance = availableBalance,
             BankName = r.BankName,
             BankAccountNumber = r.BankAccountNumber,
             BankAccountName = r.BankAccountName,
