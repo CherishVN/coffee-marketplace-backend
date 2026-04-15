@@ -28,7 +28,7 @@ public class AdminCategoryController : ControllerBase
         var result = await _categoryAdminService.GetAllCategoriesAsync(page, pageSize, level, isActive);
         return Ok(result);
     }
-
+ 
     [HttpGet("tree")]
     public async Task<IActionResult> GetCategoryTree()
     {
