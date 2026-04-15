@@ -100,16 +100,52 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+var frontendUrl = builder.Configuration["FrontendUrl"];
+var mainApiUrl = builder.Configuration["MainApi:BaseUrl"];
+
+var allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+foreach (var origin in corsOrigins)
+{
+    if (Uri.TryCreate(origin, UriKind.Absolute, out var u)) allowedHosts.Add(u.Host);
+}
+if (!string.IsNullOrEmpty(frontendUrl) && Uri.TryCreate(frontendUrl, UriKind.Absolute, out var fUri))
+{
+    allowedHosts.Add(fUri.Host);
+}
+if (!string.IsNullOrEmpty(mainApiUrl) && Uri.TryCreate(mainApiUrl, UriKind.Absolute, out var mUri))
+{
+    allowedHosts.Add(mUri.Host);
+}
+
 // ── CORS ──────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowMainApi", policy =>
     {
-        policy.WithOrigins(
-                builder.Configuration["MainApi:BaseUrl"] ?? "http://localhost:5153",
-                "http://localhost:3000")   // Frontend
-              .AllowAnyMethod()
-              .AllowAnyHeader();
+        policy
+            .SetIsOriginAllowed(origin =>
+            {
+                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    return false;
+                }
+
+                string host = uri.Host.ToLowerInvariant();
+                
+                // Luôn cho phép localhost (dev) và các nhánh preview của Vercel
+                if (host == "localhost" || host == "127.0.0.1" || host.EndsWith(".vercel.app")) 
+                {
+                    return true;
+                }
+
+                // Cho phép dựa trên cấu hình lấy từ appsettings.json hoặc Environment Variables
+                return allowedHosts.Contains(host);
+            })
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
     });
 });
 
