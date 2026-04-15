@@ -15,6 +15,7 @@ using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -101,6 +102,13 @@ namespace ECommerceAPI
             builder.Services.AddHostedService<NotificationEmailBackgroundService>();
             builder.Services.AddHostedService<PaymentTimeoutBackgroundService>();
             builder.Services.AddMemoryCache();
+
+            builder.Services.Configure<ForwardedHeadersOptions>(opts =>
+            {
+                opts.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                opts.KnownNetworks.Clear();
+                opts.KnownProxies.Clear();
+            });
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
 
@@ -261,6 +269,8 @@ namespace ECommerceAPI
             });
 
             var app = builder.Build();
+
+            app.UseForwardedHeaders();
 
             var enableSwagger = app.Environment.IsDevelopment()
                 || app.Configuration.GetValue<bool>("EnableSwagger");

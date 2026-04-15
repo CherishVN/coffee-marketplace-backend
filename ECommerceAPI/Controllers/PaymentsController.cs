@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using ECommerceAPI.Application.DTOs.Payments;
 using ECommerceAPI.Application.Interfaces;
+using ECommerceAPI.Infrastructure.Http;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -45,7 +46,7 @@ public class PaymentsController : ControllerBase
         if (customerId == null)
             return Unauthorized(new { success = false, message = "Token không hợp lệ" });
 
-        string ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        string ipAddress = HttpContext.GetClientIpAddress();
 
         var result = await _paymentService.CreateVNPayPaymentAsync(
             dto.OrderId,

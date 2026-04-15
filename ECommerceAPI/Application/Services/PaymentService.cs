@@ -50,6 +50,22 @@ public class PaymentService : IPaymentService
         _httpClient = httpClientFactory.CreateClient("MoMoGateway");
     }
 
+    private string VnPayHashSecret => (_vnPaySettings.HashSecret ?? string.Empty).Trim();
+
+    /// <summary>Giờ VN (ICT) cho vnp_CreateDate / vnp_ExpireDate; Cloud Run dùng UTC nên không dùng DateTime.Now trực tiếp.</summary>
+    private static DateTime GetVietnamDateTimeNow()
+    {
+        try
+        {
+            var tz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
+            return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return DateTime.UtcNow.AddHours(7);
+        }
+    }
+
     // ── 1. Tạo VNPay Payment URL ─────────────────────────────────────────────
     public async Task<CreatePaymentResponseDto> CreateVNPayPaymentAsync(
         Guid orderId,
@@ -130,8 +146,9 @@ public class PaymentService : IPaymentService
         vnpay.AddRequestData("vnp_Command", _vnPaySettings.Command);
         vnpay.AddRequestData("vnp_TmnCode", _vnPaySettings.TmnCode);
         vnpay.AddRequestData("vnp_Amount", ((long)(order.Total * 100)).ToString());
-        vnpay.AddRequestData("vnp_CreateDate", DateTime.Now.ToString("yyyyMMddHHmmss"));
-        vnpay.AddRequestData("vnp_ExpireDate", DateTime.Now.AddMinutes(15).ToString("yyyyMMddHHmmss"));
+        var vnNow = GetVietnamDateTimeNow();
+        vnpay.AddRequestData("vnp_CreateDate", vnNow.ToString("yyyyMMddHHmmss"));
+        vnpay.AddRequestData("vnp_ExpireDate", vnNow.AddMinutes(15).ToString("yyyyMMddHHmmss"));
         vnpay.AddRequestData("vnp_CurrCode", _vnPaySettings.CurrCode);
         vnpay.AddRequestData("vnp_IpAddr", ipAddress);
         vnpay.AddRequestData("vnp_Locale", _vnPaySettings.Locale);
@@ -140,7 +157,7 @@ public class PaymentService : IPaymentService
         vnpay.AddRequestData("vnp_ReturnUrl", vnpReturnUrl);
         vnpay.AddRequestData("vnp_TxnRef", txnRef);
 
-        string paymentUrl = vnpay.CreateRequestUrl(_vnPaySettings.Url, _vnPaySettings.HashSecret);
+        string paymentUrl = vnpay.CreateRequestUrl(_vnPaySettings.Url, VnPayHashSecret);
 
         _logger.LogInformation("[VNPay] Created payment URL for OrderId: {OrderId}, PaymentId: {PaymentId}", orderId, payment.Id);
 
@@ -172,7 +189,7 @@ public class PaymentService : IPaymentService
         _logger.LogInformation("[VNPay Return] ResponseCode: {Code}, TxnRef: {TxnRef}", responseCode, txnRef);
 
         // Validate signature using raw query string to avoid URL-encoding mismatches
-        bool isValidSignature = VNPayLibrary.ValidateSignatureRaw(rawQueryString, _vnPaySettings.HashSecret);
+        bool isValidSignature = VNPayLibrary.ValidateSignatureRaw(rawQueryString, VnPayHashSecret);
         if (!isValidSignature)
         {
             _logger.LogWarning("[VNPay Return] Invalid signature! Raw query: {Query}", rawQueryString);
