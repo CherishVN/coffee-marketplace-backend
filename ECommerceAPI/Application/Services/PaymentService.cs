@@ -892,6 +892,9 @@ public class PaymentService : IPaymentService
         if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
         if (string.Equals(host, "10.0.2.2", StringComparison.OrdinalIgnoreCase)) return true;
 
+        // Google Cloud Run (vnp_ReturnUrl HTTPS public)
+        if (host.EndsWith(".run.app", StringComparison.OrdinalIgnoreCase)) return true;
+
         if (IPAddress.TryParse(host, out var ip))
         {
             if (IPAddress.IsLoopback(ip)) return true;
