@@ -47,6 +47,7 @@ public class CustomerWithdrawalRequestDto
     public string? CustomerName { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "VND";
+    public decimal? AvailableBalance { get; set; }
     public string BankName { get; set; } = string.Empty;
     public string BankAccountNumber { get; set; } = string.Empty;
     public string BankAccountName { get; set; } = string.Empty;

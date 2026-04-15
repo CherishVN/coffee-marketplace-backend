@@ -226,6 +226,7 @@ public class CustomerWalletService : ICustomerWalletService
     {
         var query = _context.CustomerWithdrawalRequests
             .Include(r => r.Customer)
+            .Include(r => r.Wallet)
             .AsQueryable();
 
         if (status.HasValue)
@@ -237,7 +238,7 @@ public class CustomerWalletService : ICustomerWalletService
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
-        var items = raw.Select(r => MapToDto(r, r.Customer?.FullName)).ToList();
+        var items = raw.Select(r => MapToDto(r, r.Customer?.FullName, r.Wallet?.AvailableBalance)).ToList();
 
         return new CustomerWithdrawalListResponseDto
         {
@@ -334,13 +335,14 @@ public class CustomerWalletService : ICustomerWalletService
         };
     }
 
-    private static CustomerWithdrawalRequestDto MapToDto(CustomerWithdrawalRequest r, string? customerName = null) => new()
+    private static CustomerWithdrawalRequestDto MapToDto(CustomerWithdrawalRequest r, string? customerName = null, decimal? availableBalance = null) => new()
     {
         Id = r.Id,
         CustomerId = r.CustomerId,
         CustomerName = customerName,
         Amount = r.Amount,
         Currency = r.Currency,
+        AvailableBalance = availableBalance,
         BankName = r.BankName,
         BankAccountNumber = r.BankAccountNumber,
         BankAccountName = r.BankAccountName,
