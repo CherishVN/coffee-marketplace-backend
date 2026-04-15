@@ -68,6 +68,54 @@ public class VNPayLibrary
         return myChecksum.Equals(inputHash, StringComparison.InvariantCultureIgnoreCase);
     }
 
+    /// <summary>
+    /// Validate VNPay return signature using the raw query string to avoid
+    /// URL-encoding mismatches (e.g. <c>WebUtility.UrlEncode</c> encodes
+    /// space as '+' while VNPay uses '%20').
+    /// </summary>
+    public static bool ValidateSignatureRaw(string rawQueryString, string hashSecret)
+    {
+        var pairs = rawQueryString.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries);
+
+        string? inputHash = null;
+        var sorted = new SortedList<string, string>(StringComparer.InvariantCultureIgnoreCase);
+
+        foreach (var pair in pairs)
+        {
+            var eqIdx = pair.IndexOf('=');
+            if (eqIdx < 0) continue;
+
+            var key = pair[..eqIdx];
+            var rawValue = pair[(eqIdx + 1)..];
+
+            if (key.Equals("vnp_SecureHash", StringComparison.OrdinalIgnoreCase))
+            {
+                inputHash = rawValue;
+                continue;
+            }
+            if (key.Equals("vnp_SecureHashType", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!string.IsNullOrEmpty(rawValue))
+                sorted[key] = rawValue;
+        }
+
+        if (string.IsNullOrEmpty(inputHash)) return false;
+
+        var data = new StringBuilder();
+        foreach (var kv in sorted)
+        {
+            if (data.Length > 0) data.Append('&');
+            data.Append(kv.Key);
+            data.Append('=');
+            data.Append(kv.Value);
+        }
+
+        string myChecksum = HmacSHA512(hashSecret, data.ToString());
+        return myChecksum.Equals(inputHash, StringComparison.InvariantCultureIgnoreCase);
+    }
+
     public static string HmacSHA512(string key, string inputData)
     {
         byte[] keyBytes = Encoding.UTF8.GetBytes(key);

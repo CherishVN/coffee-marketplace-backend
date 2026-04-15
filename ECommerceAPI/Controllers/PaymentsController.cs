@@ -74,7 +74,7 @@ public class PaymentsController : ControllerBase
         _memoryCache.TryGetValue($"VnpayClientSuccess_{txnRef}", out string? clientSuccess);
         _memoryCache.TryGetValue($"VnpayClientFailure_{txnRef}", out string? clientFailure);
 
-        var result = await _paymentService.ProcessVNPayReturnAsync(Request.Query);
+        var result = await _paymentService.ProcessVNPayReturnAsync(Request.Query, Request.QueryString.Value ?? string.Empty);
 
         var frontendUrl = _configuration["FrontendUrl"] ?? string.Empty;
 

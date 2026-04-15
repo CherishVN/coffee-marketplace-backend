@@ -154,7 +154,7 @@ public class PaymentService : IPaymentService
     }
 
     // ── 2. Xử lý VNPay Return URL ────────────────────────────────────────────
-    public async Task<VNPayReturnDto> ProcessVNPayReturnAsync(IQueryCollection queryParams)
+    public async Task<VNPayReturnDto> ProcessVNPayReturnAsync(IQueryCollection queryParams, string rawQueryString)
     {
         _logger.LogInformation("[VNPay Return] Received callback with {Count} params", queryParams.Count);
 
@@ -164,7 +164,6 @@ public class PaymentService : IPaymentService
             vnpay.AddResponseData(key, value.ToString());
         }
 
-        string vnpSecureHash = queryParams["vnp_SecureHash"].ToString();
         string responseCode = vnpay.GetResponseData("vnp_ResponseCode");
         string txnRef = vnpay.GetResponseData("vnp_TxnRef");
         string transactionNo = vnpay.GetResponseData("vnp_TransactionNo");
@@ -172,11 +171,11 @@ public class PaymentService : IPaymentService
 
         _logger.LogInformation("[VNPay Return] ResponseCode: {Code}, TxnRef: {TxnRef}", responseCode, txnRef);
 
-        // Validate signature
-        bool isValidSignature = vnpay.ValidateSignature(vnpSecureHash, _vnPaySettings.HashSecret);
+        // Validate signature using raw query string to avoid URL-encoding mismatches
+        bool isValidSignature = VNPayLibrary.ValidateSignatureRaw(rawQueryString, _vnPaySettings.HashSecret);
         if (!isValidSignature)
         {
-            _logger.LogWarning("[VNPay Return] Invalid signature!");
+            _logger.LogWarning("[VNPay Return] Invalid signature! Raw query: {Query}", rawQueryString);
             return new VNPayReturnDto { Success = false, Message = "Chữ ký không hợp lệ", ResponseCode = "97" };
         }
 
