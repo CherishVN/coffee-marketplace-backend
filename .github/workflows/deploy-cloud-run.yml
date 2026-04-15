@@ -1,0 +1,86 @@
+# Deploy ECommerceAPI + ECommerceAI to Google Cloud Run.
+#
+# Auto-deploy: only on push to `dev`. When you want production auto-deploy, add `main` under on.push.branches.
+# Manual deploy any branch: Actions -> this workflow -> Run workflow (pick branch e.g. main).
+#
+# One-time GCP: Artifact Registry Docker repo (name must match AR_REPO), region asia-southeast1.
+# GitHub secrets: GCP_PROJECT_ID, GCP_SA_KEY.
+
+name: Deploy backend to Cloud Run
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+env:
+  REGION: asia-southeast1
+  AR_REPO: ecommerce
+  API_IMAGE_NAME: ecommerce-api
+  AI_IMAGE_NAME: ecommerce-ai
+  API_SERVICE: ecommerce-api
+  AI_SERVICE: ecommerce-ai
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push API image
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${PROJECT_ID}/${{ env.AR_REPO }}/${{ env.API_IMAGE_NAME }}"
+          docker build -f ECommerceAPI/Dockerfile -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" .
+          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:latest"
+
+      - name: Deploy API to Cloud Run
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${PROJECT_ID}/${{ env.AR_REPO }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}"
+          gcloud run deploy ${{ env.API_SERVICE }} \
+            --image "${IMAGE}" \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: Build and push AI image
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${PROJECT_ID}/${{ env.AR_REPO }}/${{ env.AI_IMAGE_NAME }}"
+          docker build -f ECommerceAI/Dockerfile -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" .
+          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:latest"
+
+      - name: Deploy AI to Cloud Run
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${PROJECT_ID}/${{ env.AR_REPO }}/${{ env.AI_IMAGE_NAME }}:${{ github.sha }}"
+          gcloud run deploy ${{ env.AI_SERVICE }} \
+            --image "${IMAGE}" \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --quiet
