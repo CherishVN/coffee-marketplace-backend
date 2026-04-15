@@ -115,7 +115,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+var enableSwagger = app.Environment.IsDevelopment()
+    || app.Configuration.GetValue<bool>("EnableSwagger");
+if (enableSwagger)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
