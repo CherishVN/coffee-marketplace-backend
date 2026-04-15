@@ -1,5 +1,7 @@
 # Build from repo folder BE/E-Commerce-BE:
-#   docker build -f ECommerceAPI/Dockerfile -t ecommerce-api .FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+#   docker build -f ECommerceAPI/Dockerfile -t ecommerce-api .
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
