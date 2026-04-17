@@ -666,7 +666,7 @@ public class SellerApprovalService : ISellerApprovalService
     private async Task<(bool Success, int? ShopId, string ErrorMessage)> CreateGhnShopAsync(Shop shop)
     {
         var ghnToken = (_configuration["GHN:Token"])?.Trim();
-        var ghnBaseUrl = (_configuration["GHN:BaseUrl"]).TrimEnd('/');
+        var ghnBaseUrl = (_configuration["GHN:BaseUrl"] ?? string.Empty).TrimEnd('/');
 
         if (string.IsNullOrWhiteSpace(ghnToken))
         {

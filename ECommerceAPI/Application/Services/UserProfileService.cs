@@ -57,6 +57,7 @@ public class UserProfileService : IUserProfileService
         return new UserProfileResponse
         {
             Id = user.Id,
+            UserCode = user.UserCode,
             Email = authEmail,
             FullName = user.FullName,
             Phone = user.Phone,

@@ -744,6 +744,8 @@ public class PaymentService : IPaymentService
         // Dùng NOW() của PostgreSQL — tránh mọi vấn đề timezone của C#
         // Điều kiện: đơn PendingPayment, tạo quá hạn, chưa có payment Paid,
         //            và không có payment Pending nào còn mới hơn cutoff
+        // PendingPaymentTimeoutMinutes là hằng số int nội bộ, không có user input → không có SQL injection.
+#pragma warning disable EF1002
         var cancelledIds = await _context.Database
             .SqlQueryRaw<Guid>($"""
                 UPDATE orders
@@ -765,6 +767,7 @@ public class PaymentService : IPaymentService
                 RETURNING id AS "Value"
                 """)
             .ToListAsync(cancellationToken);
+#pragma warning restore EF1002
 
         if (cancelledIds.Count == 0) return 0;
 

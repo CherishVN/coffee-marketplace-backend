@@ -7,7 +7,7 @@ public class OrderStatusStepDto
     public string Code { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public short Value { get; set; }
-    public string State { get; set; } = string.Empty; // completed, current, upcoming, cancelled
+    public string State { get; set; } = string.Empty;
     public DateTime? ReachedAt { get; set; }
 }
 
@@ -22,7 +22,6 @@ public class CustomerOrderItemDto
     public decimal UnitPrice { get; set; }
     public decimal TotalPrice { get; set; }
     public string? ThumbnailUrl { get; set; }
-    /// <summary>Đã có bản ghi đánh giá sản phẩm của user (product_reviews: unique theo product + user).</summary>
     public bool HasReviewedByUser { get; set; }
 }
 
@@ -47,7 +46,6 @@ public class CustomerOrderDetailDto : CustomerOrderSummaryDto
     public string? ShipFullName { get; set; }
     public string? ShipPhone { get; set; }
     public string? ShipAddress { get; set; }
-    public List<CustomerOrderItemDto> Items { get; set; } = new();
 }
 
 public class OrderTrackingDto

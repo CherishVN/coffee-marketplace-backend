@@ -75,8 +75,8 @@ public class OrderAdminService : IOrderAdminService
                     o.Id.ToString().ToLower().Contains(searchLower) ||
                     (o.ShipFullName != null && o.ShipFullName.ToLower().Contains(searchLower)) ||
                     (o.ShipPhone != null && o.ShipPhone.Contains(search)) ||
-                    o.Customer.FullName.ToLower().Contains(searchLower) ||
-                    o.Shop.Name.ToLower().Contains(searchLower));
+                    (o.Customer != null && o.Customer.FullName != null && o.Customer.FullName.ToLower().Contains(searchLower)) ||
+                    (o.Shop != null && o.Shop.Name.ToLower().Contains(searchLower)));
             }
 
             var totalCount = await query.CountAsync();
