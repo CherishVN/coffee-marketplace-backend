@@ -3,17 +3,20 @@ using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace ECommerceAPI.Application.Services;
 
 public class CartService : ICartService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IConfiguration _configuration;
     private const decimal ShippingFeePerShop = 30_000m;
 
-    public CartService(ApplicationDbContext context)
+    public CartService(ApplicationDbContext context, IConfiguration configuration)
     {
         _context = context;
+        _configuration = configuration;
     }
 
     // ── Xem giỏ hàng ────────────────────────────────────────────────────────
@@ -263,6 +266,14 @@ public class CartService : ICartService
             var subtotal = shopGroup.Sum(ci => ci.UnitPrice * ci.Quantity);
             var total = subtotal + shippingFee;
 
+            var estimatedDelivery = shippingOption?.EstimatedDeliveryDate;
+            if (estimatedDelivery == null)
+            {
+                var fallbackDays = _configuration.GetValue("Orders:DefaultEstimatedDeliveryDays", 4);
+                if (fallbackDays < 1) fallbackDays = 4;
+                estimatedDelivery = DateTimeOffset.UtcNow.AddDays(fallbackDays);
+            }
+
             var order = new Order
             {
                 Id = Guid.NewGuid(),
@@ -275,7 +286,7 @@ public class CartService : ICartService
                 ProviderShippingFee = providerShippingFee,
                 ShippingProvider = "GHN",
                 ShippingServiceId = shippingOption?.ShippingServiceId,
-                EstimatedDeliveryDate = shippingOption?.EstimatedDeliveryDate,
+                EstimatedDeliveryDate = estimatedDelivery,
                 Total = total,
                 ShipFullName = address.FullName,
                 ShipPhone = address.Phone,
