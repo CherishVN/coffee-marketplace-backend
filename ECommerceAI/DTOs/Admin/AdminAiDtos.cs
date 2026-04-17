@@ -50,7 +50,7 @@ public class TrendDataPoint
 
 public class DetectAnomaliesRequestDto
 {
-    public string DataType { get; set; } = "orders";  // orders | revenue | users
+    public string DataType { get; set; } = "orders";  // orders | revenue | users | products
     public int LookbackDays { get; set; } = 30;
 }
 
@@ -75,7 +75,7 @@ public class AnomalyItem
 
 public class PredictMetricsRequestDto
 {
-    public string Metric { get; set; } = null!;  // revenue | orders | users
+    public string Metric { get; set; } = null!;  // revenue | orders | users | products
     public int ForecastDays { get; set; } = 30;
 }
 

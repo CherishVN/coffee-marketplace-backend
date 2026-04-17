@@ -122,26 +122,26 @@ public class AiAdminService : IAiAdminService
     // ── Dự đoán chỉ số ───────────────────────────────────────────────────────
     public async Task<PredictMetricsResponseDto> PredictMetricsAsync(PredictMetricsRequestDto request)
     {
-        // Lấy dữ liệu 90 ngày gần nhất để làm cơ sở dự đoán
-        var historicalData = await GetHistoricalDataAsync(request.Metric, 90);
+        var metric = request.Metric.ToLowerInvariant();
+        var historicalData = await GetHistoricalDataAsync(metric, 90);
 
-        // Chỉ lấy 7 điểm gần nhất để giảm token
         var recentPoints = historicalData.TakeLast(7).ToList();
-        var totalCount = recentPoints.Sum(x => x.Values.FirstOrDefault().Value);
-        var avgPerDay = recentPoints.Any() ? totalCount / recentPoints.Count : 0;
+        decimal PointValue(TrendDataPoint p) => p.Values.GetValueOrDefault(metric);
+        var totalCount = recentPoints.Sum(PointValue);
+        var avgPerDay = recentPoints.Any() ? totalCount / recentPoints.Count : 0m;
 
         var prompt = $"""
-            Dữ liệu {request.Metric} 7 ngày gần nhất: trung bình {avgPerDay:F0}/ngày, tổng {totalCount:F0}.
+            Dữ liệu {metric} 7 ngày gần nhất: trung bình {avgPerDay:F0}/ngày, tổng {totalCount:F0}.
             Dự đoán xu hướng {request.ForecastDays} ngày tới trong 2-3 câu ngắn gọn bằng tiếng Việt.
             """;
 
         var analysis = await _gemini.GenerateAsync(_systemPrompt, prompt);
 
-        var predictions = GenerateSimplePredictions(historicalData, request.ForecastDays);
+        var predictions = GenerateSimplePredictions(historicalData, request.ForecastDays, metric);
 
         return new PredictMetricsResponseDto
         {
-            Metric = request.Metric,
+            Metric = metric,
             Predictions = predictions,
             AiAnalysis = analysis,
             ConfidenceLevel = 0.75m
@@ -417,80 +417,150 @@ public class AiAdminService : IAiAdminService
 
     private async Task<List<AnomalyItem>> DetectStatisticalAnomaliesAsync(DetectAnomaliesRequestDto request)
     {
-        // Simple threshold-based anomaly detection
+        var dataType = (request.DataType ?? "orders").ToLowerInvariant();
+        var fromUtc = DateTime.UtcNow.AddDays(-request.LookbackDays);
+        var startDay = fromUtc.Date;
+        var endDay = DateTime.UtcNow.Date;
+
+        var aggregates = await LoadDailyMetricDictionaryAsync(dataType, fromUtc);
+        var daily = MergeToDailySeries(aggregates, startDay, endDay);
+
+        if (daily.Count <= 7)
+            return new List<AnomalyItem>();
+
+        var avg = daily.Average(x => x.Value);
+        if (avg <= 0)
+            return new List<AnomalyItem>();
+
+        var threshold = avg * 3m;
         var anomalies = new List<AnomalyItem>();
-        var from = DateTime.UtcNow.AddDays(-request.LookbackDays);
 
-        if (request.DataType == "products")
+        foreach (var day in daily.Where(d => d.Value > threshold))
         {
-            var dailyCounts = await _context.Products
-                .Where(p => p.CreatedAt >= from)
-                .GroupBy(p => p.CreatedAt.Date)
-                .Select(g => new { Date = g.Key, Count = g.Count() })
-                .OrderBy(x => x.Date)
-                .ToListAsync();
-
-            if (dailyCounts.Count > 7)
+            var dev = (day.Value - avg) / avg * 100m;
+            anomalies.Add(new AnomalyItem
             {
-                var avg = (decimal)dailyCounts.Average(x => x.Count);
-                var threshold = avg * 3;
-
-                foreach (var day in dailyCounts.Where(d => d.Count > threshold))
-                {
-                    anomalies.Add(new AnomalyItem
-                    {
-                        DetectedAt = day.Date,
-                        Type = "spike",
-                        Severity = "medium",
-                        Description = $"Số lượng sản phẩm mới bất thường cao",
-                        ExpectedValue = avg,
-                        ActualValue = day.Count,
-                        DeviationPercent = (day.Count - avg) / avg * 100
-                    });
-                }
-            }
+                DetectedAt = day.Date,
+                Type = "spike",
+                Severity = day.Value > avg * 5m ? "high" : "medium",
+                Description = SpikeDescriptionForDataType(dataType),
+                ExpectedValue = avg,
+                ActualValue = day.Value,
+                DeviationPercent = dev
+            });
         }
 
         return anomalies;
     }
 
-    private async Task<List<TrendDataPoint>> GetHistoricalDataAsync(string metric, int days)
-    {
-        var from = DateTime.UtcNow.AddDays(-days);
-        var dataPoints = new List<TrendDataPoint>();
-
-        if (metric == "products")
+    private static string SpikeDescriptionForDataType(string dataType) =>
+        dataType switch
         {
-            var data = await _context.Products
-                .Where(p => p.CreatedAt >= from)
-                .GroupBy(p => p.CreatedAt.Date)
-                .Select(g => new { Date = g.Key, Count = g.Count() })
-                .OrderBy(x => x.Date)
-                .ToListAsync();
+            "orders" => "S\u1ed1 \u0111\u01a1n h\u00e0ng t\u1ea1o trong ng\u00e0y cao b\u1ea5t th\u01b0\u1eddng so v\u1edbi trung b\u00ecnh chu k\u1ef3.",
+            "revenue" => "Doanh thu \u0111\u01a1n ho\u00e0n th\u00e0nh trong ng\u00e0y cao b\u1ea5t th\u01b0\u1eddng so v\u1edbi trung b\u00ecnh chu k\u1ef3.",
+            "users" => "S\u1ed1 t\u00e0i kho\u1ea3n \u0111\u0103ng k\u00fd m\u1edbi trong ng\u00e0y cao b\u1ea5t th\u01b0\u1eddng so v\u1edbi trung b\u00ecnh chu k\u1ef3.",
+            "products" => "S\u1ed1 s\u1ea3n ph\u1ea9m m\u1edbi t\u1ea1o trong ng\u00e0y cao b\u1ea5t th\u01b0\u1eddng so v\u1edbi trung b\u00ecnh chu k\u1ef3.",
+            _ => "Gi\u00e1 tr\u1ecb trong ng\u00e0y cao b\u1ea5t th\u01b0\u1eddng so v\u1edbi trung b\u00ecnh chu k\u1ef3."
+        };
 
-            dataPoints = data.Select(d => new TrendDataPoint
-            {
-                Date = d.Date,
-                Values = new Dictionary<string, decimal> { [metric] = d.Count }
-            }).ToList();
+    private async Task<Dictionary<DateTime, decimal>> LoadDailyMetricDictionaryAsync(string metric, DateTime fromUtc)
+    {
+        var key = metric.ToLowerInvariant();
+
+        if (key == "orders")
+        {
+            var rows = await _context.Orders
+                .AsNoTracking()
+                .Where(o => o.CreatedAt >= fromUtc)
+                .GroupBy(o => o.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Cnt = g.Count() })
+                .ToListAsync();
+            return rows.ToDictionary(r => r.Day, r => (decimal)r.Cnt);
         }
 
-        return dataPoints;
+        if (key == "revenue")
+        {
+            var rows = await _context.Orders
+                .AsNoTracking()
+                .Where(o => o.CreatedAt >= fromUtc && o.Status == 6)
+                .GroupBy(o => o.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Sum = g.Sum(o => o.Total) })
+                .ToListAsync();
+            return rows.ToDictionary(r => r.Day, r => r.Sum);
+        }
+
+        if (key == "users")
+        {
+            var rows = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.CreatedAt >= fromUtc)
+                .GroupBy(u => u.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Cnt = g.Count() })
+                .ToListAsync();
+            return rows.ToDictionary(r => r.Day, r => (decimal)r.Cnt);
+        }
+
+        if (key == "products")
+        {
+            var rows = await _context.Products
+                .AsNoTracking()
+                .Where(p => p.CreatedAt >= fromUtc)
+                .GroupBy(p => p.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Cnt = g.Count() })
+                .ToListAsync();
+            return rows.ToDictionary(r => r.Day, r => (decimal)r.Cnt);
+        }
+
+        return new Dictionary<DateTime, decimal>();
     }
 
-    private static List<PredictionPoint> GenerateSimplePredictions(List<TrendDataPoint> historical, int forecastDays)
+    private static List<(DateTime Date, decimal Value)> MergeToDailySeries(
+        Dictionary<DateTime, decimal> aggregates,
+        DateTime startDay,
+        DateTime endDay)
+    {
+        var list = new List<(DateTime, decimal)>();
+        for (var d = startDay.Date; d <= endDay.Date; d = d.AddDays(1))
+        {
+            list.Add((d, aggregates.GetValueOrDefault(d, 0m)));
+        }
+        return list;
+    }
+
+    private async Task<List<TrendDataPoint>> GetHistoricalDataAsync(string metric, int days)
+    {
+        var fromUtc = DateTime.UtcNow.AddDays(-days);
+        var startDay = fromUtc.Date;
+        var endDay = DateTime.UtcNow.Date;
+        var m = metric.ToLowerInvariant();
+
+        var dict = await LoadDailyMetricDictionaryAsync(m, fromUtc);
+        var series = MergeToDailySeries(dict, startDay, endDay);
+
+        return series.Select(x => new TrendDataPoint
+        {
+            Date = x.Date,
+            Values = new Dictionary<string, decimal> { [m] = x.Value }
+        }).ToList();
+    }
+
+    private static List<PredictionPoint> GenerateSimplePredictions(
+        List<TrendDataPoint> historical,
+        int forecastDays,
+        string metricKey)
     {
         if (!historical.Any()) return new List<PredictionPoint>();
 
-        var avgGrowth = historical.Count > 1
-            ? historical.Skip(1).Zip(historical, (curr, prev) =>
-                curr.Values.FirstOrDefault().Value - prev.Values.FirstOrDefault().Value).Average()
-            : 0;
+        decimal GetV(TrendDataPoint p) => p.Values.GetValueOrDefault(metricKey);
 
-        var lastValue = historical.Last().Values.FirstOrDefault().Value;
+        var avgGrowth = historical.Count > 1
+            ? historical.Skip(1).Zip(historical, (curr, prev) => GetV(curr) - GetV(prev)).Average()
+            : 0m;
+
+        var lastValue = GetV(historical.Last());
         var predictions = new List<PredictionPoint>();
 
-        for (int i = 1; i <= forecastDays; i++)
+        for (var i = 1; i <= forecastDays; i++)
         {
             var predicted = lastValue + avgGrowth * i;
             predictions.Add(new PredictionPoint

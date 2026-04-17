@@ -20,7 +20,6 @@ public class AiAdminController : ControllerBase
         _gemini = gemini;
     }
 
-    /// <summary>[DEBUG] Liệt kê models Gemini khả dụng với API key hiện tại</summary>
     [HttpGet("debug/list-models")]
     public async Task<IActionResult> ListModels()
     {
@@ -28,19 +27,17 @@ public class AiAdminController : ControllerBase
         return Ok(new { models = result.Split('\n') });
     }
 
-    /// <summary>Tự động tạo báo cáo theo loại và khoảng thời gian</summary>
     [HttpPost("generate-report")]
     public async Task<IActionResult> GenerateReport([FromBody] GenerateReportRequestDto dto)
     {
         var validTypes = new[] { "sales", "sellers", "products", "customers", "disputes" };
         if (!validTypes.Contains(dto.ReportType.ToLower()))
-            return BadRequest(new { message = $"Report type không hợp lệ. Chọn: {string.Join(", ", validTypes)}" });
+            return BadRequest(new { message = $"Report type khong hop le. Chon: {string.Join(", ", validTypes)}" });
 
         var result = await _adminService.GenerateReportAsync(dto);
         return Ok(result);
     }
 
-    /// <summary>Phân tích xu hướng đa chiều</summary>
     [HttpPost("analyze-trends")]
     public async Task<IActionResult> AnalyzeTrends([FromBody] AnalyzeTrendsRequestDto dto)
     {
@@ -48,26 +45,35 @@ public class AiAdminController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>Phát hiện bất thường trong dữ liệu</summary>
     [HttpPost("detect-anomalies")]
     public async Task<IActionResult> DetectAnomalies([FromBody] DetectAnomaliesRequestDto dto)
     {
+        var allowedDataTypes = new[] { "orders", "revenue", "users", "products" };
+        var dt = (dto.DataType ?? "orders").Trim().ToLowerInvariant();
+        if (!allowedDataTypes.Contains(dt))
+            return BadRequest(new { message = $"dataType phai la mot trong: {string.Join(", ", allowedDataTypes)}" });
+        dto.DataType = dt;
+
         var result = await _adminService.DetectAnomaliesAsync(dto);
         return Ok(result);
     }
 
-    /// <summary>Dự đoán chỉ số kinh doanh</summary>
     [HttpPost("predict-metrics")]
     public async Task<IActionResult> PredictMetrics([FromBody] PredictMetricsRequestDto dto)
     {
         if (dto.ForecastDays < 1 || dto.ForecastDays > 90)
-            return BadRequest(new { message = "ForecastDays phải từ 1 đến 90" });
+            return BadRequest(new { message = "ForecastDays phai tu 1 den 90" });
+
+        var allowedMetrics = new[] { "revenue", "orders", "users", "products" };
+        var m = (dto.Metric ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(m) || !allowedMetrics.Contains(m))
+            return BadRequest(new { message = $"metric phai la mot trong: {string.Join(", ", allowedMetrics)}" });
+        dto.Metric = m;
 
         var result = await _adminService.PredictMetricsAsync(dto);
         return Ok(result);
     }
 
-    /// <summary>Tóm tắt và phân tích khiếu nại</summary>
     [HttpPost("summarize-disputes")]
     public async Task<IActionResult> SummarizeDisputes([FromBody] SummarizeDisputesRequestDto dto)
     {
@@ -75,7 +81,6 @@ public class AiAdminController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>Lấy AI insights cho dashboard</summary>
     [HttpGet("insights/dashboard")]
     public async Task<IActionResult> GetDashboardInsights()
     {
