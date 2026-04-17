@@ -242,19 +242,19 @@ public class CustomerOrderService : ICustomerOrderService
             };
         }
 
-        if ((OrderStatus)order.Status != OrderStatus.Shipping)
+        if ((OrderStatus)order.Status != OrderStatus.Delivered)
         {
             return new ConfirmOrderResponseDto
             {
                 Success = false,
-                Message = "Chỉ có thể xác nhận đơn hàng đang giao (Shipping)"
+                Message = "Chỉ có thể xác nhận khi đơn đã giao hàng (Delivered). Vui lòng chờ shop cập nhật trạng thái."
             };
         }
 
         order.Status = (short)OrderStatus.Completed;
         order.UpdatedAt = DateTime.UtcNow;
 
-        // Shipping → Completed: cộng SoldCount (chưa qua Delivered nên chưa được cộng trước đó)
+        // Delivered → Completed: cộng SoldCount (chưa cộng khi ở Delivered)
         foreach (var item in order.OrderItems)
         {
             await _context.Products
@@ -266,12 +266,12 @@ public class CustomerOrderService : ICustomerOrderService
 
         await _context.SaveChangesAsync();
 
-        await NotifyStatusChanged(order, OrderStatus.Shipping, OrderStatus.Completed);
+        await NotifyStatusChanged(order, OrderStatus.Delivered, OrderStatus.Completed);
 
         var code = NotificationFormatting.ShortEntityId(order.Id);
         var composed = await _orderEmailComposer.TryComposeAsync(
             order.Id,
-            OrderStatus.Shipping,
+            OrderStatus.Delivered,
             OrderStatus.Completed);
         await _notifications.PublishAsync(
             order.CustomerId,
