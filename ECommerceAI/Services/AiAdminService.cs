@@ -350,29 +350,70 @@ public class AiAdminService : IAiAdminService
     private async Task<List<TrendDataPoint>> QueryTrendDataAsync(AnalyzeTrendsRequestDto request)
     {
         var dataPoints = new List<TrendDataPoint>();
-        var current = request.FromDate.Date;
+        var cursor = request.FromDate.Date;
+        var endDate = request.ToDate.Date;
 
-        while (current <= request.ToDate.Date)
+        while (cursor <= endDate)
         {
-            var point = new TrendDataPoint { Date = current, Values = new Dictionary<string, decimal>() };
+            var (bucketStart, bucketEndExclusive) = TrendBucketRange(cursor, request.Granularity);
+            var point = new TrendDataPoint { Date = bucketStart, Values = new Dictionary<string, decimal>() };
+
+            if (request.MetricTypes.Contains("orders"))
+            {
+                var count = await _context.Orders.CountAsync(o =>
+                    o.CreatedAt >= bucketStart && o.CreatedAt < bucketEndExclusive);
+                point.Values["orders"] = count;
+            }
+
+            if (request.MetricTypes.Contains("revenue"))
+            {
+                // Same as sales report: revenue = completed orders (status 6) only
+                var sum = await _context.Orders
+                    .Where(o => o.CreatedAt >= bucketStart && o.CreatedAt < bucketEndExclusive && o.Status == 6)
+                    .SumAsync(o => (decimal?)o.Total) ?? 0;
+                point.Values["revenue"] = sum;
+            }
 
             if (request.MetricTypes.Contains("products"))
             {
-                var count = await _context.Products.CountAsync(p => p.CreatedAt.Date == current);
+                var count = await _context.Products.CountAsync(p =>
+                    p.CreatedAt >= bucketStart && p.CreatedAt < bucketEndExclusive);
                 point.Values["products"] = count;
             }
 
-            dataPoints.Add(point);
-            current = request.Granularity switch
+            if (request.MetricTypes.Contains("sellers"))
             {
-                "weekly" => current.AddDays(7),
-                "monthly" => current.AddMonths(1),
-                _ => current.AddDays(1)
+                var count = await _context.Shops.CountAsync(s =>
+                    s.CreatedAt >= bucketStart && s.CreatedAt < bucketEndExclusive);
+                point.Values["sellers"] = count;
+            }
+
+            if (request.MetricTypes.Contains("customers"))
+            {
+                var count = await _context.Users.CountAsync(u =>
+                    u.CreatedAt >= bucketStart && u.CreatedAt < bucketEndExclusive);
+                point.Values["customers"] = count;
+            }
+
+            dataPoints.Add(point);
+            cursor = request.Granularity switch
+            {
+                "weekly" => cursor.AddDays(7),
+                "monthly" => cursor.AddMonths(1),
+                _ => cursor.AddDays(1)
             };
         }
 
         return dataPoints;
     }
+
+    private static (DateTime Start, DateTime EndExclusive) TrendBucketRange(DateTime cursor, string granularity) =>
+        granularity switch
+        {
+            "weekly" => (cursor, cursor.AddDays(7)),
+            "monthly" => (cursor, cursor.AddMonths(1)),
+            _ => (cursor, cursor.AddDays(1))
+        };
 
     private async Task<List<AnomalyItem>> DetectStatisticalAnomaliesAsync(DetectAnomaliesRequestDto request)
     {
@@ -466,38 +507,58 @@ public class AiAdminService : IAiAdminService
 
     private async Task<DisputeStats> QueryDisputeStatsAsync(DateTime from, DateTime to, int maxItems)
     {
-        // Dùng raw SQL vì bảng disputes không có entity trong AiDbContext
-        var conn = _context.Database.GetDbConnection();
-        await conn.OpenAsync();
+        _ = maxItems; // giữ tham số cho API; thống kê là toàn bộ khoảng ngày
 
-        var stats = new DisputeStats();
+        var fromDay = from.Date;
+        var toExclusive = to.Date.AddDays(1);
 
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"""
-            SELECT COUNT(*) as total,
-                   SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as pending,
-                   SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as resolved,
-                   SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) as rejected
-            FROM disputes
-            WHERE created_at BETWEEN '{from:yyyy-MM-dd}' AND '{to:yyyy-MM-dd}'
-            LIMIT {maxItems}
-            """;
+        var query = _context.Disputes.AsNoTracking()
+            .Where(d => d.CreatedAt >= fromDay && d.CreatedAt < toExclusive);
 
-        using var reader = await cmd.ExecuteReaderAsync();
-        if (await reader.ReadAsync())
+        var stats = new DisputeStats
         {
-            stats.TotalCount = reader.GetInt32(0);
-            stats.ByStatus = new Dictionary<string, int>
-            {
-                ["pending"] = reader.GetInt32(1),
-                ["resolved"] = reader.GetInt32(2),
-                ["rejected"] = reader.GetInt32(3)
-            };
-        }
+            TotalCount = await query.CountAsync(),
+            ByStatus = (await query
+                    .GroupBy(d => d.Status)
+                    .Select(g => new { g.Key, Count = g.Count() })
+                    .ToListAsync())
+                .ToDictionary(x => DisputeStatusKey(x.Key), x => x.Count),
+            ByType = (await query
+                    .GroupBy(d => d.Type)
+                    .Select(g => new { g.Key, Count = g.Count() })
+                    .ToListAsync())
+                .ToDictionary(x => DisputeTypeKey(x.Key), x => x.Count),
+        };
 
-        await conn.CloseAsync();
         return stats;
     }
+
+    /// <summary>Giá trị khớp enum DisputeStatus trong ECommerceAPI (0–7).</summary>
+    private static string DisputeStatusKey(short status) => status switch
+    {
+        0 => "pending",
+        1 => "under_review",
+        2 => "waiting_seller",
+        3 => "waiting_customer",
+        4 => "resolved",
+        5 => "rejected",
+        6 => "refunded",
+        7 => "cancelled",
+        _ => $"status_{status}"
+    };
+
+    /// <summary>Giá trị khớp enum DisputeType trong ECommerceAPI (0–6).</summary>
+    private static string DisputeTypeKey(short type) => type switch
+    {
+        0 => "refund",
+        1 => "return",
+        2 => "damaged",
+        3 => "not_received",
+        4 => "wrong_item",
+        5 => "quality_issue",
+        6 => "other",
+        _ => $"type_{type}"
+    };
 
     private async Task<object> GetOverviewStatsAsync(DateTime from)
     {
