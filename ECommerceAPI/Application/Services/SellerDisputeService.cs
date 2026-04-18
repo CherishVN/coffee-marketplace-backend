@@ -56,6 +56,8 @@ public class SellerDisputeService : ISellerDisputeService
         var totalCount = await query.CountAsync();
 
         var disputes = await query
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
             .OrderByDescending(d => d.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -81,6 +83,8 @@ public class SellerDisputeService : ISellerDisputeService
 
         var dispute = await _context.Disputes
             .Include(d => d.Customer)
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
             .FirstOrDefaultAsync(d => d.Id == disputeId && d.ShopId == shop.Id);
 
         if (dispute == null)
@@ -104,6 +108,8 @@ public class SellerDisputeService : ISellerDisputeService
 
         var dispute = await _context.Disputes
             .Include(d => d.Customer)
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
             .FirstOrDefaultAsync(d => d.Id == disputeId && d.ShopId == shop.Id);
 
         if (dispute == null)
@@ -142,6 +148,15 @@ public class SellerDisputeService : ISellerDisputeService
             dispute.Id,
             queueEmail: true);
 
+        await _notifications.PublishToUsersWithRoleAsync(
+            "admin",
+            nameof(NotificationType.Dispute),
+            "Shop đã phản hồi khiếu nại",
+            $"Đơn #{orderRef}: người bán đã gửi phản hồi — cần xem xét (khiếu nại «{dispute.Title}»).",
+            "Dispute",
+            dispute.Id,
+            queueEmail: false);
+
         return new SellerDisputeResponseDto
         {
             Success = true,
@@ -178,8 +193,27 @@ public class SellerDisputeService : ISellerDisputeService
             UpdatedAt = dispute.UpdatedAt,
             CanRespond = !isFinal,
             CustomerNote = dispute.CustomerNote,
-            AdminNote = dispute.AdminNote
+            AdminNote = dispute.AdminNote,
+            AffectedItems = MapSellerAffectedItems(dispute)
         };
+    }
+
+    private static List<DisputeAffectedItemDto> MapSellerAffectedItems(Domain.Entities.Dispute dispute)
+    {
+        if (dispute.DisputeOrderItems == null || dispute.DisputeOrderItems.Count == 0)
+            return new List<DisputeAffectedItemDto>();
+
+        return dispute.DisputeOrderItems
+            .OrderBy(x => x.OrderItem?.ProductName)
+            .Select(r => new DisputeAffectedItemDto
+            {
+                OrderItemId = r.OrderItemId,
+                ProductName = r.OrderItem?.ProductName ?? "",
+                Quantity = r.Quantity,
+                UnitPrice = r.UnitPriceSnapshot,
+                LineTotal = r.LineSnapshotTotal
+            })
+            .ToList();
     }
 
     private static List<string> TryDeserializeUrls(string? json)

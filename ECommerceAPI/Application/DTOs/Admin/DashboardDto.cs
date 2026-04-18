@@ -6,7 +6,10 @@ public class DashboardStatsDto
     public ShopStats Shops { get; set; } = new();
     public ProductStats Products { get; set; } = new();
     public OrderStats Orders { get; set; } = new();
+    /// <summary>Platform fee revenue (non-reversed fee records).</summary>
     public RevenueStats Revenue { get; set; } = new();
+    /// <summary>GMV: completed order totals (not platform income).</summary>
+    public CompletedOrderGmvStats CompletedOrderGmv { get; set; } = new();
     public DisputeStats Disputes { get; set; } = new();
     public PlatformFeeStats PlatformFees { get; set; } = new();
 }
@@ -60,6 +63,15 @@ public class RevenueStats
     public decimal TodayRevenue { get; set; }
     public decimal ThisMonthRevenue { get; set; }
     public decimal LastMonthRevenue { get; set; }
+    public decimal GrowthPercentage { get; set; }
+}
+
+public class CompletedOrderGmvStats
+{
+    public decimal TotalGmv { get; set; }
+    public decimal TodayGmv { get; set; }
+    public decimal ThisMonthGmv { get; set; }
+    public decimal LastMonthGmv { get; set; }
     public decimal GrowthPercentage { get; set; }
 }
 

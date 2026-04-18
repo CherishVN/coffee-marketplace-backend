@@ -1,9 +1,12 @@
+using ECommerceAPI.Application.DTOs.Disputes;
+
 namespace ECommerceAPI.Application.DTOs.Admin;
 
 public class DisputeAdminDto
 {
     public Guid Id { get; set; }
     public Guid OrderId { get; set; }
+    public decimal OrderTotal { get; set; }
     public Guid CustomerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public Guid ShopId { get; set; }
@@ -27,6 +30,7 @@ public class DisputeAdminDto
     public List<string> EvidenceUrls { get; set; } = new();
     public List<string> SellerEvidenceUrls { get; set; } = new();
     public string? CustomerNote { get; set; }
+    public List<DisputeAffectedItemDto> AffectedItems { get; set; } = new();
 }
 
 public class ApproveRefundDto

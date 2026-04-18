@@ -1,7 +1,16 @@
+using System.Text.Json.Serialization;
 using ECommerceAPI.Domain.Enums;
 using FluentValidation;
 
 namespace ECommerceAPI.Application.DTOs.Disputes;
+
+/// <summary>Dòng đơn bị khiếu nại (mã order_item + số lượng lỗi).</summary>
+public class CreateDisputeLineItemDto
+{
+    public Guid OrderItemId { get; set; }
+    /// <summary>Số lượng khiếu nại, không vượt quá số lượng trên đơn.</summary>
+    public int Quantity { get; set; }
+}
 
 public class CreateDisputeDto
 {
@@ -11,6 +20,18 @@ public class CreateDisputeDto
     public string Reason { get; set; } = string.Empty;
     public decimal RequestedAmount { get; set; }
     public List<string>? EvidenceUrls { get; set; }
+    /// <summary>Ít nhất một dòng — nghiệp vụ TMĐT: chỉ định món / SL bị ảnh hưởng.</summary>
+    public List<CreateDisputeLineItemDto> Items { get; set; } = new();
+}
+
+/// <summary>Hiển thị phạm vi khiếu nại theo dòng đơn.</summary>
+public class DisputeAffectedItemDto
+{
+    public Guid OrderItemId { get; set; }
+    public string ProductName { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal LineTotal { get; set; }
 }
 
 public class UpdateEvidenceDto
@@ -43,6 +64,10 @@ public class CustomerDisputeDto
     public DateTime UpdatedAt { get; set; }
     public bool CanUpdateEvidence { get; set; }
     public string? CustomerNote { get; set; }
+    /// <summary>Ghi chú / yêu cầu từ bộ phận hỗ trợ (admin) gửi khách, vd. khi cần bổ sung thông tin.</summary>
+    [JsonPropertyName("adminNote")]
+    public string? AdminNote { get; set; }
+    public List<DisputeAffectedItemDto> AffectedItems { get; set; } = new();
 }
 
 public class CustomerDisputeListResponseDto
@@ -88,6 +113,16 @@ public class CreateDisputeDtoValidator : AbstractValidator<CreateDisputeDto>
         RuleFor(x => x.EvidenceUrls)
             .Must(urls => urls == null || urls.Count <= 10)
             .WithMessage("Tối đa 10 file bằng chứng khi tạo khiếu nại");
+
+        RuleFor(x => x.Items)
+            .NotEmpty()
+            .WithMessage("Vui lòng chọn ít nhất một sản phẩm trong đơn để khiếu nại");
+
+        RuleForEach(x => x.Items).ChildRules(item =>
+        {
+            item.RuleFor(i => i.OrderItemId).NotEmpty();
+            item.RuleFor(i => i.Quantity).GreaterThanOrEqualTo(1);
+        });
     }
 }
 

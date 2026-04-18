@@ -165,6 +165,8 @@ public class SellerService : ISellerService
             .Where(l => l.Amount < 0 && l.ReferenceType == WalletLedgerReferenceTypes.OrderRefund)
             .Sum(l => Math.Abs(l.Amount));
 
+        var netAfterRefunds = Math.Max(0, totalEarnings - totalRefunded);
+
         return new ServiceResponse<WalletDto>
         {
             Success = true,
@@ -175,6 +177,7 @@ public class SellerService : ISellerService
                 HeldBalance = wallet.HeldBalance,
                 PendingBalance = wallet.PendingBalance,
                 TotalEarnings = totalEarnings,
+                NetEarningsAfterRefunds = netAfterRefunds,
                 TotalWithdrawn = totalWithdrawn,
                 TotalRefunded = totalRefunded,
                 UpdatedAt = wallet.UpdatedAt

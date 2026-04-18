@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using ECommerceAPI.Domain.Enums;
 using FluentValidation;
 
@@ -27,7 +28,9 @@ public class SellerDisputeDto
     public DateTime UpdatedAt { get; set; }
     public bool CanRespond { get; set; }
     public string? CustomerNote { get; set; }
+    [JsonPropertyName("adminNote")]
     public string? AdminNote { get; set; }
+    public List<DisputeAffectedItemDto> AffectedItems { get; set; } = new();
 }
 
 public class SellerDisputeListResponseDto

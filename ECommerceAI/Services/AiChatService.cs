@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ECommerceAI.Data;
 using ECommerceAI.Data.Entities;
 using ECommerceAI.Data.Entities.ReadOnly;
@@ -10,6 +11,12 @@ namespace ECommerceAI.Services;
 
 public class AiChatService : IAiChatService
 {
+    private static readonly JsonSerializerOptions ProductJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     private readonly AiDbContext _context;
     private readonly GeminiClientService _gemini;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -199,11 +206,21 @@ public class AiChatService : IAiChatService
                 : "Mình đã nhận yêu cầu của bạn. Bạn mô tả thêm một chút để mình hỗ trợ chuẩn hơn nhé.";
         }
 
-        // 7. Lưu user message + assistant reply cuối cùng vào DB
+        // 7. Persist user + assistant rows; assistant row stores suggested products JSON for history UI
         var now = DateTime.UtcNow;
+        var assistantRow = new AiChatMessage
+        {
+            SessionId = sessionId,
+            Role = "assistant",
+            Content = parsed.Reply,
+            CreatedAt = now.AddMilliseconds(1),
+            SuggestedProductsJson = products.Count > 0
+                ? JsonSerializer.Serialize(products, ProductJsonOptions)
+                : null
+        };
         _context.AiChatMessages.AddRange(
             new AiChatMessage { SessionId = sessionId, Role = "user", Content = message, CreatedAt = now },
-            new AiChatMessage { SessionId = sessionId, Role = "assistant", Content = parsed.Reply, CreatedAt = now.AddMilliseconds(1) }
+            assistantRow
         );
 
         // 8. Update session timestamp
@@ -684,6 +701,19 @@ public class AiChatService : IAiChatService
         }
     }
 
+    private static List<ProductSuggestionDto>? DeserializeSuggestedProducts(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<ProductSuggestionDto>>(json, ProductJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static SessionResponseDto MapToSessionDto(AiChatSession session)
     {
         return new SessionResponseDto
@@ -695,7 +725,8 @@ public class AiChatService : IAiChatService
                 Id = m.Id,
                 Role = m.Role,
                 Content = m.Content,
-                CreatedAt = m.CreatedAt
+                CreatedAt = m.CreatedAt,
+                Products = DeserializeSuggestedProducts(m.SuggestedProductsJson)
             }).ToList()
         };
     }

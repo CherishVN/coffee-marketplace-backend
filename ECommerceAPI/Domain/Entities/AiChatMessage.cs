@@ -12,6 +12,9 @@ public partial class AiChatMessage
 
     public string Content { get; set; } = null!;
 
+    /// <summary>JSON array of product suggestions for assistant replies (camelCase).</summary>
+    public string? SuggestedProductsJson { get; set; }
+
     public DateTime? CreatedAt { get; set; }
 
     public virtual AiChatSession Session { get; set; } = null!;

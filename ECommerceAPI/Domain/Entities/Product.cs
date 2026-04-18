@@ -63,4 +63,6 @@ public partial class Product
     public virtual ICollection<ProductMaterial> ProductMaterials { get; set; } = new List<ProductMaterial>();
 
     public virtual ICollection<ProductTag> ProductTags { get; set; } = new List<ProductTag>();
+
+    public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 }

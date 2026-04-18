@@ -3,7 +3,9 @@ using ECommerceAPI.Application.DTOs.Notifications;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Application.Notifications;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ECommerceAPI.Application.Services;
@@ -12,11 +14,16 @@ public class NotificationService : INotificationService
 {
     private readonly ApplicationDbContext _context;
     private readonly INotificationQueue _notificationQueue;
+    private readonly IHubContext<OrderTrackingHub> _hubContext;
 
-    public NotificationService(ApplicationDbContext context, INotificationQueue notificationQueue)
+    public NotificationService(
+        ApplicationDbContext context,
+        INotificationQueue notificationQueue,
+        IHubContext<OrderTrackingHub> hubContext)
     {
         _context = context;
         _notificationQueue = notificationQueue;
+        _hubContext = hubContext;
     }
 
     public async Task<NotificationListResponseDto> GetNotificationsAsync(
@@ -144,6 +151,9 @@ public class NotificationService : INotificationService
         _context.Notifications.Add(entity);
         await _context.SaveChangesAsync(cancellationToken);
 
+        await _hubContext.Clients.Group(OrderTrackingHub.GetUserGroupName(userId))
+            .SendAsync("NotificationsUpdated", cancellationToken: cancellationToken);
+
         if (!queueEmail)
             return;
 
@@ -163,5 +173,75 @@ public class NotificationService : INotificationService
         await _notificationQueue.EnqueueEmailAsync(
             new NotificationEmailJob(userId, subject, html),
             cancellationToken);
+    }
+
+    public async Task PublishToUsersWithRoleAsync(
+        string roleCode,
+        string type,
+        string title,
+        string content,
+        string? referenceType = null,
+        Guid? referenceId = null,
+        bool queueEmail = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(roleCode))
+            return;
+
+        var normalized = roleCode.Trim().ToLowerInvariant();
+        var roleId = await _context.Roles.AsNoTracking()
+            .Where(r => r.Code.ToLower() == normalized)
+            .Select(r => r.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (roleId == 0)
+            return;
+
+        var userIds = await _context.Users.AsNoTracking()
+            .Where(u => u.RoleId == roleId)
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
+
+        if (userIds.Count == 0)
+            return;
+
+        var now = DateTime.UtcNow;
+        foreach (var uid in userIds)
+        {
+            _context.Notifications.Add(new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = uid,
+                Type = type,
+                Title = title,
+                Content = content,
+                ReferenceType = referenceType,
+                ReferenceId = referenceId,
+                IsRead = false,
+                CreatedAt = now
+            });
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        foreach (var uid in userIds)
+        {
+            await _hubContext.Clients.Group(OrderTrackingHub.GetUserGroupName(uid))
+                .SendAsync("NotificationsUpdated", cancellationToken: cancellationToken);
+        }
+
+        if (!queueEmail)
+            return;
+
+        foreach (var uid in userIds)
+        {
+            var subject = title;
+            var safe = WebUtility.HtmlEncode(content).Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace("\n", "<br/>", StringComparison.Ordinal);
+            var html = $"<html><body style=\"font-family:sans-serif\"><p>{safe}</p></body></html>";
+            await _notificationQueue.EnqueueEmailAsync(
+                new NotificationEmailJob(uid, subject, html),
+                cancellationToken);
+        }
     }
 }

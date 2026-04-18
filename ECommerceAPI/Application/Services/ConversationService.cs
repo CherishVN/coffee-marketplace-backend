@@ -1,6 +1,7 @@
 using ECommerceAPI.Application.DTOs.Chat;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -12,15 +13,18 @@ public class ConversationService : IConversationService
 {
     private readonly ApplicationDbContext _context;
     private readonly IUserAuthEmailResolver _authResolver;
+    private readonly INotificationService _notifications;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
 
     public ConversationService(
         ApplicationDbContext context,
         IUserAuthEmailResolver authResolver,
+        INotificationService notifications,
         IHubContext<OrderTrackingHub> hubContext)
     {
         _context = context;
         _authResolver = authResolver;
+        _notifications = notifications;
         _hubContext = hubContext;
     }
 
@@ -34,6 +38,10 @@ public class ConversationService : IConversationService
 
         if (shop.OwnerId == buyerId)
             return new ServiceResponse<ConversationDto> { Success = false, Message = "Không thể tự nhắn tin cho chính mình" };
+
+        var chatProduct = await ResolveChatProductForStartAsync(dto.ShopId, dto.ProductId);
+        if (dto.ProductId.HasValue && chatProduct == null)
+            return new ServiceResponse<ConversationDto> { Success = false, Message = "Sản phẩm không tồn tại hoặc không thuộc shop này" };
 
         // Tìm conversation đã có (cùng buyer + shop + order nếu có)
         var existing = await _context.Conversations
@@ -49,6 +57,12 @@ public class ConversationService : IConversationService
         if (existing != null)
         {
             await UnhideForUserAsync(buyerId, existing.Id);
+
+            if (chatProduct != null && existing.ProductId != chatProduct.Id)
+            {
+                existing.ProductId = chatProduct.Id;
+                await _context.SaveChangesAsync();
+            }
 
             // Nếu có tin nhắn đầu tiên thì gửi luôn
             if (!string.IsNullOrWhiteSpace(dto.FirstMessage))
@@ -67,10 +81,11 @@ public class ConversationService : IConversationService
                 await _context.SaveChangesAsync();
             }
 
+            var existingLoaded = await LoadConversationGraphAsync(existing.Id);
             return new ServiceResponse<ConversationDto>
             {
                 Success = true,
-                Data = await MapConversationDtoAsync(existing, buyerId)
+                Data = await MapConversationDtoAsync(existingLoaded, buyerId)
             };
         }
 
@@ -82,6 +97,7 @@ public class ConversationService : IConversationService
             SellerId = shop.OwnerId,
             ShopId = dto.ShopId,
             OrderId = dto.OrderId,
+            ProductId = chatProduct?.Id,
             CreatedAt = DateTime.UtcNow
         };
         await _context.Conversations.AddAsync(conversation);
@@ -104,13 +120,7 @@ public class ConversationService : IConversationService
 
         await _context.SaveChangesAsync();
 
-        // Load lại để có đủ navigation properties
-        var created = await _context.Conversations
-            .Include(c => c.Shop)
-            .Include(c => c.Buyer)
-            .Include(c => c.Seller)
-            .Include(c => c.Messages.OrderByDescending(m => m.CreatedAt).Take(1))
-            .FirstAsync(c => c.Id == conversation.Id);
+        var created = await LoadConversationGraphAsync(conversation.Id);
 
         return new ServiceResponse<ConversationDto>
         {
@@ -125,6 +135,8 @@ public class ConversationService : IConversationService
             .Include(c => c.Shop)
             .Include(c => c.Buyer)
             .Include(c => c.Seller)
+            .Include(c => c.Product)
+                .ThenInclude(p => p!.ProductImages)
             .Include(c => c.Messages.OrderByDescending(m => m.CreatedAt).Take(1))
             .Where(c => c.BuyerId == userId || c.SellerId == userId)
             .Where(c => !_context.ConversationUserPreferences.Any(p =>
@@ -158,6 +170,8 @@ public class ConversationService : IConversationService
             .Include(c => c.Shop)
             .Include(c => c.Buyer)
             .Include(c => c.Seller)
+            .Include(c => c.Product)
+                .ThenInclude(p => p!.ProductImages)
             .FirstOrDefaultAsync(c =>
                 c.Id == conversationId &&
                 (c.BuyerId == userId || c.SellerId == userId));
@@ -253,6 +267,8 @@ public class ConversationService : IConversationService
             .Include(c => c.Shop)
             .Include(c => c.Buyer)
             .Include(c => c.Seller)
+            .Include(c => c.Product)
+                .ThenInclude(p => p!.ProductImages)
             .Include(c => c.Messages.OrderByDescending(m => m.CreatedAt).Take(1))
             .FirstAsync(c => c.Id == conversationId);
 
@@ -262,6 +278,25 @@ public class ConversationService : IConversationService
 
         var buyerGroup = OrderTrackingHub.GetUserGroupName(conversationForPush.BuyerId);
         var sellerGroup = OrderTrackingHub.GetUserGroupName(conversationForPush.SellerId);
+
+        var recipientMuted = await _context.ConversationUserPreferences.AsNoTracking()
+            .AnyAsync(p => p.ConversationId == conversationId && p.UserId == recipientId && p.IsMuted);
+
+        if (!recipientMuted)
+        {
+            var senderName = message.Sender?.FullName ?? "Người dùng";
+            var preview = (dto.MessageType ?? "text") == "image"
+                ? "[Hình ảnh]"
+                : (message.Content.Length > 160 ? message.Content[..160] + "…" : message.Content);
+
+            await _notifications.PublishAsync(
+                recipientId,
+                "chat_message",
+                $"Tin nhắn từ {senderName}",
+                preview,
+                "conversation",
+                conversationId);
+        }
 
         await _hubContext.Clients.Group(buyerGroup).SendAsync("ChatMessageReceived", new
         {
@@ -391,6 +426,45 @@ public class ConversationService : IConversationService
 
     // ─── Helpers ────────────────────────────────────────────────────────────
 
+    private async Task<Conversation> LoadConversationGraphAsync(Guid id)
+    {
+        return await _context.Conversations
+            .Include(c => c.Shop)
+            .Include(c => c.Buyer)
+            .Include(c => c.Seller)
+            .Include(c => c.Product)
+                .ThenInclude(p => p!.ProductImages)
+            .Include(c => c.Messages.OrderByDescending(m => m.CreatedAt).Take(1))
+            .FirstAsync(c => c.Id == id);
+    }
+
+    private async Task<Product?> ResolveChatProductForStartAsync(Guid shopId, Guid? productId)
+    {
+        if (!productId.HasValue) return null;
+        return await _context.Products
+            .Include(p => p.ProductImages)
+            .FirstOrDefaultAsync(p =>
+                p.Id == productId.Value &&
+                p.ShopId == shopId &&
+                p.Status == (short)ProductStatus.Active);
+    }
+
+    private static ChatProductContextDto? MapProductContext(Product? p)
+    {
+        if (p == null) return null;
+        var img = p.ProductImages
+            .OrderBy(i => i.SortOrder)
+            .FirstOrDefault()?.ImageUrl;
+        return new ChatProductContextDto
+        {
+            ProductId = p.Id,
+            Slug = p.Slug,
+            Name = p.Name,
+            ImageUrl = img,
+            Price = p.BasePrice
+        };
+    }
+
     private async Task<ConversationDto> MapConversationDtoAsync(
         Conversation c,
         Guid currentUserId,
@@ -423,6 +497,15 @@ public class ConversationService : IConversationService
             pr = await _context.ConversationUserPreferences.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.ConversationId == c.Id && x.UserId == currentUserId);
 
+        var productCtx = MapProductContext(c.Product);
+        if (productCtx == null && c.ProductId.HasValue)
+        {
+            var p = await _context.Products.AsNoTracking()
+                .Include(x => x.ProductImages)
+                .FirstOrDefaultAsync(x => x.Id == c.ProductId);
+            productCtx = MapProductContext(p);
+        }
+
         return new ConversationDto
         {
             Id = c.Id,
@@ -434,6 +517,7 @@ public class ConversationService : IConversationService
             BuyerAvatarUrl = buyerAvatarUrl,
             SellerId = c.SellerId,
             OrderId = c.OrderId,
+            ProductContext = productCtx,
             IsMuted = pr?.IsMuted ?? false,
             UnreadCount = unreadCount,
             CreatedAt = c.CreatedAt,

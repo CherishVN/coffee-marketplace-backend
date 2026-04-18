@@ -29,4 +29,15 @@ public interface INotificationService
         string? emailHtmlBody = null,
         string? emailSubjectOverride = null,
         CancellationToken cancellationToken = default);
+
+   
+    Task PublishToUsersWithRoleAsync(
+        string roleCode,
+        string type,
+        string title,
+        string content,
+        string? referenceType = null,
+        Guid? referenceId = null,
+        bool queueEmail = false,
+        CancellationToken cancellationToken = default);
 }

@@ -110,4 +110,7 @@ public partial class Dispute
     public virtual Shop Shop { get; set; } = null!;
     public virtual User? ResolvedByNavigation { get; set; }
     public virtual ICollection<DisputeMessage> DisputeMessages { get; set; } = new List<DisputeMessage>();
+
+    /// <summary>Các dòng đơn hàng bị khiếu nại (TMĐT: chọn món / số lượng cụ thể).</summary>
+    public virtual ICollection<DisputeOrderItem> DisputeOrderItems { get; set; } = new List<DisputeOrderItem>();
 }
