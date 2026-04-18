@@ -31,6 +31,8 @@ public class ProductStorefrontDetailDto : ProductStorefrontDto
     public int ReviewCount { get; set; }
     public List<ProductVariantStorefrontDto> Variants { get; set; } = new();
     public int TotalStock { get; set; }
+    public List<string> Tags { get; set; } = new();
+    public List<string> Materials { get; set; } = new();
 }
 
 public class ProductVariantStorefrontDto

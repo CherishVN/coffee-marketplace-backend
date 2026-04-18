@@ -173,6 +173,8 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.ProductReviews)
                 .Include(p => p.ProductVariants).ThenInclude(v => v.Inventories)
                 .Include(p => p.Inventories)
+                .Include(p => p.ProductTags).ThenInclude(pt => pt.Tag)
+                .Include(p => p.ProductMaterials).ThenInclude(pm => pm.Material)
                 .Where(p => p.Id == productId && p.Status == (short)ProductStatus.Active)
                 .Select(p => new ProductStorefrontDetailDto
                 {
@@ -211,6 +213,8 @@ public class ProductStorefrontService : IProductStorefrontService
                         .ToList(),
                     TotalStock = p.Inventories
                         .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                    Tags = p.ProductTags.Select(pt => pt.Tag.Name).ToList(),
+                    Materials = p.ProductMaterials.Select(pm => pm.Material.Name).ToList(),
                     CreatedAt = p.CreatedAt,
                     SoldCount = p.SoldCount,
                 })
@@ -320,6 +324,8 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.ProductReviews)
                 .Include(p => p.ProductVariants).ThenInclude(v => v.Inventories)
                 .Include(p => p.Inventories)
+                .Include(p => p.ProductTags).ThenInclude(pt => pt.Tag)
+                .Include(p => p.ProductMaterials).ThenInclude(pm => pm.Material)
                 .Where(p => p.Slug == slug && p.Status == (short)ProductStatus.Active)
                 .Select(p => new ProductStorefrontDetailDto
                 {
@@ -358,6 +364,8 @@ public class ProductStorefrontService : IProductStorefrontService
                         .ToList(),
                     TotalStock = p.Inventories
                         .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                    Tags = p.ProductTags.Select(pt => pt.Tag.Name).ToList(),
+                    Materials = p.ProductMaterials.Select(pm => pm.Material.Name).ToList(),
                     CreatedAt = p.CreatedAt,
                     SoldCount = p.SoldCount,
                 })
