@@ -81,8 +81,20 @@ public class ShopStorefrontService : IShopStorefrontService
 
             query = sortBy switch
             {
-                "price_asc" => query.OrderBy(p => p.BasePrice).ThenBy(p => p.Id),
-                "price_desc" => query.OrderByDescending(p => p.BasePrice).ThenBy(p => p.Id),
+                "price_asc" => query.OrderBy(p =>
+                        !p.ProductVariants.Any(v => v.IsActive)
+                            ? p.BasePrice
+                            : Math.Min(
+                                p.BasePrice,
+                                p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    .ThenBy(p => p.Id),
+                "price_desc" => query.OrderByDescending(p =>
+                        !p.ProductVariants.Any(v => v.IsActive)
+                            ? p.BasePrice
+                            : Math.Min(
+                                p.BasePrice,
+                                p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    .ThenBy(p => p.Id),
                 "newest" => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
                 "best_selling" => query.OrderByDescending(p => p.SoldCount).ThenBy(p => p.Id),
                 _ => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
@@ -96,11 +108,16 @@ public class ShopStorefrontService : IShopStorefrontService
                 .Select(p => new ProductStorefrontDto
                 {
                     Id = p.Id,
+                    Slug = p.Slug,
                     Name = p.Name,
                     ShopId = p.ShopId,
                     ShopName = p.Shop.Name,
                     ShopSlug = p.Shop.Slug,
-                    BasePrice = p.BasePrice,
+                    BasePrice = !p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)),
                     Currency = p.Currency,
                     CategoryId = p.CategoryId,
                     CategoryName = p.Category != null ? p.Category.Name : null,

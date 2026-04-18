@@ -57,11 +57,28 @@ public class ProductStorefrontService : IProductStorefrontService
                     || (p.Description != null && p.Description.ToLower().Contains(searchLower)));
             }
 
+            // Giá trên danh sách = min(giá gốc, variant active); variant không Price thì dùng giá gốc.
             if (minPrice.HasValue)
-                query = query.Where(p => p.BasePrice >= minPrice.Value);
+            {
+                query = query.Where(p =>
+                    (!p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    >= minPrice.Value);
+            }
 
             if (maxPrice.HasValue)
-                query = query.Where(p => p.BasePrice <= maxPrice.Value);
+            {
+                query = query.Where(p =>
+                    (!p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    <= maxPrice.Value);
+            }
 
             if (minRating.HasValue)
                 query = query.Where(p => p.ProductReviews.Any() && p.ProductReviews.Average(r => (double)r.Rating) >= minRating.Value);
@@ -74,8 +91,20 @@ public class ProductStorefrontService : IProductStorefrontService
 
             query = sortBy switch
             {
-                "price_asc"   => query.OrderBy(p => p.BasePrice).ThenBy(p => p.Id),
-                "price_desc"  => query.OrderByDescending(p => p.BasePrice).ThenBy(p => p.Id),
+                "price_asc" => query.OrderBy(p =>
+                        !p.ProductVariants.Any(v => v.IsActive)
+                            ? p.BasePrice
+                            : Math.Min(
+                                p.BasePrice,
+                                p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    .ThenBy(p => p.Id),
+                "price_desc" => query.OrderByDescending(p =>
+                        !p.ProductVariants.Any(v => v.IsActive)
+                            ? p.BasePrice
+                            : Math.Min(
+                                p.BasePrice,
+                                p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    .ThenBy(p => p.Id),
                 "rating"      => query.OrderByDescending(p => p.ProductReviews.Any() ? p.ProductReviews.Average(r => (double)r.Rating) : 0).ThenBy(p => p.Id),
                 "newest"      => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
                 "best_seller" => query.OrderByDescending(p => p.SoldCount).ThenBy(p => p.Id),
@@ -95,7 +124,11 @@ public class ProductStorefrontService : IProductStorefrontService
                     ShopId       = p.ShopId,
                     ShopName     = p.Shop.Name,
                     ShopSlug     = p.Shop.Slug,
-                    BasePrice    = p.BasePrice,
+                    BasePrice    = !p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)),
                     Currency     = p.Currency,
                     CategoryId   = p.CategoryId,
                     CategoryName = p.Category != null ? p.Category.Name : null,
@@ -219,7 +252,12 @@ public class ProductStorefrontService : IProductStorefrontService
                 {
                     Id = p.Id, Slug = p.Slug, Name = p.Name,
                     ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug,
-                    BasePrice = p.BasePrice, Currency = p.Currency,
+                    BasePrice = !p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)),
+                    Currency = p.Currency,
                     CategoryId = p.CategoryId,
                     CategoryName = p.Category != null ? p.Category.Name : null,
                     CategorySlug = p.Category != null ? p.Category.Slug : null,
@@ -239,7 +277,12 @@ public class ProductStorefrontService : IProductStorefrontService
                 {
                     Id = p.Id, Slug = p.Slug, Name = p.Name,
                     ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug,
-                    BasePrice = p.BasePrice, Currency = p.Currency,
+                    BasePrice = !p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)),
+                    Currency = p.Currency,
                     CategoryId = p.CategoryId,
                     CategoryName = p.Category != null ? p.Category.Name : null,
                     CategorySlug = p.Category != null ? p.Category.Slug : null,
