@@ -345,6 +345,17 @@ public class AiChatService : IAiChatService
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
+    /// <summary>Name, category, or tag only — no description (aligns with storefront; avoids SEO keyword spam).</summary>
+    private static IQueryable<Product> WhereProductMatchesToken(IQueryable<Product> q, string tokenLower) =>
+        q.Where(p =>
+            p.Name.ToLower().Contains(tokenLower)
+            || (p.Category != null &&
+                (p.Category.Name.ToLower().Contains(tokenLower) ||
+                 p.Category.Slug.ToLower().Contains(tokenLower)))
+            || p.ProductTags.Any(pt =>
+                pt.Tag.Name.ToLower().Contains(tokenLower) ||
+                pt.Tag.Slug.ToLower().Contains(tokenLower)));
+
     private async Task<string> BuildProductContextAsync(string userMessage, IEnumerable<AiChatMessage>? history = null)
     {
         var keyword = ExtractProductKeyword(userMessage);
@@ -360,13 +371,14 @@ public class AiChatService : IAiChatService
 
         var maxPrice = ExtractMaxPrice(userMessage);
 
-        var query = _context.Products
-            .Include(p => p.Variants)
-            .Include(p => p.Images)
-            .Include(p => p.Category)
-            .Where(p => p.Status == 1 &&
-                        (p.Name.ToLower().Contains(keyword.ToLower()) ||
-                         (p.Description != null && p.Description.ToLower().Contains(keyword.ToLower()))));
+        var kw = keyword.ToLower();
+        var query = WhereProductMatchesToken(
+                _context.Products
+                    .Include(p => p.Variants)
+                    .Include(p => p.Images)
+                    .Include(p => p.Category),
+                kw)
+            .Where(p => p.Status == 1);
 
         if (maxPrice.HasValue)
             query = query.Where(p =>
@@ -572,21 +584,13 @@ public class AiChatService : IAiChatService
 
         if (normalizedTokens.Count > 0)
         {
-            // Match theo từng token có nghĩa để tránh miss khi query có từ mô tả như "đẹp", "2026", ...
             foreach (var token in normalizedTokens)
-            {
-                var t = token;
-                dbQuery = dbQuery.Where(p =>
-                    p.Name.ToLower().Contains(t) ||
-                    (p.Description != null && p.Description.ToLower().Contains(t)));
-            }
+                dbQuery = WhereProductMatchesToken(dbQuery, token);
         }
         else
         {
             var lowerQuery = query.ToLower().Trim();
-            dbQuery = dbQuery.Where(p =>
-                p.Name.ToLower().Contains(lowerQuery) ||
-                (p.Description != null && p.Description.ToLower().Contains(lowerQuery)));
+            dbQuery = WhereProductMatchesToken(dbQuery, lowerQuery);
         }
 
         if (maxPrice.HasValue)
