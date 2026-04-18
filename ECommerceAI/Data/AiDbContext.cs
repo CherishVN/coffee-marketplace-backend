@@ -19,6 +19,7 @@ public class AiDbContext : DbContext
 
     // ── Shared tables (read-only) ─────────────────────────────────────────
     public DbSet<Product> Products { get; set; }
+    public DbSet<ProductTag> ProductTags { get; set; }
     public DbSet<ProductVariant> ProductVariants { get; set; }
     public DbSet<ProductImage> ProductImages { get; set; }
     public DbSet<Category> Categories { get; set; }
@@ -154,8 +155,20 @@ public class AiDbContext : DbContext
                 .HasForeignKey(v => v.ProductId);
             e.HasMany(x => x.Images).WithOne()
                 .HasForeignKey(i => i.ProductId);
+            e.HasMany(x => x.ProductTags).WithOne(pt => pt.Product)
+                .HasForeignKey(pt => pt.ProductId);
             e.HasOne(x => x.Category).WithMany()
                 .HasForeignKey(x => x.CategoryId);
+        });
+
+        modelBuilder.Entity<ProductTag>(e =>
+        {
+            e.ToTable("product_tags");
+            e.HasKey(x => new { x.ProductId, x.TagId });
+            e.Property(x => x.ProductId).HasColumnName("product_id");
+            e.Property(x => x.TagId).HasColumnName("tag_id");
+            e.HasOne(x => x.Tag).WithMany()
+                .HasForeignKey(x => x.TagId);
         });
 
         // ── Read-only: ProductVariant ─────────────────────────────────────

@@ -16,5 +16,6 @@ public class Product
 
     public virtual ICollection<ProductVariant> Variants { get; set; } = new List<ProductVariant>();
     public virtual ICollection<ProductImage> Images { get; set; } = new List<ProductImage>();
+    public virtual ICollection<ProductTag> ProductTags { get; set; } = new List<ProductTag>();
     public virtual Category? Category { get; set; }
 }
