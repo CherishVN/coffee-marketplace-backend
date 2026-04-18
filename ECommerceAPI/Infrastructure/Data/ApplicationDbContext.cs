@@ -50,6 +50,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<DisputeMessage> DisputeMessages { get; set; }
 
+    public virtual DbSet<DisputeOrderItem> DisputeOrderItems { get; set; }
+
     public virtual DbSet<FavoriteProduct> FavoriteProducts { get; set; }
 
     public virtual DbSet<Inventory> Inventories { get; set; }
@@ -563,8 +565,11 @@ public partial class ApplicationDbContext : DbContext
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
             entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
             entity.Property(e => e.SellerId).HasColumnName("seller_id");
             entity.Property(e => e.ShopId).HasColumnName("shop_id");
+
+            entity.HasIndex(e => e.ProductId, "idx_conversations_product");
 
             entity.HasOne(d => d.Buyer).WithMany(p => p.ConversationBuyers)
                 .HasForeignKey(d => d.BuyerId)
@@ -574,6 +579,11 @@ public partial class ApplicationDbContext : DbContext
                 .HasForeignKey(d => d.OrderId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("conversations_order_id_fkey");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.Conversations)
+                .HasForeignKey(d => d.ProductId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("conversations_product_id_fkey");
 
             entity.HasOne(d => d.Seller).WithMany(p => p.ConversationSellers)
                 .HasForeignKey(d => d.SellerId)
@@ -734,6 +744,44 @@ public partial class ApplicationDbContext : DbContext
                 .HasForeignKey(d => d.SenderId)
                 .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("dispute_messages_sender_id_fkey");
+        });
+
+        modelBuilder.Entity<DisputeOrderItem>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("dispute_order_items_pkey");
+
+            entity.ToTable("dispute_order_items");
+
+            entity.HasIndex(e => e.DisputeId, "idx_dispute_order_items_dispute");
+            entity.HasIndex(e => e.OrderItemId, "idx_dispute_order_items_order_item");
+            entity.HasIndex(e => new { e.DisputeId, e.OrderItemId }, "uq_dispute_order_items_dispute_line")
+                .IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.DisputeId).HasColumnName("dispute_id");
+            entity.Property(e => e.OrderItemId).HasColumnName("order_item_id");
+            entity.Property(e => e.Quantity).HasColumnName("quantity");
+            entity.Property(e => e.UnitPriceSnapshot)
+                .HasPrecision(12, 2)
+                .HasColumnName("unit_price_snapshot");
+            entity.Property(e => e.LineSnapshotTotal)
+                .HasPrecision(12, 2)
+                .HasColumnName("line_snapshot_total");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Dispute).WithMany(p => p.DisputeOrderItems)
+                .HasForeignKey(d => d.DisputeId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("dispute_order_items_dispute_id_fkey");
+
+            entity.HasOne(d => d.OrderItem).WithMany(p => p.DisputeOrderItems)
+                .HasForeignKey(d => d.OrderItemId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("dispute_order_items_order_item_id_fkey");
         });
 
         modelBuilder.Entity<FavoriteProduct>(entity =>

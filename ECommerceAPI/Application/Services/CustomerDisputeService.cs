@@ -45,6 +45,7 @@ public class CustomerDisputeService : ICustomerDisputeService
     public async Task<CustomerDisputeResponseDto> CreateDisputeAsync(Guid customerId, CreateDisputeDto dto)
     {
         var order = await _context.Orders
+            .Include(o => o.OrderItems)
             .Include(o => o.Shop)
             .FirstOrDefaultAsync(o => o.Id == dto.OrderId && o.CustomerId == customerId);
 
@@ -72,7 +73,7 @@ public class CustomerDisputeService : ICustomerDisputeService
             return Fail($"Đã quá thời hạn khiếu nại ({DisputeWindowDays} ngày kể từ khi đơn được giao/hoàn thành)");
         }
 
-        // BR: One dispute per order
+        // BR: Một đơn — một khiếu nại (đang mở)
         var existingDispute = await _context.Disputes
             .AnyAsync(d => d.OrderId == dto.OrderId);
 
@@ -81,15 +82,47 @@ public class CustomerDisputeService : ICustomerDisputeService
             return Fail("Đơn hàng này đã có khiếu nại");
         }
 
-        // BR: Không được yêu cầu hoàn vượt tổng giá trị đơn hàng
+        if (dto.Items == null || dto.Items.Count == 0)
+        {
+            return Fail("Vui lòng chọn ít nhất một sản phẩm và số lượng bị khiếu nại.");
+        }
+
+        var itemById = order.OrderItems.ToDictionary(i => i.Id);
+        var seen = new HashSet<Guid>();
+        decimal sumAffectedGoods = 0;
+
+        foreach (var line in dto.Items)
+        {
+            if (!seen.Add(line.OrderItemId))
+                return Fail("Không được chọn trùng một dòng sản phẩm. Gộp số lượng vào một dòng.");
+
+            if (!itemById.TryGetValue(line.OrderItemId, out var oi))
+                return Fail("Có sản phẩm không thuộc đơn hàng này.");
+
+            if (line.Quantity < 1 || line.Quantity > oi.Quantity)
+            {
+                return Fail(
+                    $"Số lượng khiếu nại không hợp lệ cho «{oi.ProductName}» (tối đa {oi.Quantity} theo đơn).");
+            }
+
+            sumAffectedGoods += oi.UnitPrice * line.Quantity;
+        }
+
+        // BR: Số tiền yêu cầu không vượt tổng đơn; với phần hàng đã chọn — không vượt giá trị phần đó
         if (dto.RequestedAmount > order.Total)
         {
             return Fail($"Số tiền yêu cầu không được vượt quá tổng giá trị đơn hàng ({order.Total:N0} VND).");
         }
 
+        if (dto.RequestedAmount > sumAffectedGoods)
+        {
+            return Fail(
+                $"Số tiền yêu cầu không được vượt quá giá trị các sản phẩm đã chọn ({sumAffectedGoods:N0} VND).");
+        }
+
         if (dto.Type == (short)DisputeType.Refund && dto.RequestedAmount <= 0)
         {
-            return Fail("Với loại «Hoàn tiền», vui lòng nhập số tiền hoàn lớn hơn 0 (tối đa bằng tổng giá trị đơn hàng).");
+            return Fail("Với loại «Hoàn tiền», vui lòng nhập số tiền hoàn lớn hơn 0.");
         }
 
         var evidenceJson = dto.EvidenceUrls != null && dto.EvidenceUrls.Count > 0
@@ -113,6 +146,23 @@ public class CustomerDisputeService : ICustomerDisputeService
         };
 
         _context.Disputes.Add(dispute);
+
+        foreach (var line in dto.Items)
+        {
+            var oi = itemById[line.OrderItemId];
+            var lineSnap = oi.UnitPrice * line.Quantity;
+            _context.DisputeOrderItems.Add(new DisputeOrderItem
+            {
+                Id = Guid.NewGuid(),
+                DisputeId = dispute.Id,
+                OrderItemId = oi.Id,
+                Quantity = line.Quantity,
+                UnitPriceSnapshot = oi.UnitPrice,
+                LineSnapshotTotal = lineSnap,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
         await _context.SaveChangesAsync();
 
         var orderRef = NotificationFormatting.ShortEntityId(order.Id);
@@ -125,11 +175,26 @@ public class CustomerDisputeService : ICustomerDisputeService
             dispute.Id,
             queueEmail: true);
 
+        await _notifications.PublishToUsersWithRoleAsync(
+            "admin",
+            nameof(NotificationType.Dispute),
+            "Khiếu nại mới cần xử lý",
+            $"Cửa hàng «{order.Shop.Name}»: khách tạo khiếu nại cho đơn #{orderRef} — {dto.Title}.",
+            "Dispute",
+            dispute.Id,
+            queueEmail: false);
+
+        var created = await _context.Disputes
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
+            .Include(d => d.Shop)
+            .FirstAsync(d => d.Id == dispute.Id);
+
         return new CustomerDisputeResponseDto
         {
             Success = true,
-            Message = "Tạo khiếu nại thành công. Trạng thái: Pending Validation",
-            Dispute = MapToDto(dispute, order.Shop.Name)
+            Message = "Tạo khiếu nại thành công.",
+            Dispute = MapToDto(created, created.Shop.Name)
         };
     }
 
@@ -137,6 +202,8 @@ public class CustomerDisputeService : ICustomerDisputeService
     {
         var dispute = await _context.Disputes
             .Include(d => d.Shop)
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
             .FirstOrDefaultAsync(d => d.Id == disputeId && d.CustomerId == customerId);
 
         if (dispute == null)
@@ -163,6 +230,19 @@ public class CustomerDisputeService : ICustomerDisputeService
 
         await _context.SaveChangesAsync();
 
+        var ordRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+        if (wasWaitingCustomer)
+        {
+            await _notifications.PublishToUsersWithRoleAsync(
+                "admin",
+                nameof(NotificationType.Dispute),
+                "Khách đã bổ sung thông tin khiếu nại",
+                $"Đơn #{ordRef} — «{dispute.Title}»: khách đã gửi phản hồi hoặc bằng chứng bổ sung.",
+                "Dispute",
+                dispute.Id,
+                queueEmail: false);
+        }
+
         return new CustomerDisputeResponseDto
         {
             Success = true,
@@ -187,6 +267,8 @@ public class CustomerDisputeService : ICustomerDisputeService
         var totalCount = await query.CountAsync();
 
         var disputes = await query
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
             .OrderByDescending(d => d.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -206,6 +288,8 @@ public class CustomerDisputeService : ICustomerDisputeService
     {
         var dispute = await _context.Disputes
             .Include(d => d.Shop)
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
             .FirstOrDefaultAsync(d => d.Id == disputeId && d.CustomerId == customerId);
 
         if (dispute == null)
@@ -224,6 +308,8 @@ public class CustomerDisputeService : ICustomerDisputeService
     {
         var dispute = await _context.Disputes
             .Include(d => d.Shop)
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
             .FirstOrDefaultAsync(d => d.Id == disputeId && d.CustomerId == customerId);
 
         if (dispute == null)
@@ -251,6 +337,15 @@ public class CustomerDisputeService : ICustomerDisputeService
             "Dispute",
             dispute.Id,
             queueEmail: true);
+
+        await _notifications.PublishToUsersWithRoleAsync(
+            "admin",
+            nameof(NotificationType.Dispute),
+            "Khách hủy khiếu nại",
+            $"Đơn #{ordRef}: khách đã hủy khiếu nại «{dispute.Title}».",
+            "Dispute",
+            dispute.Id,
+            queueEmail: false);
 
         return new CustomerDisputeResponseDto
         {
@@ -286,8 +381,28 @@ public class CustomerDisputeService : ICustomerDisputeService
             CreatedAt = dispute.CreatedAt,
             UpdatedAt = dispute.UpdatedAt,
             CanUpdateEvidence = !isFinal,
-            CustomerNote = dispute.CustomerNote
+            CustomerNote = dispute.CustomerNote,
+            AdminNote = string.IsNullOrWhiteSpace(dispute.AdminNote) ? null : dispute.AdminNote.Trim(),
+            AffectedItems = MapAffectedItems(dispute)
         };
+    }
+
+    private static List<DisputeAffectedItemDto> MapAffectedItems(Dispute dispute)
+    {
+        if (dispute.DisputeOrderItems == null || dispute.DisputeOrderItems.Count == 0)
+            return new List<DisputeAffectedItemDto>();
+
+        return dispute.DisputeOrderItems
+            .OrderBy(x => x.OrderItem?.ProductName)
+            .Select(r => new DisputeAffectedItemDto
+            {
+                OrderItemId = r.OrderItemId,
+                ProductName = r.OrderItem?.ProductName ?? "",
+                Quantity = r.Quantity,
+                UnitPrice = r.UnitPriceSnapshot,
+                LineTotal = r.LineSnapshotTotal
+            })
+            .ToList();
     }
 
     private static List<string> TryDeserializeUrls(string? json)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
+using ECommerceAPI.Application.DTOs.Disputes;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Infrastructure.Data;
@@ -77,6 +78,7 @@ public class DisputeAdminService : IDisputeAdminService
                 {
                     Id = d.Id,
                     OrderId = d.OrderId,
+                    OrderTotal = d.Order.Total,
                     CustomerId = d.CustomerId,
                     CustomerName = d.Customer.FullName ?? "N/A",
                     ShopId = d.ShopId,
@@ -131,7 +133,9 @@ public class DisputeAdminService : IDisputeAdminService
                 .Where(d => d.Id == disputeId)
                 .Select(d => new
                 {
-                    d.Id, d.OrderId, d.CustomerId,
+                    d.Id, d.OrderId,
+                    OrderTotal = d.Order.Total,
+                    d.CustomerId,
                     CustomerName = d.Customer.FullName ?? "N/A",
                     d.ShopId,
                     ShopName = d.Shop.Name,
@@ -154,6 +158,7 @@ public class DisputeAdminService : IDisputeAdminService
             {
                 Id = raw.Id,
                 OrderId = raw.OrderId,
+                OrderTotal = raw.OrderTotal,
                 CustomerId = raw.CustomerId,
                 CustomerName = raw.CustomerName,
                 ShopId = raw.ShopId,
@@ -178,6 +183,24 @@ public class DisputeAdminService : IDisputeAdminService
                 SellerEvidenceUrls = TryDeserializeUrls(raw.SellerEvidenceUrls),
                 CustomerNote = raw.CustomerNote,
             };
+
+            var lineRows = await _context.DisputeOrderItems
+                .AsNoTracking()
+                .Where(x => x.DisputeId == disputeId)
+                .Include(x => x.OrderItem)
+                .ToListAsync();
+
+            dispute.AffectedItems = lineRows
+                .Select(r => new DisputeAffectedItemDto
+                {
+                    OrderItemId = r.OrderItemId,
+                    ProductName = r.OrderItem?.ProductName ?? "",
+                    Quantity = r.Quantity,
+                    UnitPrice = r.UnitPriceSnapshot,
+                    LineTotal = r.LineSnapshotTotal
+                })
+                .OrderBy(x => x.ProductName)
+                .ToList();
 
             return new DisputeResponseDto { Success = true, Dispute = dispute };
         }
@@ -216,6 +239,7 @@ public class DisputeAdminService : IDisputeAdminService
             var dispute = await _context.Disputes
                 .Include(d => d.Order)
                 .Include(d => d.Shop)
+                .Include(d => d.DisputeOrderItems)
                 .FirstOrDefaultAsync(d => d.Id == disputeId);
 
             if (dispute == null)
@@ -237,7 +261,30 @@ public class DisputeAdminService : IDisputeAdminService
                 };
             }
 
-            var approvedAmount = dto.ApprovedAmount ?? dispute.RequestedAmount;
+            var lineSum = dispute.DisputeOrderItems.Sum(x => x.LineSnapshotTotal);
+
+            // Trần hoàn: theo yêu cầu / tổng đơn; nếu có dòng hàng khiếu nại thì không vượt quá giá trị phần hàng đó.
+            var refundCeiling = dispute.RequestedAmount > 0
+                ? dispute.RequestedAmount
+                : dispute.Order.Total;
+
+            if (lineSum > 0)
+                refundCeiling = Math.Min(refundCeiling, lineSum);
+
+            decimal approvedAmount;
+            if (dto.ApprovedAmount.HasValue)
+                approvedAmount = dto.ApprovedAmount.Value;
+            else if (dispute.RequestedAmount > 0)
+                approvedAmount = dispute.RequestedAmount;
+            else
+            {
+                return new DisputeResponseDto
+                {
+                    Success = false,
+                    Message = "Vui lòng nhập số tiền hoàn (khiếu nại không có số tiền yêu cầu cụ thể)."
+                };
+            }
+
             if (approvedAmount < 0)
             {
                 return new DisputeResponseDto
@@ -247,12 +294,14 @@ public class DisputeAdminService : IDisputeAdminService
                 };
             }
 
-            if (approvedAmount > dispute.RequestedAmount)
+            if (approvedAmount > refundCeiling)
             {
                 return new DisputeResponseDto
                 {
                     Success = false,
-                    Message = "Số tiền duyệt không được vượt quá số tiền khách yêu cầu"
+                    Message = dispute.RequestedAmount > 0
+                        ? "Số tiền duyệt không được vượt quá số tiền khách yêu cầu"
+                        : $"Số tiền duyệt không được vượt quá tổng đơn hàng ({dispute.Order.Total:N0} VND)."
                 };
             }
 

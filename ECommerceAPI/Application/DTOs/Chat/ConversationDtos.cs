@@ -6,6 +6,9 @@ public class StartConversationDto
 {
     public Guid ShopId { get; set; }
     public Guid? OrderId { get; set; }
+
+    public Guid? ProductId { get; set; }
+
     public string? FirstMessage { get; set; }
 }
 
@@ -16,6 +19,15 @@ public class SendMessageDto
 }
 
 // ─── Response DTOs ──────────────────────────────────────────────────────────
+
+public class ChatProductContextDto
+{
+    public Guid ProductId { get; set; }
+    public string Slug { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? ImageUrl { get; set; }
+    public decimal Price { get; set; }
+}
 
 public class ConversationDto
 {
@@ -28,6 +40,9 @@ public class ConversationDto
     public string? BuyerAvatarUrl { get; set; }
     public Guid SellerId { get; set; }
     public Guid? OrderId { get; set; }
+
+    public ChatProductContextDto? ProductContext { get; set; }
+
     public MessageDto? LastMessage { get; set; }
     public int UnreadCount { get; set; }
     public DateTime CreatedAt { get; set; }

@@ -209,6 +209,8 @@ public class PaymentService : IPaymentService
                 .ThenInclude(o => o.OrderItems)
             .Include(p => p.Order)
                 .ThenInclude(o => o.Customer)
+            .Include(p => p.Order)
+                .ThenInclude(o => o.Shop)
             .FirstOrDefaultAsync(p => p.Id == paymentId);
 
         if (payment == null)
@@ -287,6 +289,15 @@ public class PaymentService : IPaymentService
                 "Order",
                 order.Id,
                 queueEmail: true);
+
+            await _notifications.PublishAsync(
+                order.Shop.OwnerId,
+                nameof(NotificationType.Order),
+                "Đơn hàng mới",
+                $"Đơn #{oid} vừa thanh toán thành công — vui lòng xử lý trong mục Đơn hàng.",
+                "Order",
+                order.Id,
+                queueEmail: false);
 
             if (settlement is { NetAmount: > 0 })
             {
@@ -586,6 +597,8 @@ public class PaymentService : IPaymentService
         var payment = await _context.Payments
             .Include(p => p.Order)
                 .ThenInclude(o => o.OrderItems)
+            .Include(p => p.Order)
+                .ThenInclude(o => o.Shop)
             .FirstOrDefaultAsync(p => p.Id == paymentId);
 
         if (payment == null)
@@ -675,6 +688,15 @@ public class PaymentService : IPaymentService
                 "Order",
                 order.Id,
                 queueEmail: true);
+
+            await _notifications.PublishAsync(
+                order.Shop.OwnerId,
+                nameof(NotificationType.Order),
+                "Đơn hàng mới",
+                $"Đơn #{momoOk} vừa thanh toán thành công — vui lòng xử lý trong mục Đơn hàng.",
+                "Order",
+                order.Id,
+                queueEmail: false);
 
             if (momoSettlement is { NetAmount: > 0 })
             {

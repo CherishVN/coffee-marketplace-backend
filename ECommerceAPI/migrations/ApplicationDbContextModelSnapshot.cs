@@ -678,6 +678,10 @@ namespace ECommerceAPI.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("order_id");
 
+                    b.Property<Guid?>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
                     b.Property<Guid>("SellerId")
                         .HasColumnType("uuid")
                         .HasColumnName("seller_id");
@@ -692,6 +696,8 @@ namespace ECommerceAPI.Migrations
                     b.HasIndex("OrderId");
 
                     b.HasIndex("ShopId");
+
+                    b.HasIndex(new[] { "ProductId" }, "idx_conversations_product");
 
                     b.HasIndex(new[] { "BuyerId", "SellerId", "ShopId" }, "conversations_buyer_id_seller_id_shop_id_key")
                         .IsUnique();
@@ -3028,6 +3034,12 @@ namespace ECommerceAPI.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("conversations_order_id_fkey");
 
+                    b.HasOne("ECommerceAPI.Domain.Entities.Product", "Product")
+                        .WithMany("Conversations")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("conversations_product_id_fkey");
+
                     b.HasOne("ECommerceAPI.Domain.Entities.User", "Seller")
                         .WithMany("ConversationSellers")
                         .HasForeignKey("SellerId")
@@ -3045,6 +3057,8 @@ namespace ECommerceAPI.Migrations
                     b.Navigation("Buyer");
 
                     b.Navigation("Order");
+
+                    b.Navigation("Product");
 
                     b.Navigation("Seller");
 
@@ -3774,6 +3788,8 @@ namespace ECommerceAPI.Migrations
                     b.Navigation("AiTagSuggestions");
 
                     b.Navigation("CartItems");
+
+                    b.Navigation("Conversations");
 
                     b.Navigation("FavoriteProducts");
 

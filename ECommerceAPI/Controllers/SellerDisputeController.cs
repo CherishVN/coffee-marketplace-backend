@@ -1,3 +1,4 @@
+using System;
 using ECommerceAPI.Application.DTOs.Disputes;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -52,7 +53,11 @@ public class SellerDisputeController : ControllerBase
         var result = await _sellerDisputeService.GetDisputeByIdAsync(userId.Value, disputeId);
 
         if (!result.Success)
+        {
+            if (string.Equals(result.Message, "Bạn chưa có shop", StringComparison.Ordinal))
+                return BadRequest(result);
             return NotFound(result);
+        }
 
         return Ok(result);
     }
