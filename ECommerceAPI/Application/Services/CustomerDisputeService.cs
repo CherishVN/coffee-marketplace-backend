@@ -84,12 +84,12 @@ public class CustomerDisputeService : ICustomerDisputeService
         // BR: Không được yêu cầu hoàn vượt tổng giá trị đơn hàng
         if (dto.RequestedAmount > order.Total)
         {
-            return Fail($"Số tiền yêu cầu không được vượt quá tổng đơn hàng ({order.Total:N0} VND).");
+            return Fail($"Số tiền yêu cầu không được vượt quá tổng giá trị đơn hàng ({order.Total:N0} VND).");
         }
 
         if (dto.Type == (short)DisputeType.Refund && dto.RequestedAmount <= 0)
         {
-            return Fail("Với loại «Hoàn tiền», vui lòng nhập số tiền hoàn lớn hơn 0 (tối đa bằng tổng đơn).");
+            return Fail("Với loại «Hoàn tiền», vui lòng nhập số tiền hoàn lớn hơn 0 (tối đa bằng tổng giá trị đơn hàng).");
         }
 
         var evidenceJson = dto.EvidenceUrls != null && dto.EvidenceUrls.Count > 0
