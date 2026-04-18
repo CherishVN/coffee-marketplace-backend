@@ -11,6 +11,7 @@ public class ProductStorefrontDto
     public Guid ShopId { get; set; }
     public string ShopName { get; set; } = string.Empty;
     public string ShopSlug { get; set; } = string.Empty;
+    public string? ShopLogoUrl { get; set; }
     public decimal BasePrice { get; set; }
     public string Currency { get; set; } = "VND";
     public long? CategoryId { get; set; }

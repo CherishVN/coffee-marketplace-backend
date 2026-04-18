@@ -37,7 +37,7 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.Shop)
                 .Include(p => p.Category)
                 .Include(p => p.ProductImages)
-                .Where(p => p.Status == (short)ProductStatus.Active)
+                .Where(p => p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1)
                 .AsQueryable();
 
             if (categoryId.HasValue)
@@ -54,6 +54,9 @@ public class ProductStorefrontService : IProductStorefrontService
 
                 query = query.Where(p =>
                     p.Name.ToLower().Contains(searchLower)
+                    || (p.Shop != null && (
+                        p.Shop.Name.ToLower().Contains(searchLower)
+                        || p.Shop.Slug.ToLower().Contains(searchLower)))
                     || (p.Category != null && (
                         p.Category.Name.ToLower().Contains(searchLower)
                         || p.Category.Slug.ToLower().Contains(searchLower)))
@@ -129,6 +132,7 @@ public class ProductStorefrontService : IProductStorefrontService
                     ShopId       = p.ShopId,
                     ShopName     = p.Shop.Name,
                     ShopSlug     = p.Shop.Slug,
+                    ShopLogoUrl  = p.Shop.LogoUrl,
                     BasePrice    = !p.ProductVariants.Any(v => v.IsActive)
                         ? p.BasePrice
                         : Math.Min(
@@ -180,16 +184,17 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.Inventories)
                 .Include(p => p.ProductTags).ThenInclude(pt => pt.Tag)
                 .Include(p => p.ProductMaterials).ThenInclude(pm => pm.Material)
-                .Where(p => p.Id == productId && p.Status == (short)ProductStatus.Active)
+                .Where(p => p.Id == productId && p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1)
                 .Select(p => new ProductStorefrontDetailDto
                 {
-                    Id           = p.Id,
+                    Id = p.Id,
                     Slug         = p.Slug,
                     Name         = p.Name,
                     Description  = p.Description,
                     ShopId       = p.ShopId,
                     ShopName     = p.Shop.Name,
                     ShopSlug     = p.Shop.Slug,
+                    ShopLogoUrl  = p.Shop.LogoUrl,
                     BasePrice    = p.BasePrice,
                     Currency     = p.Currency,
                     CategoryId   = p.CategoryId,
@@ -254,13 +259,13 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.Shop)
                 .Include(p => p.Category)
                 .Include(p => p.ProductImages)
-                .Where(p => p.Status == (short)ProductStatus.Active && p.SoldCount > 0)
+                .Where(p => p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1 && p.SoldCount > 0)
                 .OrderByDescending(p => p.SoldCount)
                 .Take(limit / 2)
                 .Select(p => new ProductStorefrontDto
                 {
                     Id = p.Id, Slug = p.Slug, Name = p.Name,
-                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug,
+                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug, ShopLogoUrl = p.Shop.LogoUrl,
                     BasePrice = !p.ProductVariants.Any(v => v.IsActive)
                         ? p.BasePrice
                         : Math.Min(
@@ -279,13 +284,13 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.Shop)
                 .Include(p => p.Category)
                 .Include(p => p.ProductImages)
-                .Where(p => p.Status == (short)ProductStatus.Active && trending.Select(t => t.Id).All(id => id != p.Id))
+                .Where(p => p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1 && trending.Select(t => t.Id).All(id => id != p.Id))
                 .OrderByDescending(p => p.CreatedAt)
                 .Take(limit - trending.Count)
                 .Select(p => new ProductStorefrontDto
                 {
                     Id = p.Id, Slug = p.Slug, Name = p.Name,
-                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug,
+                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug, ShopLogoUrl = p.Shop.LogoUrl,
                     BasePrice = !p.ProductVariants.Any(v => v.IsActive)
                         ? p.BasePrice
                         : Math.Min(
@@ -331,7 +336,7 @@ public class ProductStorefrontService : IProductStorefrontService
                 .Include(p => p.Inventories)
                 .Include(p => p.ProductTags).ThenInclude(pt => pt.Tag)
                 .Include(p => p.ProductMaterials).ThenInclude(pm => pm.Material)
-                .Where(p => p.Slug == slug && p.Status == (short)ProductStatus.Active)
+                .Where(p => p.Slug == slug && p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1)
                 .Select(p => new ProductStorefrontDetailDto
                 {
                     Id           = p.Id,
@@ -341,6 +346,7 @@ public class ProductStorefrontService : IProductStorefrontService
                     ShopId       = p.ShopId,
                     ShopName     = p.Shop.Name,
                     ShopSlug     = p.Shop.Slug,
+                    ShopLogoUrl  = p.Shop.LogoUrl,
                     BasePrice    = p.BasePrice,
                     Currency     = p.Currency,
                     CategoryId   = p.CategoryId,
