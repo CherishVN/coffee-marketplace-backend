@@ -46,15 +46,20 @@ public class ProductStorefrontService : IProductStorefrontService
                 query = query.Where(p => p.CategoryId.HasValue && allowedCategoryIds.Contains(p.CategoryId.Value));
             }
 
+            // Match name, category, or tags only — not description/fts (SEO text causes irrelevant hits, e.g. "túi" matching jackets).
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var searchTerm = search.Trim();
                 var searchLower = searchTerm.ToLower();
 
                 query = query.Where(p =>
-                    (p.SearchVector != null && p.SearchVector.Matches(EF.Functions.WebSearchToTsQuery("simple", searchTerm)))
-                    || p.Name.ToLower().Contains(searchLower)
-                    || (p.Description != null && p.Description.ToLower().Contains(searchLower)));
+                    p.Name.ToLower().Contains(searchLower)
+                    || (p.Category != null && (
+                        p.Category.Name.ToLower().Contains(searchLower)
+                        || p.Category.Slug.ToLower().Contains(searchLower)))
+                    || p.ProductTags.Any(pt =>
+                        pt.Tag.Name.ToLower().Contains(searchLower)
+                        || pt.Tag.Slug.ToLower().Contains(searchLower)));
             }
 
             // Giá trên danh sách = min(giá gốc, variant active); variant không Price thì dùng giá gốc.
