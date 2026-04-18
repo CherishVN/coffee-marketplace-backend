@@ -82,4 +82,15 @@ public class ShopController : ControllerBase
 
         return Ok(new { success = true, message = result.Message });
     }
+    [HttpGet("followed")]
+    [Authorize]
+    public async Task<IActionResult> GetFollowedShops()
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var shops = await _shopService.GetFollowedShopsAsync(userId.Value);
+        return Ok(new { success = true, shops });
+    }
 }

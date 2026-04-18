@@ -30,3 +30,13 @@ public class ShopCategoryDto
     public string? Slug { get; set; }
     public int ProductCount { get; set; }
 }
+
+public class ShopFollowedDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Slug { get; set; } = string.Empty;
+    public string? LogoUrl { get; set; }
+    public int FollowerCount { get; set; }
+    public double AverageRating { get; set; }
+}

@@ -9,4 +9,5 @@ public interface IShopStorefrontService
     Task<List<ShopCategoryDto>> GetShopCategoriesAsync(Guid shopId);
     Task<ServiceResponse> FollowShopAsync(Guid userId, Guid shopId);
     Task<ServiceResponse> UnfollowShopAsync(Guid userId, Guid shopId);
+    Task<List<ShopFollowedDto>> GetFollowedShopsAsync(Guid userId);
 }

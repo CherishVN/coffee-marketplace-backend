@@ -226,4 +226,30 @@ public class ShopStorefrontService : IShopStorefrontService
             return new ServiceResponse { Success = false, Message = "Có lỗi xảy ra" };
         }
     }
+    public async Task<List<ShopFollowedDto>> GetFollowedShopsAsync(Guid userId)
+    {
+        try
+        {
+            return await _context.ShopFollows
+                .Include(f => f.Shop)
+                .Where(f => f.UserId == userId && f.Shop.Status == 1 && f.Shop.VerificationStatus == 1)
+                .Select(f => new ShopFollowedDto
+                {
+                    Id = f.Shop.Id,
+                    Name = f.Shop.Name,
+                    Slug = f.Shop.Slug,
+                    LogoUrl = f.Shop.LogoUrl,
+                    FollowerCount = f.Shop.ShopFollows.Count,
+                    AverageRating = f.Shop.ShopReviews.Any()
+                        ? Math.Round(f.Shop.ShopReviews.Average(r => (double)r.Rating), 1)
+                        : 0
+                })
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching followed shops for user {UserId}", userId);
+            return new List<ShopFollowedDto>();
+        }
+    }
 }
