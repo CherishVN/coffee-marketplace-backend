@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ECommerceAI.Data;
 using ECommerceAI.Data.Entities;
+using ECommerceAI.Data.Entities.ReadOnly;
 using ECommerceAI.DTOs.Chat;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -140,6 +141,17 @@ public class AiChatService : IAiChatService
         {
             var maxPrice = ExtractMaxPrice(message);
             products = await SearchProductsAsync(parsed.SearchQuery, maxPrice);
+        }
+
+        // Khi LLM trả search_query kèm mức giá, token hóa có thể sai — thử lại từ khóa sạch từ câu user.
+        if (!products.Any() && !string.IsNullOrWhiteSpace(parsed.SearchQuery) && IsLikelyProductRequest(message))
+        {
+            var cleaned = ExtractProductKeyword(message);
+            if (!string.IsNullOrWhiteSpace(cleaned))
+            {
+                products = await SearchProductsAsync(cleaned, ExtractMaxPrice(message));
+                if (products.Any()) parsed.SearchQuery = cleaned;
+            }
         }
 
         // Fallback cho trường hợp LLM không trả search_query nhưng user đang hỏi sản phẩm.
@@ -457,6 +469,37 @@ public class AiChatService : IAiChatService
             .ToList();
     }
 
+    /// <summary>Giá hiển thị trong chat: thấp nhất giữa base và variant đang bán.</summary>
+    private static decimal GetMinCustomerFacingPrice(Product p)
+    {
+        var active = p.Variants?.Where(v => v.IsActive).ToList();
+        if (active == null || active.Count == 0)
+            return p.BasePrice;
+        var minV = active.Min(v => v.Price ?? p.BasePrice);
+        return Math.Min(p.BasePrice, minV);
+    }
+
+    /// <summary>Token dạng 300k, 1.5tr — không dùng để match tên sản phẩm.</summary>
+    private static bool IsPriceLikeToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return false;
+        var t = token.Trim().ToLowerInvariant();
+        if (t.Length < 2) return false;
+        if (long.TryParse(t, System.Globalization.NumberStyles.Integer, null, out _)) return true;
+
+        string[] suffixes = { "kđ", "nghìn", "ngàn", "triệu", "tr", "k", "đ" };
+        foreach (var suf in suffixes)
+        {
+            if (t.Length <= suf.Length || !t.EndsWith(suf, StringComparison.Ordinal)) continue;
+            var head = t[..^suf.Length].Replace(",", ".").Trim();
+            if (string.IsNullOrEmpty(head)) continue;
+            if (decimal.TryParse(head, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out _))
+                return true;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Trích xuất từ khóa sản phẩm từ message, bỏ qua số và từ liên quan đến giá.
     /// Ví dụ: "tôi muốn mua 1 áo thun dưới 180 nghìn" → "áo thun"
@@ -481,6 +524,7 @@ public class AiChatService : IAiChatService
             .Where(w =>
                 !stopWords.Contains(w) &&
                 w.Length > 1 &&
+                !IsPriceLikeToken(w) &&
                 !long.TryParse(w, out _) &&
                 !(w.Length == 4 && w.StartsWith("20"))) // lọc năm như 2024, 2025, 2026
             .ToArray();
@@ -556,7 +600,7 @@ public class AiChatService : IAiChatService
         {
             Id = p.Id,
             Name = p.Name,
-            BasePrice = p.BasePrice,
+            BasePrice = GetMinCustomerFacingPrice(p),
             ImageUrl = p.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.ImageUrl,
             CategoryName = p.Category?.Name,
             Variants = p.Variants.Select(v => new VariantSuggestionDto
@@ -575,7 +619,10 @@ public class AiChatService : IAiChatService
             "đẹp", "xinh", "hot", "trend", "trendy", "new", "mới", "cao", "cấp",
             "xịn", "siêu", "best", "top", "chất", "đỉnh", "sịn", "phiên", "bản",
             "mẫu", "này", "kia", "đó", "vài", "các", "cho", "tôi", "mình", "anh",
-            "chị", "em", "muốn", "cần", "mua", "tìm"
+            "chị", "em", "muốn", "cần", "mua", "tìm",
+            "dưới", "trên", "tầm", "khoảng", "quanh", "tối", "đa", "đến", "lên",
+            "max", "min", "under", "below", "above", "around",
+            "nghìn", "ngàn", "triệu", "trăm", "đồng", "vnđ", "vnd"
         };
 
         return query
@@ -583,6 +630,7 @@ public class AiChatService : IAiChatService
             .Split(new[] { ' ', ',', '.', '?', '!', ':', ';', '/', '\\', '-', '_', '(', ')', '[', ']', '"' }, StringSplitOptions.RemoveEmptyEntries)
             .Where(token => token.Length >= 2)
             .Where(token => !stopWords.Contains(token))
+            .Where(token => !IsPriceLikeToken(token))
             .Where(token => !long.TryParse(token, out _)) // loại năm/số như 2026
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();

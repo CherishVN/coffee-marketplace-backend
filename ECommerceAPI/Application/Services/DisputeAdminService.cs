@@ -237,9 +237,37 @@ public class DisputeAdminService : IDisputeAdminService
                 };
             }
 
+            var approvedAmount = dto.ApprovedAmount ?? dispute.RequestedAmount;
+            if (approvedAmount < 0)
+            {
+                return new DisputeResponseDto
+                {
+                    Success = false,
+                    Message = "Số tiền hoàn không được âm"
+                };
+            }
+
+            if (approvedAmount > dispute.RequestedAmount)
+            {
+                return new DisputeResponseDto
+                {
+                    Success = false,
+                    Message = "Số tiền duyệt không được vượt quá số tiền khách yêu cầu"
+                };
+            }
+
+            if (approvedAmount > dispute.Order.Total)
+            {
+                return new DisputeResponseDto
+                {
+                    Success = false,
+                    Message = $"Số tiền hoàn không được vượt quá tổng đơn hàng ({dispute.Order.Total:N0} VND)."
+                };
+            }
+
             // Update dispute
             dispute.Status = (short)DisputeStatus.Refunded;
-            dispute.ApprovedAmount = dto.ApprovedAmount ?? dispute.RequestedAmount;
+            dispute.ApprovedAmount = approvedAmount;
             dispute.Resolution = dto.Resolution;
             dispute.AdminNote = dto.AdminNote;
             dispute.ResolvedBy = adminId;
@@ -255,7 +283,6 @@ public class DisputeAdminService : IDisputeAdminService
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
 
-            var approvedAmount = dispute.ApprovedAmount ?? dispute.RequestedAmount;
             if (approvedAmount > 0)
             {
                 await _customerWallet.CreditRefundAsync(

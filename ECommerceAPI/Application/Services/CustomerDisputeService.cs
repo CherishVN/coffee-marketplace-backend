@@ -81,6 +81,17 @@ public class CustomerDisputeService : ICustomerDisputeService
             return Fail("Đơn hàng này đã có khiếu nại");
         }
 
+        // BR: Không được yêu cầu hoàn vượt tổng giá trị đơn hàng
+        if (dto.RequestedAmount > order.Total)
+        {
+            return Fail($"Số tiền yêu cầu không được vượt quá tổng đơn hàng ({order.Total:N0} VND).");
+        }
+
+        if (dto.Type == (short)DisputeType.Refund && dto.RequestedAmount <= 0)
+        {
+            return Fail("Với loại «Hoàn tiền», vui lòng nhập số tiền hoàn lớn hơn 0 (tối đa bằng tổng đơn).");
+        }
+
         var evidenceJson = dto.EvidenceUrls != null && dto.EvidenceUrls.Count > 0
             ? JsonSerializer.Serialize(dto.EvidenceUrls)
             : "[]";
