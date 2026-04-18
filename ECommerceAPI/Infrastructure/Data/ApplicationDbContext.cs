@@ -248,6 +248,7 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.SessionId).HasColumnName("session_id");
             entity.Property(e => e.Role).HasColumnName("role");
             entity.Property(e => e.Content).HasColumnName("content");
+            entity.Property(e => e.SuggestedProductsJson).HasColumnName("suggested_products_json");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");

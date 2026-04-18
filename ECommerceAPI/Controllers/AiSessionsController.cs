@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -114,17 +115,27 @@ public class AiSessionsController : ControllerBase
 
         if (session == null) return NotFound(new { success = false, message = "Không tìm thấy phiên chat" });
 
-        var messages = await _context.AiChatMessages
+        var rows = await _context.AiChatMessages
             .Where(m => m.SessionId == sessionId)
             .OrderBy(m => m.CreatedAt)
             .Select(m => new
             {
-                id        = m.Id.ToString(),
-                role      = m.Role,
-                content   = m.Content,
-                createdAt = m.CreatedAt,
+                m.Id,
+                m.Role,
+                m.Content,
+                m.CreatedAt,
+                m.SuggestedProductsJson,
             })
             .ToListAsync();
+
+        var messages = rows.Select(m => new
+        {
+            id = m.Id.ToString(),
+            role      = m.Role,
+            content   = m.Content,
+            createdAt = m.CreatedAt,
+            products  = ParseSuggestedProductsJson(m.SuggestedProductsJson),
+        }).ToList();
 
         return Ok(new { success = true, sessionId, messages });
     }
@@ -230,5 +241,35 @@ public class AiSessionsController : ControllerBase
 
         await _context.SaveChangesAsync();
         return Ok(new { success = true, sessionId });
+    }
+
+    private static readonly JsonSerializerOptions SuggestedProductJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    private static List<AiChatHistoryProductItem>? ParseSuggestedProductsJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<List<AiChatHistoryProductItem>>(json, SuggestedProductJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed class AiChatHistoryProductItem
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = "";
+        public decimal BasePrice { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? CategoryName { get; set; }
+        public string? Slug { get; set; }
+        public decimal? MatchScore { get; set; }
+        public string? MatchReason { get; set; }
     }
 }

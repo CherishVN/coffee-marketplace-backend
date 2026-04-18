@@ -61,6 +61,7 @@ public class AiDbContext : DbContext
             e.Property(x => x.SessionId).HasColumnName("session_id");
             e.Property(x => x.Role).HasColumnName("role");
             e.Property(x => x.Content).HasColumnName("content");
+            e.Property(x => x.SuggestedProductsJson).HasColumnName("suggested_products_json");
             e.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
         });
 
