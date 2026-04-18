@@ -12,8 +12,16 @@ public class DashboardStatsDto
     public CompletedOrderGmvStats CompletedOrderGmv { get; set; } = new();
     public DisputeStats Disputes { get; set; } = new();
     public PlatformFeeStats PlatformFees { get; set; } = new();
+    public List<DashboardTimeSeriesDto> DailyStats { get; set; } = new();
+    public List<DashboardTimeSeriesDto> MonthlyStats { get; set; } = new();
 }
 
+public class DashboardTimeSeriesDto
+{
+    public string DateLabel { get; set; } = string.Empty;
+    public decimal Revenue { get; set; }
+    public int Orders { get; set; }
+}
 public class UserStats
 {
     public int Total { get; set; }

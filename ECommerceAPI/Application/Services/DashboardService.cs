@@ -161,6 +161,55 @@ public class DashboardService : IDashboardService
                 })
                 .FirstOrDefaultAsync();
 
+            // 7) Time Series Data (30 Days and 6 Months)
+            var last30DaysStart = startOfToday.AddDays(-29);
+            
+            var orders30DaysData = await _context.Orders
+                .Where(o => o.CreatedAt >= last30DaysStart)
+                .GroupBy(o => o.CreatedAt.Date)
+                .Select(g => new { Date = g.Key, Count = g.Count() })
+                .ToListAsync();
+            var orders30Days = orders30DaysData.ToDictionary(x => x.Date.ToString("yyyy-MM-dd"), x => x.Count);
+
+            var fees30DaysData = await _context.PlatformFeeRecords
+                .Where(f => f.CreatedAt >= last30DaysStart && f.ReversedAt == null)
+                .GroupBy(f => f.CreatedAt.Date)
+                .Select(g => new { Date = g.Key, Total = g.Sum(x => x.FeeAmount) })
+                .ToListAsync();
+            var fees30Days = fees30DaysData.ToDictionary(x => x.Date.ToString("yyyy-MM-dd"), x => x.Total);
+                
+            var dailyStats30Days = Enumerable.Range(0, 30).Select(i => {
+                var dStr = last30DaysStart.AddDays(i).ToString("yyyy-MM-dd");
+                return new DashboardTimeSeriesDto {
+                    DateLabel = dStr,
+                    Revenue = fees30Days.GetValueOrDefault(dStr, 0m),
+                    Orders = orders30Days.GetValueOrDefault(dStr, 0)
+                };
+            }).ToList();
+
+            var last6MonthsStart = startOfMonth.AddMonths(-5);
+            
+            var orders6Months = await _context.Orders
+                .Where(o => o.CreatedAt >= last6MonthsStart)
+                .GroupBy(o => new { o.CreatedAt.Year, o.CreatedAt.Month })
+                .Select(g => new { g.Key.Year, g.Key.Month, Count = g.Count() })
+                .ToListAsync();
+
+            var fees6Months = await _context.PlatformFeeRecords
+                .Where(f => f.CreatedAt >= last6MonthsStart && f.ReversedAt == null)
+                .GroupBy(f => new { f.CreatedAt.Year, f.CreatedAt.Month })
+                .Select(g => new { g.Key.Year, g.Key.Month, Total = g.Sum(x => x.FeeAmount) })
+                .ToListAsync();
+                
+            var monthlyStats6Months = Enumerable.Range(0, 6).Select(i => {
+                var d = last6MonthsStart.AddMonths(i);
+                return new DashboardTimeSeriesDto {
+                    DateLabel = d.ToString("yyyy-MM"),
+                    Revenue = fees6Months.FirstOrDefault(x => x.Year == d.Year && x.Month == d.Month)?.Total ?? 0m,
+                    Orders = orders6Months.FirstOrDefault(x => x.Year == d.Year && x.Month == d.Month)?.Count ?? 0
+                };
+            }).ToList();
+
             var stats = new DashboardStatsDto
             {
                 Users = new UserStats
@@ -233,7 +282,9 @@ public class DashboardService : IDashboardService
                     ThisMonthFees = platformFeeStats?.ThisMonth ?? 0m,
                     LastMonthFees = platformFeeStats?.LastMonth ?? 0m,
                     SettledOrdersCount = platformFeeStats?.Count ?? 0
-                }
+                },
+                DailyStats = dailyStats30Days,
+                MonthlyStats = monthlyStats6Months
             };
 
             return new DashboardResponseDto
