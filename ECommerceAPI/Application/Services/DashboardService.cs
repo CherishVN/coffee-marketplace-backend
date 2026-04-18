@@ -102,29 +102,29 @@ public class DashboardService : IDashboardService
                 })
                 .FirstOrDefaultAsync();
 
-            // 5) Revenue Stats — single query
-            var revenueStats = await _context.Orders
+            // 5) GMV - completed orders (order totals; platform income is platform fees)
+            var completedOrderGmvStats = await _context.Orders
                 .Where(o => o.Status == (short)OrderStatus.Completed)
                 .GroupBy(_ => 1)
                 .Select(g => new
                 {
-                    TotalRevenue = g.Sum(o => (decimal?)o.Total) ?? 0m,
-                    TodayRevenue = g.Where(o => o.CreatedAt >= startOfToday).Sum(o => (decimal?)o.Total) ?? 0m,
-                    ThisMonthRevenue = g.Where(o => o.CreatedAt >= startOfMonth).Sum(o => (decimal?)o.Total) ?? 0m,
-                    LastMonthRevenue = g.Where(o => o.CreatedAt >= lastMonthStart && o.CreatedAt < startOfMonth).Sum(o => (decimal?)o.Total) ?? 0m,
+                    TotalGmv = g.Sum(o => (decimal?)o.Total) ?? 0m,
+                    TodayGmv = g.Where(o => o.CreatedAt >= startOfToday).Sum(o => (decimal?)o.Total) ?? 0m,
+                    ThisMonthGmv = g.Where(o => o.CreatedAt >= startOfMonth).Sum(o => (decimal?)o.Total) ?? 0m,
+                    LastMonthGmv = g.Where(o => o.CreatedAt >= lastMonthStart && o.CreatedAt < startOfMonth).Sum(o => (decimal?)o.Total) ?? 0m,
                 })
                 .FirstOrDefaultAsync();
 
-            var totalRevenue = revenueStats?.TotalRevenue ?? 0m;
-            var todayRevenue = revenueStats?.TodayRevenue ?? 0m;
-            var thisMonthRevenue = revenueStats?.ThisMonthRevenue ?? 0m;
-            var lastMonthRevenue = revenueStats?.LastMonthRevenue ?? 0m;
+            var totalGmv = completedOrderGmvStats?.TotalGmv ?? 0m;
+            var todayGmv = completedOrderGmvStats?.TodayGmv ?? 0m;
+            var thisMonthGmv = completedOrderGmvStats?.ThisMonthGmv ?? 0m;
+            var lastMonthGmv = completedOrderGmvStats?.LastMonthGmv ?? 0m;
 
-            var growthPercentage = lastMonthRevenue > 0
-                ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
+            var gmvGrowthPercentage = lastMonthGmv > 0
+                ? ((thisMonthGmv - lastMonthGmv) / lastMonthGmv) * 100
                 : 0m;
 
-            // 5b) Platform fee (phí sàn) — từ bảng platform_fee_records
+            // 5b) Platform fee records (accumulated, ReversedAt null)
             var platformFeeStats = await _context.PlatformFeeRecords
                 .AsNoTracking()
                 .Where(r => r.ReversedAt == null)
@@ -138,6 +138,15 @@ public class DashboardService : IDashboardService
                     Count = g.Count()
                 })
                 .FirstOrDefaultAsync();
+
+            var totalFees = platformFeeStats?.Total ?? 0m;
+            var todayFees = platformFeeStats?.Today ?? 0m;
+            var thisMonthFees = platformFeeStats?.ThisMonth ?? 0m;
+            var lastMonthFees = platformFeeStats?.LastMonth ?? 0m;
+
+            var feeGrowthPercentage = lastMonthFees > 0
+                ? ((thisMonthFees - lastMonthFees) / lastMonthFees) * 100
+                : 0m;
 
             // 6) Dispute Stats — single query
             var disputeStats = await _context.Disputes
@@ -195,11 +204,19 @@ public class DashboardService : IDashboardService
                 },
                 Revenue = new RevenueStats
                 {
-                    TotalRevenue = totalRevenue,
-                    TodayRevenue = todayRevenue,
-                    ThisMonthRevenue = thisMonthRevenue,
-                    LastMonthRevenue = lastMonthRevenue,
-                    GrowthPercentage = growthPercentage
+                    TotalRevenue = totalFees,
+                    TodayRevenue = todayFees,
+                    ThisMonthRevenue = thisMonthFees,
+                    LastMonthRevenue = lastMonthFees,
+                    GrowthPercentage = feeGrowthPercentage
+                },
+                CompletedOrderGmv = new CompletedOrderGmvStats
+                {
+                    TotalGmv = totalGmv,
+                    TodayGmv = todayGmv,
+                    ThisMonthGmv = thisMonthGmv,
+                    LastMonthGmv = lastMonthGmv,
+                    GrowthPercentage = gmvGrowthPercentage
                 },
                 Disputes = new DisputeStats
                 {
