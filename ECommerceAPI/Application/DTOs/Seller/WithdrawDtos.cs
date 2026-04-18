@@ -35,7 +35,10 @@ public class WalletDto
     public decimal HeldBalance { get; set; }
     /// <summary>Tiền đang chờ duyệt rút (yêu cầu rút).</summary>
     public decimal PendingBalance { get; set; }
+    /// <summary>Gross credits to wallet (sum of positive ledger), before refunds.</summary>
     public decimal TotalEarnings { get; set; }
+    /// <summary>Net after order refunds: gross credits minus refunds (min 0).</summary>
+    public decimal NetEarningsAfterRefunds { get; set; }
     /// <summary>Tổng đã rút (ledger withdrawal, sau khi admin duyệt).</summary>
     public decimal TotalWithdrawn { get; set; }
     /// <summary>Tổng đã hoàn tác do hủy/hoàn đơn (ledger order_refund).</summary>
