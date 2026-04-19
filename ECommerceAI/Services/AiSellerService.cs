@@ -174,6 +174,66 @@ public class AiSellerService : IAiSellerService
         return new CandidateSet(catById, promptCats, promptTags, promptMats);
     }
 
+    /// <summary>Ngữ cảnh từ lịch sử tag (accepted/modified) — dùng chung cho suggest-tags và analyze-*.</summary>
+    private async Task<string> BuildSellerTagHistoryHintAsync(Guid sellerId)
+    {
+        var recentChosen = await _context.AiTagSuggestions
+            .AsNoTracking()
+            .Where(s => s.SellerId == sellerId && (s.Action == "accepted" || s.Action == "modified"))
+            .OrderByDescending(s => s.CreatedAt)
+            .Take(5)
+            .ToListAsync();
+
+        if (!recentChosen.Any())
+            return string.Empty;
+
+        var frequentTags = recentChosen
+            .SelectMany(s =>
+            {
+                try { return JsonSerializer.Deserialize<List<string>>(s.ChosenTags.RootElement.GetRawText()) ?? new(); }
+                catch { return new List<string>(); }
+            })
+            .GroupBy(t => t)
+            .OrderByDescending(g => g.Count())
+            .Take(10)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (frequentTags.Count == 0)
+            return string.Empty;
+
+        return $"\nSeller này thường chọn các tags: {string.Join(", ", frequentTags)}. Ưu tiên gợi ý các tags tương tự nếu phù hợp.";
+    }
+
+    /// <summary>Ngữ cảnh từ lịch sử chất liệu — map id → tên từ catalog đang đưa vào prompt.</summary>
+    private async Task<string> BuildSellerMaterialHistoryHintAsync(Guid sellerId, IReadOnlyDictionary<Guid, string> materialNameById)
+    {
+        var recentChosen = await _context.AiMaterialSuggestions
+            .AsNoTracking()
+            .Where(s => s.SellerId == sellerId && (s.Action == "accepted" || s.Action == "modified")
+                        && s.ChosenMaterialIds != null && s.ChosenMaterialIds.Length > 0)
+            .OrderByDescending(s => s.CreatedAt)
+            .Take(5)
+            .ToListAsync();
+
+        if (!recentChosen.Any())
+            return string.Empty;
+
+        var frequentNames = recentChosen
+            .SelectMany(s => s.ChosenMaterialIds!)
+            .GroupBy(id => id)
+            .OrderByDescending(g => g.Count())
+            .Take(5)
+            .Select(g => materialNameById.TryGetValue(g.Key, out var name) ? name : null)
+            .OfType<string>()
+            .ToList();
+
+        if (frequentNames.Count == 0)
+            return string.Empty;
+
+        return $"\nSeller này thường chọn các chất liệu: {string.Join(", ", frequentNames)}. Ưu tiên gợi ý các chất liệu tương tự nếu phù hợp.";
+    }
+
     // ── Gợi ý Category ─────────────────────────────────────────────────────────────
     public async Task<SuggestCategoryResponseDto> SuggestCategoryAsync(SuggestCategoryRequestDto request, Guid sellerId)
     {
@@ -241,29 +301,7 @@ public class AiSellerService : IAiSellerService
     {
         var tags = await _context.Tags.OrderBy(t => t.Name).ToListAsync();
         var tagList = string.Join(", ", tags.Select(t => $"{t.Name}(ID:{t.Id})"));
-
-        // Lịch sử lựa chọn của seller để AI học theo thói quen
-        var recentChosen = await _context.AiTagSuggestions
-            .Where(s => s.SellerId == sellerId && (s.Action == "accepted" || s.Action == "modified"))
-            .OrderByDescending(s => s.CreatedAt)
-            .Take(5)
-            .ToListAsync();
-
-        var historyHint = string.Empty;
-        if (recentChosen.Any())
-        {
-            var allChosen = recentChosen
-                .SelectMany(s =>
-                {
-                    try { return JsonSerializer.Deserialize<List<string>>(s.ChosenTags.RootElement.GetRawText()) ?? new(); }
-                    catch { return new List<string>(); }
-                })
-                .GroupBy(t => t)
-                .OrderByDescending(g => g.Count())
-                .Take(10)
-                .Select(g => g.Key);
-            historyHint = $"\nSeller này thường chọn các tags: {string.Join(", ", allChosen)}. Ưu tiên gợi ý các tags tương tự nếu phù hợp.";
-        }
+        var historyHint = await BuildSellerTagHistoryHintAsync(sellerId);
 
         var tagJsonExample = """{"suggestions":[{"tagId":1,"tagName":"Tên tag","confidenceScore":0.95}]}""";
         var userMessage = $"""
@@ -600,28 +638,8 @@ public class AiSellerService : IAiSellerService
             .ToListAsync();
 
         var materialList = string.Join(", ", materials.Select(m => $"{m.Name}(ID:{m.Id})"));
-
-        // Lịch sử lựa chọn của seller để AI học theo thói quen
-        var recentChosen = await _context.AiMaterialSuggestions
-            .Where(s => s.SellerId == sellerId && (s.Action == "accepted" || s.Action == "modified")
-                        && s.ChosenMaterialIds != null && s.ChosenMaterialIds.Length > 0)
-            .OrderByDescending(s => s.CreatedAt)
-            .Take(5)
-            .ToListAsync();
-
-        var historyHint = string.Empty;
-        if (recentChosen.Any())
-        {
-            var materialById = materials.ToDictionary(m => m.Id, m => m.Name);
-            var frequentIds = recentChosen
-                .SelectMany(s => s.ChosenMaterialIds!)
-                .GroupBy(id => id)
-                .OrderByDescending(g => g.Count())
-                .Take(5)
-                .Select(g => materialById.TryGetValue(g.Key, out var name) ? name : null)
-                .OfType<string>();
-            historyHint = $"\nSeller này thường chọn các chất liệu: {string.Join(", ", frequentIds)}. Ưu tiên gợi ý các chất liệu tương tự nếu phù hợp.";
-        }
+        var materialById = materials.ToDictionary(m => m.Id, m => m.Name);
+        var historyHint = await BuildSellerMaterialHistoryHintAsync(sellerId, materialById);
 
         var matJsonExample = """{"suggestions":[{"materialId":"uuid-here","materialName":"Tên chất liệu","confidenceScore":0.95}]}""";
         var userMessage = $"""
@@ -726,6 +744,13 @@ public class AiSellerService : IAiSellerService
         var categoryList = string.Join("\n", candidates.PromptCats.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
         var tagList = string.Join(", ", candidates.PromptTags.Select(t => $"{t.Name}(ID:{t.Id})"));
         var materialList = string.Join(", ", candidates.PromptMats.Select(m => $"{m.Name}(ID:{m.Id})"));
+        var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
+        var matNameById = candidates.PromptMats.ToDictionary(m => m.Id, m => m.Name);
+        var matHistoryHint = await BuildSellerMaterialHistoryHintAsync(sellerId, matNameById);
+        const string sellerHabitBalanceNoteImage = """
+
+            Khi chọn tags và materials: ưu tiên đúng với ảnh và mô tả; có thể ưu tiên tag/chất liệu trùng thói quen shop (nếu có) khi phù hợp — không ép lặp nếu sản phẩm khác loại.
+            """;
 
         var imagePrompt = _imagePrompt.Value;
 
@@ -771,8 +796,8 @@ public class AiSellerService : IAiSellerService
             - Ví dụ: với quần jeans nữ thì chọn "Thời Trang Nữ > Quần Jeans" (nếu có), KHÔNG chọn "Thời Trang Nữ" đơn thuần
             - Điền categoryPath đúng theo cột "Đường dẫn đầy đủ" trong danh sách (sao chép nguyên văn)
             
-            Danh sách tags có trong hệ thống: {tagList}
-            Danh sách materials có trong hệ thống: {materialList}
+            Danh sách tags có trong hệ thống: {tagList}{tagHistoryHint}
+            Danh sách materials có trong hệ thống: {materialList}{matHistoryHint}{sellerHabitBalanceNoteImage}
             
             Hãy trả về JSON theo format sau (không thêm markdown, chỉ JSON thuần):
             {jsonExample}
@@ -866,6 +891,14 @@ public class AiSellerService : IAiSellerService
         if (request.CategoryId.HasValue && catById.TryGetValue(request.CategoryId.Value, out var hintCat))
             categoryHint = $"\nNgười dùng đã chọn category: {BuildPath(hintCat.Id)} — dùng đây làm ngữ cảnh để chọn tags và materials phù hợp.\n";
 
+        var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
+        var matNameById = candidates.PromptMats.ToDictionary(m => m.Id, m => m.Name);
+        var matHistoryHint = await BuildSellerMaterialHistoryHintAsync(sellerId, matNameById);
+        const string sellerHabitBalanceNote = """
+
+            Khi chọn tags và materials: ưu tiên đúng với tên/mô tả sản phẩm; có thể ưu tiên các tag/chất liệu trùng thói quen shop (nếu có ở trên) khi thật sự phù hợp — không ép lặp lại nếu sản phẩm khác loại.
+            """;
+
         var userMessage = $"""
             Phân tích sản phẩm dưới đây và trả về category, tags, materials phù hợp nhất.
 
@@ -876,10 +909,10 @@ public class AiSellerService : IAiSellerService
             {catLines}
 
             === DANH SÁCH TAGS ===
-            {tagLines}
+            {tagLines}{tagHistoryHint}
 
             === DANH SÁCH MATERIALS ===
-            {matLines}
+            {matLines}{matHistoryHint}{sellerHabitBalanceNote}
 
             Yêu cầu trả về:
             - categories: top 3 category phù hợp, ưu tiên leaf node (cấp sâu nhất), chỉ dùng ID từ danh sách, confidenceScore 0.0–1.0
