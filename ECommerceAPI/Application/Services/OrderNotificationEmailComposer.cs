@@ -38,7 +38,7 @@ public class OrderNotificationEmailComposer : IOrderNotificationEmailComposer
         if (order == null)
             return null;
 
-        var fe = (_configuration["FrontendUrl"] ?? "http://localhost:3000").TrimEnd('/');
+        var fe = (_configuration["FrontendUrl"] ?? "https://ecomviet.vercel.app").TrimEnd('/');
         var brand = _configuration["Smtp:FromName"] ?? "E-Commerce";
         // Trang đơn mua (FE): app/user/purchase
         var orderDetailUrl = $"{fe}/user/purchase";

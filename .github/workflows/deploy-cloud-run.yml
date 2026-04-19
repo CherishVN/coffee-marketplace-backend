@@ -69,7 +69,7 @@ jobs:
           API_URL="${{ steps.api_url.outputs.url }}"
           FRONTEND_URL="${{ secrets.FRONTEND_URL }}"
 
-          ENV_VARS="FrontendUrl=${FRONTEND_URL:-http://localhost:3000}"
+          ENV_VARS="FrontendUrl=${FRONTEND_URL:-https://ecomviet.vercel.app}"
           if [ -n "$API_URL" ]; then
             ENV_VARS="${ENV_VARS},VNPay__ReturnUrl=${API_URL}/api/payments/vnpay/return"
             ENV_VARS="${ENV_VARS},MoMo__ReturnUrl=${API_URL}/api/payments/momo/return"
