@@ -79,12 +79,40 @@ public class AiSellerController : ControllerBase
         return Ok(new { message = "Đã lưu phản hồi thành công" });
     }
 
+    /// <summary>
+    /// Ghi lịch sử gợi ý tag và/hoặc chất liệu sau khi tạo sản phẩm (analyze-product / analyze-image).
+    /// </summary>
+    [HttpPost("commit-product-ai-tags")]
+    public async Task<IActionResult> CommitProductAiTagSession([FromBody] CommitProductAiTagSessionDto dto)
+    {
+        if (dto.ProductId == Guid.Empty)
+            return BadRequest(new { message = "productId không hợp lệ." });
+        if (string.IsNullOrWhiteSpace(dto.Title))
+            return BadRequest(new { message = "Tên sản phẩm là bắt buộc." });
+
+        var sellerId = GetUserId();
+        var ok = await _sellerService.CommitProductAiTagSessionAsync(dto, sellerId);
+        if (!ok)
+            return NotFound(new { message = "Không tìm thấy sản phẩm hoặc bạn không có quyền." });
+
+        return Ok(new { message = "Đã lưu lịch sử gợi ý." });
+    }
+
     /// <summary>Lấy lịch sử gợi ý tags của seller (không gồm pending)</summary>
     [HttpGet("tag-suggestions")]
     public async Task<IActionResult> GetTagSuggestions([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         var sellerId = GetUserId();
         var result = await _sellerService.GetTagSuggestionLogsAsync(sellerId, page, pageSize);
+        return Ok(result);
+    }
+
+    /// <summary>Lấy lịch sử gợi ý chất liệu của seller (không gồm pending)</summary>
+    [HttpGet("material-suggestions")]
+    public async Task<IActionResult> GetMaterialSuggestions([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var sellerId = GetUserId();
+        var result = await _sellerService.GetMaterialSuggestionLogsAsync(sellerId, page, pageSize);
         return Ok(result);
     }
 

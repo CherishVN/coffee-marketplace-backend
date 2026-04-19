@@ -50,6 +50,92 @@ public class AiSellerService : IAiSellerService
         _logger = logger;
     }
 
+    /// <summary>Đọc suggested_tags jsonb: hỗ trợ cả {tag, confidence} và {tagName, score}.</summary>
+    private static List<SuggestedTagJsonItem> ParseSuggestedTagsFromJsonDocument(JsonDocument doc)
+    {
+        var list = new List<SuggestedTagJsonItem>();
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            return list;
+
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            string? tagName = null;
+            if (el.TryGetProperty("tag", out var tagProp))
+                tagName = tagProp.GetString();
+            else if (el.TryGetProperty("tagName", out var nameProp))
+                tagName = nameProp.GetString();
+
+            if (string.IsNullOrWhiteSpace(tagName))
+                continue;
+
+            decimal confidence = 0m;
+            if (el.TryGetProperty("confidence", out var cEl) && cEl.TryGetDecimal(out var c))
+                confidence = c;
+            else if (el.TryGetProperty("confidenceScore", out var csEl) && csEl.TryGetDecimal(out var cs))
+                confidence = cs;
+            else if (el.TryGetProperty("score", out var sEl) && sEl.TryGetDecimal(out var sc))
+                confidence = sc;
+
+            if (confidence > 1m)
+                confidence /= 100m;
+
+            list.Add(new SuggestedTagJsonItem
+            {
+                Tag = tagName.Trim(),
+                Confidence = confidence < 0m ? 0m : confidence
+            });
+        }
+
+        return list;
+    }
+
+    /// <summary>Đọc suggested_materials jsonb: materialId + materialName + confidence | score | confidenceScore.</summary>
+    private static List<SuggestedMaterialJsonItem> ParseSuggestedMaterialsFromJsonDocument(JsonDocument doc)
+    {
+        var list = new List<SuggestedMaterialJsonItem>();
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            return list;
+
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            Guid? matId = null;
+            if (el.TryGetProperty("materialId", out var idEl))
+            {
+                if (idEl.ValueKind == JsonValueKind.String && Guid.TryParse(idEl.GetString(), out var g))
+                    matId = g;
+                else if (idEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(idEl.GetString()))
+                { /* ignore invalid */ }
+            }
+
+            string? matName = null;
+            if (el.TryGetProperty("materialName", out var nameProp))
+                matName = nameProp.GetString();
+
+            if (string.IsNullOrWhiteSpace(matName))
+                continue;
+
+            decimal confidence = 0m;
+            if (el.TryGetProperty("confidence", out var cEl) && cEl.TryGetDecimal(out var c))
+                confidence = c;
+            else if (el.TryGetProperty("confidenceScore", out var csEl) && csEl.TryGetDecimal(out var cs))
+                confidence = cs;
+            else if (el.TryGetProperty("score", out var sEl) && sEl.TryGetDecimal(out var sc))
+                confidence = sc;
+
+            if (confidence > 1m)
+                confidence /= 100m;
+
+            list.Add(new SuggestedMaterialJsonItem
+            {
+                MaterialId = matId,
+                MaterialName = matName.Trim(),
+                Confidence = confidence < 0m ? 0m : confidence
+            });
+        }
+
+        return list;
+    }
+
     // ── Candidate loading (full catalog for prompt) ─────────────────────────
     private sealed record CandidateSet(
         Dictionary<long, CategoryCandidate> CatById,
@@ -202,7 +288,11 @@ public class AiSellerService : IAiSellerService
                 try
                 {
                     var suggestedJson = JsonSerializer.Serialize(
-                        result.Suggestions.Select(s => new { tagId = s.TagId, tagName = s.TagName, score = s.ConfidenceScore }));
+                        result.Suggestions.Select(s => new
+                        {
+                            tag = s.TagName,
+                            confidence = s.ConfidenceScore > 1m ? s.ConfidenceScore / 100m : s.ConfidenceScore
+                        }));
 
                     var log = new AiTagSuggestion
                     {
@@ -255,6 +345,130 @@ public class AiSellerService : IAiSellerService
         return true;
     }
 
+    // ── Lưu lịch sử sau khi tạo SP kèm AI (analyze-product / analyze-image) ───
+    public async Task<bool> CommitProductAiTagSessionAsync(CommitProductAiTagSessionDto dto, Guid sellerId)
+    {
+        var shopIds = await _context.Shops.AsNoTracking()
+            .Where(s => s.OwnerId == sellerId)
+            .Select(s => s.Id)
+            .ToListAsync();
+
+        var ownsProduct = await _context.Products.AsNoTracking()
+            .AnyAsync(p => p.Id == dto.ProductId && shopIds.Contains(p.ShopId));
+
+        if (!ownsProduct)
+            return false;
+
+        var anySave = false;
+
+        var suggestedItems = (dto.SuggestedTags ?? new List<CommitAiSuggestedTagDto>())
+            .Where(t => !string.IsNullOrWhiteSpace(t.TagName))
+            .Select(t =>
+            {
+                var c = t.ConfidenceScore;
+                if (c > 1m) c /= 100m;
+                if (c < 0m) c = 0m;
+                return new { tag = t.TagName.Trim(), confidence = c };
+            })
+            .ToList();
+
+        var suggestedNorm = suggestedItems
+            .Select(x => x.tag.ToLowerInvariant())
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+
+        var chosenList = (dto.ChosenTagNames ?? new List<string>())
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var chosenNorm = chosenList
+            .Select(t => t.ToLowerInvariant())
+            .OrderBy(x => x)
+            .ToList();
+
+        if (suggestedNorm.Count > 0 || chosenNorm.Count > 0)
+        {
+            var action = suggestedNorm.SequenceEqual(chosenNorm) ? "accepted" : "modified";
+            var suggestedJson = JsonSerializer.Serialize(suggestedItems);
+            var chosenJson = JsonSerializer.Serialize(chosenList);
+
+            _context.AiTagSuggestions.Add(new AiTagSuggestion
+            {
+                Id = Guid.NewGuid(),
+                ProductId = dto.ProductId,
+                SellerId = sellerId,
+                InputTitle = dto.Title,
+                InputDescription = dto.Description,
+                SuggestedCategoryId = dto.CategoryId,
+                SuggestedTags = JsonDocument.Parse(suggestedJson),
+                ChosenCategoryId = dto.CategoryId,
+                ChosenTags = JsonDocument.Parse(chosenJson),
+                Action = action,
+                CreatedAt = DateTime.UtcNow
+            });
+            anySave = true;
+        }
+
+        var matRows = (dto.SuggestedMaterials ?? new List<CommitAiSuggestedMaterialDto>())
+            .Select(m =>
+            {
+                var c = m.ConfidenceScore;
+                if (c > 1m) c /= 100m;
+                if (c < 0m) c = 0m;
+                var name = string.IsNullOrWhiteSpace(m.MaterialName) ? "" : m.MaterialName.Trim();
+                return new { materialId = m.MaterialId, materialName = name, confidence = c };
+            })
+            .Where(x => (x.materialId.HasValue && x.materialId.Value != Guid.Empty) || x.materialName.Length > 0)
+            .ToList();
+
+        var suggestedMatIds = matRows
+            .Where(x => x.materialId.HasValue && x.materialId.Value != Guid.Empty)
+            .Select(x => x.materialId!.Value)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+
+        var chosenMatIds = (dto.ChosenMaterialIds ?? new List<Guid>())
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+
+        if (suggestedMatIds.Count > 0 || chosenMatIds.Count > 0)
+        {
+            var matAction = suggestedMatIds.Count == chosenMatIds.Count && !suggestedMatIds.Except(chosenMatIds).Any()
+                ? "accepted"
+                : "modified";
+
+            var matJson = JsonSerializer.Serialize(matRows.Select(x => new
+            {
+                materialId = x.materialId,
+                materialName = x.materialName,
+                confidence = x.confidence
+            }));
+
+            _context.AiMaterialSuggestions.Add(new AiMaterialSuggestion
+            {
+                Id = Guid.NewGuid(),
+                ProductId = dto.ProductId,
+                SellerId = sellerId,
+                SuggestedMaterials = JsonDocument.Parse(matJson),
+                ChosenMaterialIds = chosenMatIds.ToArray(),
+                Action = matAction,
+                CreatedAt = DateTime.UtcNow
+            });
+            anySave = true;
+        }
+
+        if (anySave)
+            await _context.SaveChangesAsync();
+
+        return true;
+    }
+
     // ── Lấy lịch sử gợi ý tags ──────────────────────────────────────────────
     public async Task<TagSuggestionLogResponse> GetTagSuggestionLogsAsync(Guid sellerId, int page, int pageSize)
     {
@@ -269,16 +483,15 @@ public class AiSellerService : IAiSellerService
             .Take(pageSize)
             .Select(s =>
             {
-                // Parse suggested_tags: [{"tag": "vải cotton", "confidence": 0.95}]
-                var suggestedTags = new List<SuggestedTagJsonItem>();
+                List<SuggestedTagJsonItem> suggestedTags;
                 try
                 {
-                    suggestedTags = JsonSerializer.Deserialize<List<SuggestedTagJsonItem>>(
-                        s.SuggestedTags.RootElement.GetRawText(), _jsonReadOptions) ?? new();
+                    suggestedTags = ParseSuggestedTagsFromJsonDocument(s.SuggestedTags);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Parse suggested_tags failed for log {LogId}", s.Id);
+                    suggestedTags = new List<SuggestedTagJsonItem>();
                 }
 
                 // Parse chosen_tags: ["vải cotton", "tối giản"]
@@ -308,6 +521,67 @@ public class AiSellerService : IAiSellerService
             .ToList();
 
         return new TagSuggestionLogResponse
+        {
+            Items = items,
+            Total = all.Count,
+            Accepted = all.Count(s => s.Action == "accepted"),
+            Modified = all.Count(s => s.Action == "modified"),
+            Rejected = all.Count(s => s.Action == "rejected"),
+        };
+    }
+
+    public async Task<MaterialSuggestionLogResponse> GetMaterialSuggestionLogsAsync(Guid sellerId, int page, int pageSize)
+    {
+        var query = _context.AiMaterialSuggestions
+            .Where(s => s.SellerId == sellerId && s.Action != ActionPending)
+            .OrderByDescending(s => s.CreatedAt);
+
+        var all = await query.ToListAsync();
+
+        var productIds = all.Select(s => s.ProductId).Distinct().ToList();
+        var productTitles = await _context.Products.AsNoTracking()
+            .Where(p => productIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.Name);
+
+        var matById = await _context.Materials.AsNoTracking()
+            .ToDictionaryAsync(m => m.Id, m => m.Name);
+
+        var items = all
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(s =>
+            {
+                List<SuggestedMaterialJsonItem> suggestedMats;
+                try
+                {
+                    suggestedMats = ParseSuggestedMaterialsFromJsonDocument(s.SuggestedMaterials);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Parse suggested_materials failed for log {LogId}", s.Id);
+                    suggestedMats = new List<SuggestedMaterialJsonItem>();
+                }
+
+                var chosenIds = s.ChosenMaterialIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? new List<Guid>();
+                var chosenNames = chosenIds
+                    .Select(id => matById.TryGetValue(id, out var n) ? n : id.ToString())
+                    .ToList();
+
+                return new MaterialSuggestionLogItem
+                {
+                    Id = s.Id,
+                    ProductId = s.ProductId,
+                    ProductName = productTitles.TryGetValue(s.ProductId, out var pn) ? pn : null,
+                    SuggestedMaterials = suggestedMats,
+                    ChosenMaterialIds = chosenIds,
+                    ChosenMaterialNames = chosenNames,
+                    Action = s.Action,
+                    CreatedAt = s.CreatedAt
+                };
+            })
+            .ToList();
+
+        return new MaterialSuggestionLogResponse
         {
             Items = items,
             Total = all.Count,
@@ -374,7 +648,12 @@ public class AiSellerService : IAiSellerService
                 try
                 {
                     var suggestedJson = JsonSerializer.Serialize(
-                        result.Suggestions.Select(s => new { materialId = s.MaterialId, materialName = s.MaterialName, score = s.ConfidenceScore }));
+                        result.Suggestions.Select(s => new
+                        {
+                            materialId = s.MaterialId,
+                            materialName = s.MaterialName,
+                            confidence = s.ConfidenceScore > 1m ? s.ConfidenceScore / 100m : s.ConfidenceScore
+                        }));
 
                     var log = new AiMaterialSuggestion
                     {

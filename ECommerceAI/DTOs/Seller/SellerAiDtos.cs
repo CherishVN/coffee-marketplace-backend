@@ -88,6 +88,34 @@ public class AnalyzeProductResponseDto
     public string? ErrorMessage { get; set; }
 }
 
+/// <summary>
+/// Ghi nhận phiên gợi ý tag + chất liệu sau khi seller tạo sản phẩm (analyze-product / analyze-image).
+/// </summary>
+public class CommitProductAiTagSessionDto
+{
+    public Guid ProductId { get; set; }
+    public string Title { get; set; } = null!;
+    public string? Description { get; set; }
+    public long? CategoryId { get; set; }
+    public List<CommitAiSuggestedTagDto> SuggestedTags { get; set; } = new();
+    public List<string> ChosenTagNames { get; set; } = new();
+    public List<CommitAiSuggestedMaterialDto> SuggestedMaterials { get; set; } = new();
+    public List<Guid> ChosenMaterialIds { get; set; } = new();
+}
+
+public class CommitAiSuggestedTagDto
+{
+    public string TagName { get; set; } = null!;
+    public decimal ConfidenceScore { get; set; }
+}
+
+public class CommitAiSuggestedMaterialDto
+{
+    public Guid? MaterialId { get; set; }
+    public string MaterialName { get; set; } = null!;
+    public decimal ConfidenceScore { get; set; }
+}
+
 // ── Image Analysis ────────────────────────────────────────────────────────────
 
 public class AnalyzeImageRequestDto
@@ -174,6 +202,36 @@ public class TagSuggestionLogItem
 public class TagSuggestionLogResponse
 {
     public List<TagSuggestionLogItem> Items { get; set; } = new();
+    public int Total { get; set; }
+    public int Accepted { get; set; }
+    public int Modified { get; set; }
+    public int Rejected { get; set; }
+}
+
+// ── Material Suggestion Log ───────────────────────────────────────────────────
+
+public class SuggestedMaterialJsonItem
+{
+    public Guid? MaterialId { get; set; }
+    public string MaterialName { get; set; } = null!;
+    public decimal Confidence { get; set; }
+}
+
+public class MaterialSuggestionLogItem
+{
+    public Guid Id { get; set; }
+    public Guid ProductId { get; set; }
+    public string? ProductName { get; set; }
+    public List<SuggestedMaterialJsonItem> SuggestedMaterials { get; set; } = new();
+    public List<Guid> ChosenMaterialIds { get; set; } = new();
+    public List<string> ChosenMaterialNames { get; set; } = new();
+    public string Action { get; set; } = "accepted";
+    public DateTime CreatedAt { get; set; }
+}
+
+public class MaterialSuggestionLogResponse
+{
+    public List<MaterialSuggestionLogItem> Items { get; set; } = new();
     public int Total { get; set; }
     public int Accepted { get; set; }
     public int Modified { get; set; }
