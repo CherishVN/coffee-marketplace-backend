@@ -48,10 +48,14 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                     Name = c.Name,
                     Slug = c.Slug,
                     Level = c.Level,
-                    ProductCount = c.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                    ProductCount = 0,
                     Image = c.Image
                 })
                 .ToListAsync();
+
+            var subtreeCounts = await BuildSubtreeStorefrontProductCountsAsync();
+            foreach (var dto in categories)
+                dto.ProductCount = subtreeCounts.GetValueOrDefault(dto.Id, 0);
 
             return new CategoryStorefrontListResponseDto
             {
@@ -89,10 +93,14 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                     Name = c.Name,
                     Slug = c.Slug,
                     Level = c.Level,
-                    ProductCount = c.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                    ProductCount = 0,
                     Image = c.Image
                 })
                 .ToListAsync();
+
+            var subtreeCounts = await BuildSubtreeStorefrontProductCountsAsync();
+            foreach (var dto in allCategories)
+                dto.ProductCount = subtreeCounts.GetValueOrDefault(dto.Id, 0);
 
             var tree = BuildTree(allCategories, null);
 
@@ -123,7 +131,7 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                     Name = c.Name,
                     Slug = c.Slug,
                     Level = c.Level,
-                    ProductCount = c.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                    ProductCount = 0,
                     Image = c.Image,
                     Subcategories = c.InverseParent
                         .Where(sub => sub.IsActive)
@@ -135,7 +143,7 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                             Name = sub.Name,
                             Slug = sub.Slug,
                             Level = sub.Level,
-                            ProductCount = sub.Products.Count(p => p.Status == (short)ProductStatus.Active),
+                            ProductCount = 0,
                             Image = sub.Image
                         })
                         .OrderBy(sub => sub.Name)
@@ -149,6 +157,11 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                     Success = false,
                     Message = "Không tìm thấy danh mục"
                 };
+
+            var subtreeCounts = await BuildSubtreeStorefrontProductCountsAsync();
+            category.ProductCount = subtreeCounts.GetValueOrDefault(category.Id, 0);
+            foreach (var sub in category.Subcategories)
+                sub.ProductCount = subtreeCounts.GetValueOrDefault(sub.Id, 0);
 
             return new CategoryStorefrontDetailResponseDto { Success = true, Category = category };
         }
@@ -175,5 +188,70 @@ public class CategoryStorefrontService : ICategoryStorefrontService
                 return c;
             })
             .ToList();
+    }
+
+    /// <summary>
+    /// Tổng sản phẩm hiển thị được trên storefront (như filter /api/products) trong từng danh mục
+    /// và toàn bộ danh mục con — khớp với <see cref="ProductStorefrontService.GetProductsAsync"/>.
+    /// </summary>
+    private async Task<Dictionary<long, int>> BuildSubtreeStorefrontProductCountsAsync()
+    {
+        var categories = await _context.Categories
+            .AsNoTracking()
+            .Where(c => c.IsActive)
+            .Select(c => new { c.Id, c.ParentId })
+            .ToListAsync();
+
+        var directRows = await _context.Products
+            .AsNoTracking()
+            .Where(p =>
+                p.Status == (short)ProductStatus.Active
+                && p.Shop != null
+                && p.Shop.Status == 1
+                && p.Shop.VerificationStatus == 1
+                && p.CategoryId.HasValue)
+            .GroupBy(p => p.CategoryId!.Value)
+            .Select(g => new { CatId = g.Key, Cnt = g.Count() })
+            .ToListAsync();
+
+        var directMap = directRows.ToDictionary(x => x.CatId, x => x.Cnt);
+
+        var childrenByParent = new Dictionary<long, List<long>>();
+        foreach (var c in categories)
+        {
+            if (!c.ParentId.HasValue)
+                continue;
+
+            if (!childrenByParent.TryGetValue(c.ParentId.Value, out var list))
+            {
+                list = [];
+                childrenByParent[c.ParentId.Value] = list;
+            }
+
+            list.Add(c.Id);
+        }
+
+        var subtree = new Dictionary<long, int>();
+
+        int SumSubtree(long id)
+        {
+            if (subtree.TryGetValue(id, out var memo))
+                return memo;
+
+            var sum = directMap.GetValueOrDefault(id, 0);
+            if (childrenByParent.TryGetValue(id, out var kids))
+            {
+                foreach (var childId in kids)
+                    sum += SumSubtree(childId);
+            }
+
+            subtree[id] = sum;
+            return sum;
+        }
+
+        foreach (var c in categories)
+            SumSubtree(c.Id);
+
+        return subtree;
     }
 }
