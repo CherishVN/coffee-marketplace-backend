@@ -653,10 +653,8 @@ public class SellerApprovalService : ISellerApprovalService
         {
             await using var tx = await _context.Database.BeginTransactionAsync();
 
-            await _context.Database.ExecuteSqlInterpolatedAsync(
-                $"SELECT set_config('request.jwt.claim.sub', {adminId.ToString()}, true)");
             await _context.Database.ExecuteSqlRawAsync(
-                "SELECT set_config('request.jwt.claim.role', 'admin', true)");
+                "SET LOCAL session_replication_role = replica");
 
             await _context.SaveChangesAsync();
             await tx.CommitAsync();

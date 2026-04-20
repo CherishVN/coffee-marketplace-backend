@@ -116,6 +116,8 @@ public class ProductDto
     public List<ProductImageDto>? Images { get; set; }
     public List<ProductVariantDetailDto>? Variants { get; set; }
     public int? TotalStock { get; set; }
+    public List<long>? TagIds { get; set; }
+    public List<Guid>? MaterialIds { get; set; }
 }
 
 public class ProductImageDto

@@ -399,6 +399,8 @@ public class SellerService : ISellerService
             .Include(p => p.ProductImages)
             .Include(p => p.ProductVariants)
             .Include(p => p.Inventories)
+            .Include(p => p.ProductTags)
+            .Include(p => p.ProductMaterials)
             .FirstOrDefaultAsync(p => p.Id == productId && p.ShopId == shop.Id);
 
         if (product == null)
@@ -444,7 +446,9 @@ public class SellerService : ISellerService
                     Stock = product.Inventories.FirstOrDefault(i => i.VariantId == v.Id)?.Quantity ?? 0,
                     Attributes = v.Attributes
                 }).ToList(),
-                TotalStock = product.Inventories.Sum(i => i.Quantity)
+                TotalStock = product.Inventories.Sum(i => i.Quantity),
+                TagIds = product.ProductTags?.Select(t => t.TagId).ToList(),
+                MaterialIds = product.ProductMaterials?.Select(m => m.MaterialId).ToList()
             }
         };
     }
