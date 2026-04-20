@@ -25,6 +25,11 @@ public interface IAiSellerService
     /// </summary>
     Task<TagSuggestionLogResponse> GetTagSuggestionLogsAsync(Guid sellerId, int page, int pageSize);
 
+    /// <summary>
+    /// Lấy lịch sử gợi ý chất liệu của seller (không bao gồm pending).
+    /// </summary>
+    Task<MaterialSuggestionLogResponse> GetMaterialSuggestionLogsAsync(Guid sellerId, int page, int pageSize);
+
     Task<AnalyzeImageResponseDto> AnalyzeImageAsync(AnalyzeImageRequestDto request, Guid sellerId);
 
     /// <summary>
@@ -32,4 +37,9 @@ public interface IAiSellerService
     /// Kết quả được post-validate: chỉ trả về IDs thực sự tồn tại trong DB.
     /// </summary>
     Task<AnalyzeProductResponseDto> AnalyzeProductAsync(AnalyzeProductRequestDto request, Guid sellerId);
+
+    /// <summary>
+    /// Lưu lịch sử gợi ý tag sau khi tạo sản phẩm (kèm phân tích AI trên form).
+    /// </summary>
+    Task<bool> CommitProductAiTagSessionAsync(CommitProductAiTagSessionDto dto, Guid sellerId);
 }

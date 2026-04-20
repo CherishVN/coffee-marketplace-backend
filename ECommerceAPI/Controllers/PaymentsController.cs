@@ -77,7 +77,7 @@ public class PaymentsController : ControllerBase
 
         var result = await _paymentService.ProcessVNPayReturnAsync(Request.Query, Request.QueryString.Value ?? string.Empty);
 
-        var frontendUrl = _configuration["FrontendUrl"] ?? string.Empty;
+        var frontendUrl = (_configuration["FrontendUrl"] ?? "https://ecomviet.vercel.app").TrimEnd('/');
 
         if (result.Success)
         {
@@ -153,7 +153,7 @@ public class PaymentsController : ControllerBase
 
         var result = await _paymentService.ProcessMoMoReturnAsync(Request.Query);
 
-        var frontendUrl = _configuration["FrontendUrl"];
+        var frontendUrl = (_configuration["FrontendUrl"] ?? "https://ecomviet.vercel.app").TrimEnd('/');
 
         if (result.Success)
             return Redirect($"{frontendUrl}/payment/success?orderCode={result.OrderCode}&amount={result.Amount}");
