@@ -102,7 +102,6 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<ShopFollow> ShopFollows { get; set; }
 
-    public virtual DbSet<ShopReview> ShopReviews { get; set; }
 
     public virtual DbSet<Tag> Tags { get; set; }
 
@@ -1761,52 +1760,6 @@ public partial class ApplicationDbContext : DbContext
                 .HasConstraintName("shop_documents_shop_id_fkey");
         });
 
-        modelBuilder.Entity<ShopReview>(entity =>
-        {
-            entity.HasKey(e => e.Id).HasName("shop_reviews_pkey");
-
-            entity.ToTable("shop_reviews");
-
-            entity.HasIndex(e => e.ShopId, "idx_shop_reviews_shop");
-
-            entity.HasIndex(e => e.Status, "idx_shop_reviews_status");
-
-            entity.HasIndex(e => e.UserId, "idx_shop_reviews_user");
-
-            entity.HasIndex(e => new { e.ShopId, e.UserId }, "shop_reviews_shop_id_user_id_key").IsUnique();
-
-            entity.Property(e => e.Id)
-                .HasDefaultValueSql("gen_random_uuid()")
-                .HasColumnName("id");
-            entity.Property(e => e.Content).HasColumnName("content");
-            entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("now()")
-                .HasColumnName("created_at");
-            entity.Property(e => e.OrderId).HasColumnName("order_id");
-            entity.Property(e => e.Rating).HasColumnName("rating");
-            entity.Property(e => e.ShopId).HasColumnName("shop_id");
-            entity.Property(e => e.Status)
-                .HasDefaultValue((short)1)
-                .HasColumnName("status");
-            entity.Property(e => e.Title).HasColumnName("title");
-            entity.Property(e => e.UpdatedAt)
-                .HasDefaultValueSql("now()")
-                .HasColumnName("updated_at");
-            entity.Property(e => e.UserId).HasColumnName("user_id");
-
-            entity.HasOne(d => d.Order).WithMany(p => p.ShopReviews)
-                .HasForeignKey(d => d.OrderId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("shop_reviews_order_id_fkey");
-
-            entity.HasOne(d => d.Shop).WithMany(p => p.ShopReviews)
-                .HasForeignKey(d => d.ShopId)
-                .HasConstraintName("shop_reviews_shop_id_fkey");
-
-            entity.HasOne(d => d.User).WithMany(p => p.ShopReviews)
-                .HasForeignKey(d => d.UserId)
-                .HasConstraintName("shop_reviews_user_id_fkey");
-        });
 
         modelBuilder.Entity<Tag>(entity =>
         {

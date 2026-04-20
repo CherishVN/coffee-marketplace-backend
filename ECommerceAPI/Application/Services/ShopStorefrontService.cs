@@ -22,8 +22,10 @@ public class ShopStorefrontService : IShopStorefrontService
     {
         try
         {
+            var isGuid = Guid.TryParse(slug, out var parsedShopId);
+
             var shop = await _context.Shops
-                .Where(s => s.Slug == slug && s.Status == 1 && s.VerificationStatus == 1)
+                .Where(s => (s.Slug == slug || (isGuid && s.Id == parsedShopId)) && s.Status == 1 && s.VerificationStatus == 1)
                 .Select(s => new ShopPublicDto
                 {
                     Id = s.Id,
@@ -34,10 +36,10 @@ public class ShopStorefrontService : IShopStorefrontService
                     CoverUrl = s.CoverUrl,
                     ProductCount = s.Products.Count(p => p.Status == (short)ProductStatus.Active),
                     FollowerCount = s.ShopFollows.Count,
-                    AverageRating = s.ShopReviews.Any()
-                        ? Math.Round(s.ShopReviews.Average(r => (double)r.Rating), 1)
+                    AverageRating = s.Products.SelectMany(p => p.ProductReviews).Any()
+                        ? Math.Round(s.Products.SelectMany(p => p.ProductReviews).Average(r => (double)r.Rating), 1)
                         : 0,
-                    ReviewCount = s.ShopReviews.Count,
+                    ReviewCount = s.Products.SelectMany(p => p.ProductReviews).Count(),
                     CreatedAt = s.CreatedAt,
                     IsFollowing = currentUserId.HasValue
                         && s.ShopFollows.Any(f => f.UserId == currentUserId.Value),
@@ -240,8 +242,8 @@ public class ShopStorefrontService : IShopStorefrontService
                     Slug = f.Shop.Slug,
                     LogoUrl = f.Shop.LogoUrl,
                     FollowerCount = f.Shop.ShopFollows.Count,
-                    AverageRating = f.Shop.ShopReviews.Any()
-                        ? Math.Round(f.Shop.ShopReviews.Average(r => (double)r.Rating), 1)
+                    AverageRating = f.Shop.Products.SelectMany(p => p.ProductReviews).Any()
+                        ? Math.Round(f.Shop.Products.SelectMany(p => p.ProductReviews).Average(r => (double)r.Rating), 1)
                         : 0
                 })
                 .ToListAsync();

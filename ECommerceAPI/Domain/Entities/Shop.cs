@@ -79,7 +79,7 @@ public partial class Shop
 
     public virtual ICollection<ShopFollow> ShopFollows { get; set; } = new List<ShopFollow>();
 
-    public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
+
 
     public virtual User? VerifiedByNavigation { get; set; }
 

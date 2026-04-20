@@ -67,7 +67,7 @@ public partial class Order
 
     public virtual Shop Shop { get; set; } = null!;
 
-    public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
+
 
     public virtual Transaction? Transaction { get; set; }
 

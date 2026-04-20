@@ -473,7 +473,12 @@ public class UserAdminService : IUserAdminService
         if (!exists)
             return new UserShopReviewsResponseDto { Success = false, Message = "Không tìm thấy user" };
 
-        var q = _context.ShopReviews.AsNoTracking().Where(r => r.UserId == userId);
+        var q = _context.ProductReviews
+            .AsNoTracking()
+            .Include(r => r.Product)
+            .ThenInclude(p => p.Shop)
+            .Where(r => r.UserId == userId);
+            
         var total = await q.CountAsync();
         var items = await q
             .OrderByDescending(r => r.CreatedAt)
@@ -482,10 +487,10 @@ public class UserAdminService : IUserAdminService
             .Select(r => new AdminUserShopReviewDto
             {
                 Id = r.Id,
-                ShopId = r.ShopId,
-                ShopName = r.Shop.Name,
+                ShopId = r.Product.ShopId,
+                ShopName = r.Product.Shop.Name,
                 Rating = r.Rating,
-                Title = r.Title,
+                Title = r.Product.Name,
                 Content = r.Content,
                 Status = r.Status,
                 CreatedAt = r.CreatedAt

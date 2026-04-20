@@ -71,7 +71,7 @@ public partial class User
 
     public virtual ICollection<Shop> ShopOwners { get; set; } = new List<Shop>();
 
-    public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
+
 
     public virtual ICollection<Shop> ShopVerifiedByNavigations { get; set; } = new List<Shop>();
 

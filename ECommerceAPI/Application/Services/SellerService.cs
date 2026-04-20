@@ -472,6 +472,33 @@ public class SellerService : ISellerService
             };
         }
 
+        if (!dto.CategoryId.HasValue)
+        {
+            return new ServiceResponse<ProductDto>
+            {
+                Success = false,
+                Message = "Vui lòng phân loại AI để có Danh mục sản phẩm"
+            };
+        }
+
+        if (dto.MaterialIds == null || !dto.MaterialIds.Any())
+        {
+            return new ServiceResponse<ProductDto>
+            {
+                Success = false,
+                Message = "Vui lòng phân loại AI để xác định Chất liệu"
+            };
+        }
+
+        if (dto.TagIds == null || !dto.TagIds.Any())
+        {
+            return new ServiceResponse<ProductDto>
+            {
+                Success = false,
+                Message = "Vui lòng phân loại AI để xác định Thẻ (Tags)"
+            };
+        }
+
         var productCode = await GenerateUniqueProductCodeAsync();
         var slug = await GenerateUniqueProductSlugAsync(dto.Name);
 
