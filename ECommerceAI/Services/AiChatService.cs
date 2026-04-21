@@ -115,7 +115,10 @@ public class AiChatService : IAiChatService
         }
 
         // 3. Nếu là yêu cầu tìm sản phẩm, lấy danh sách products để inject vào context
-        var productsContext = await BuildProductContextAsync(message, session.Messages);
+        // Chỉ query DB khi message có khả năng liên quan sản phẩm — tránh query thừa với "xin chào", "cảm ơn" v.v.
+        var productsContext = (IsLikelyProductRequest(message) || IsImageRequest(message))
+            ? await BuildProductContextAsync(message, session.Messages)
+            : string.Empty;
         var userMessageWithContext = string.IsNullOrEmpty(productsContext)
             ? message
             : $"{message}\n\n[Danh sách sản phẩm có sẵn trong hệ thống:\n{productsContext}]";

@@ -4,6 +4,7 @@ using ECommerceAI.Services;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
@@ -17,6 +18,9 @@ builder.Services.AddDbContext<AiDbContext>(options =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("DefaultConnection"),
         npgsql => npgsql.EnableRetryOnFailure(3)));
+
+// ── In-memory cache (dùng cho JWKS keys và catalog candidates) ───────────────
+builder.Services.AddMemoryCache();
 
 // ── AI Services ───────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<GeminiClientService>();
@@ -42,6 +46,11 @@ builder.Services.AddHttpClient("MainApi", client =>
 var supabaseUrl = builder.Configuration["Supabase:Url"]!;
 var jwksUrl = $"{supabaseUrl}/auth/v1/.well-known/jwks.json";
 
+// Cache JWKS keys 10 phút — tránh gọi Supabase mỗi request
+IList<SecurityKey>? cachedJwksKeys = null;
+DateTime jwksCachedAt = DateTime.MinValue;
+object jwksLock = new();
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -57,10 +66,24 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ClockSkew = TimeSpan.FromMinutes(5),
             IssuerSigningKeyResolver = (token, securityToken, kid, parameters) =>
             {
-                var httpClient = new HttpClient();
-                var jwks = httpClient.GetStringAsync(jwksUrl).Result;
-                var keys = new Microsoft.IdentityModel.Tokens.JsonWebKeySet(jwks);
-                return keys.Keys;
+                lock (jwksLock)
+                {
+                    if (cachedJwksKeys != null && (DateTime.UtcNow - jwksCachedAt).TotalMinutes < 10)
+                        return cachedJwksKeys;
+                }
+
+                using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                var jwks = httpClient.GetStringAsync(jwksUrl).GetAwaiter().GetResult();
+                IList<SecurityKey> keys = new Microsoft.IdentityModel.Tokens.JsonWebKeySet(jwks)
+                    .Keys.Cast<SecurityKey>().ToList();
+
+                lock (jwksLock)
+                {
+                    cachedJwksKeys = keys;
+                    jwksCachedAt = DateTime.UtcNow;
+                }
+
+                return keys;
             }
         };
     });

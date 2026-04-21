@@ -349,58 +349,89 @@ public class AiAdminService : IAiAdminService
 
     private async Task<List<TrendDataPoint>> QueryTrendDataAsync(AnalyzeTrendsRequestDto request)
     {
-        var dataPoints = new List<TrendDataPoint>();
-        var cursor = request.FromDate.Date;
-        var endDate = request.ToDate.Date;
+        var fromDate = request.FromDate.Date;
+        var toDate = request.ToDate.Date;
+        var toExclusive = toDate.AddDays(1);
+        var metrics = request.MetricTypes;
 
-        while (cursor <= endDate)
+        // Batch-load tất cả metrics trong 1 lần query mỗi loại, thay vì query từng bucket
+        Dictionary<DateTime, decimal>? ordersByDay = null;
+        Dictionary<DateTime, decimal>? revenueByDay = null;
+        Dictionary<DateTime, decimal>? productsByDay = null;
+        Dictionary<DateTime, decimal>? sellersByDay = null;
+        Dictionary<DateTime, decimal>? customersByDay = null;
+
+        if (metrics.Contains("orders"))
         {
-            var (bucketStart, bucketEndExclusive) = TrendBucketRange(cursor, request.Granularity);
+            var rows = await _context.Orders.AsNoTracking()
+                .Where(o => o.CreatedAt >= fromDate && o.CreatedAt < toExclusive)
+                .GroupBy(o => o.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Val = (decimal)g.Count() })
+                .ToListAsync();
+            ordersByDay = rows.ToDictionary(r => r.Day, r => r.Val);
+        }
+
+        if (metrics.Contains("revenue"))
+        {
+            var rows = await _context.Orders.AsNoTracking()
+                .Where(o => o.CreatedAt >= fromDate && o.CreatedAt < toExclusive && o.Status == 6)
+                .GroupBy(o => o.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Val = g.Sum(o => o.Total) })
+                .ToListAsync();
+            revenueByDay = rows.ToDictionary(r => r.Day, r => r.Val);
+        }
+
+        if (metrics.Contains("products"))
+        {
+            var rows = await _context.Products.AsNoTracking()
+                .Where(p => p.CreatedAt >= fromDate && p.CreatedAt < toExclusive)
+                .GroupBy(p => p.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Val = (decimal)g.Count() })
+                .ToListAsync();
+            productsByDay = rows.ToDictionary(r => r.Day, r => r.Val);
+        }
+
+        if (metrics.Contains("sellers"))
+        {
+            var rows = await _context.Shops.AsNoTracking()
+                .Where(s => s.CreatedAt >= fromDate && s.CreatedAt < toExclusive)
+                .GroupBy(s => s.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Val = (decimal)g.Count() })
+                .ToListAsync();
+            sellersByDay = rows.ToDictionary(r => r.Day, r => r.Val);
+        }
+
+        if (metrics.Contains("customers"))
+        {
+            var rows = await _context.Users.AsNoTracking()
+                .Where(u => u.CreatedAt >= fromDate && u.CreatedAt < toExclusive)
+                .GroupBy(u => u.CreatedAt.Date)
+                .Select(g => new { Day = g.Key, Val = (decimal)g.Count() })
+                .ToListAsync();
+            customersByDay = rows.ToDictionary(r => r.Day, r => r.Val);
+        }
+
+        // Build data points từ dữ liệu đã load
+        var dataPoints = new List<TrendDataPoint>();
+        var cursor = fromDate;
+
+        while (cursor <= toDate)
+        {
+            var (bucketStart, _) = TrendBucketRange(cursor, request.Granularity);
             var point = new TrendDataPoint { Date = bucketStart, Values = new Dictionary<string, decimal>() };
 
-            if (request.MetricTypes.Contains("orders"))
-            {
-                var count = await _context.Orders.CountAsync(o =>
-                    o.CreatedAt >= bucketStart && o.CreatedAt < bucketEndExclusive);
-                point.Values["orders"] = count;
-            }
-
-            if (request.MetricTypes.Contains("revenue"))
-            {
-                // Same as sales report: revenue = completed orders (status 6) only
-                var sum = await _context.Orders
-                    .Where(o => o.CreatedAt >= bucketStart && o.CreatedAt < bucketEndExclusive && o.Status == 6)
-                    .SumAsync(o => (decimal?)o.Total) ?? 0;
-                point.Values["revenue"] = sum;
-            }
-
-            if (request.MetricTypes.Contains("products"))
-            {
-                var count = await _context.Products.CountAsync(p =>
-                    p.CreatedAt >= bucketStart && p.CreatedAt < bucketEndExclusive);
-                point.Values["products"] = count;
-            }
-
-            if (request.MetricTypes.Contains("sellers"))
-            {
-                var count = await _context.Shops.CountAsync(s =>
-                    s.CreatedAt >= bucketStart && s.CreatedAt < bucketEndExclusive);
-                point.Values["sellers"] = count;
-            }
-
-            if (request.MetricTypes.Contains("customers"))
-            {
-                var count = await _context.Users.CountAsync(u =>
-                    u.CreatedAt >= bucketStart && u.CreatedAt < bucketEndExclusive);
-                point.Values["customers"] = count;
-            }
+            if (ordersByDay != null)    point.Values["orders"]    = ordersByDay.GetValueOrDefault(bucketStart);
+            if (revenueByDay != null)   point.Values["revenue"]   = revenueByDay.GetValueOrDefault(bucketStart);
+            if (productsByDay != null)  point.Values["products"]  = productsByDay.GetValueOrDefault(bucketStart);
+            if (sellersByDay != null)   point.Values["sellers"]   = sellersByDay.GetValueOrDefault(bucketStart);
+            if (customersByDay != null) point.Values["customers"] = customersByDay.GetValueOrDefault(bucketStart);
 
             dataPoints.Add(point);
             cursor = request.Granularity switch
             {
-                "weekly" => cursor.AddDays(7),
+                "weekly"  => cursor.AddDays(7),
                 "monthly" => cursor.AddMonths(1),
-                _ => cursor.AddDays(1)
+                _         => cursor.AddDays(1)
             };
         }
 

@@ -5,6 +5,7 @@ using ECommerceAI.Data.Entities;
 using ECommerceAI.DTOs.Seller;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace ECommerceAI.Services;
 
@@ -39,14 +40,18 @@ public class AiSellerService : IAiSellerService
     private static readonly object _analyzeImageSchema = BuildAnalyzeImageSchema();
     private static readonly object _analyzeProductSchema = BuildAnalyzeProductSchema();
 
+    private const string CandidateCacheKey = "PromptCandidates";
+
     private readonly AiDbContext _context;
     private readonly GeminiClientService _gemini;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<AiSellerService> _logger;
 
-    public AiSellerService(AiDbContext context, GeminiClientService gemini, ILogger<AiSellerService> logger)
+    public AiSellerService(AiDbContext context, GeminiClientService gemini, IMemoryCache cache, ILogger<AiSellerService> logger)
     {
         _context = context;
         _gemini = gemini;
+        _cache = cache;
         _logger = logger;
     }
 
@@ -144,11 +149,14 @@ public class AiSellerService : IAiSellerService
         List<MaterialCandidate> PromptMats);
 
     /// <summary>
-    /// Loads every active category, every tag, and every active material for the AI prompt so the
-    /// model can always pick from the full catalog (no RAG truncation).
+    /// Loads every active category, every tag, and every active material for the AI prompt.
+    /// Kết quả được cache 5 phút để tránh query DB lặp lại cho mỗi request analyze.
     /// </summary>
     private async Task<CandidateSet> GetPromptCandidatesAsync()
     {
+        if (_cache.TryGetValue(CandidateCacheKey, out CandidateSet? cached) && cached != null)
+            return cached;
+
         var allCats = await _context.Categories
             .Where(c => c.IsActive)
             .Select(c => new CategoryCandidate(c.Id, c.Name, c.Level, c.ParentId))
@@ -171,7 +179,11 @@ public class AiSellerService : IAiSellerService
             .Select(m => new MaterialCandidate(m.Id, m.Name))
             .ToListAsync();
 
-        return new CandidateSet(catById, promptCats, promptTags, promptMats);
+        var result = new CandidateSet(catById, promptCats, promptTags, promptMats);
+
+        _cache.Set(CandidateCacheKey, result, TimeSpan.FromMinutes(5));
+
+        return result;
     }
 
     /// <summary>Ngữ cảnh từ lịch sử tag (accepted/modified) — dùng chung cho suggest-tags và analyze-*.</summary>
@@ -514,11 +526,17 @@ public class AiSellerService : IAiSellerService
             .Where(s => s.SellerId == sellerId && s.Action != ActionPending)
             .OrderByDescending(s => s.CreatedAt);
 
-        var all = await query.ToListAsync();
+        var total = await query.CountAsync();
+        var accepted = await query.CountAsync(s => s.Action == "accepted");
+        var modified = await query.CountAsync(s => s.Action == "modified");
+        var rejected = await query.CountAsync(s => s.Action == "rejected");
 
-        var items = all
+        var pagedRows = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
+            .ToListAsync();
+
+        var items = pagedRows
             .Select(s =>
             {
                 List<SuggestedTagJsonItem> suggestedTags;
@@ -561,10 +579,10 @@ public class AiSellerService : IAiSellerService
         return new TagSuggestionLogResponse
         {
             Items = items,
-            Total = all.Count,
-            Accepted = all.Count(s => s.Action == "accepted"),
-            Modified = all.Count(s => s.Action == "modified"),
-            Rejected = all.Count(s => s.Action == "rejected"),
+            Total = total,
+            Accepted = accepted,
+            Modified = modified,
+            Rejected = rejected,
         };
     }
 
@@ -574,9 +592,17 @@ public class AiSellerService : IAiSellerService
             .Where(s => s.SellerId == sellerId && s.Action != ActionPending)
             .OrderByDescending(s => s.CreatedAt);
 
-        var all = await query.ToListAsync();
+        var total = await query.CountAsync();
+        var accepted = await query.CountAsync(s => s.Action == "accepted");
+        var modified = await query.CountAsync(s => s.Action == "modified");
+        var rejected = await query.CountAsync(s => s.Action == "rejected");
 
-        var productIds = all.Select(s => s.ProductId).Distinct().ToList();
+        var pagedRows = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        var productIds = pagedRows.Select(s => s.ProductId).Distinct().ToList();
         var productTitles = await _context.Products.AsNoTracking()
             .Where(p => productIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p.Name);
@@ -584,9 +610,7 @@ public class AiSellerService : IAiSellerService
         var matById = await _context.Materials.AsNoTracking()
             .ToDictionaryAsync(m => m.Id, m => m.Name);
 
-        var items = all
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+        var items = pagedRows
             .Select(s =>
             {
                 List<SuggestedMaterialJsonItem> suggestedMats;
@@ -622,10 +646,10 @@ public class AiSellerService : IAiSellerService
         return new MaterialSuggestionLogResponse
         {
             Items = items,
-            Total = all.Count,
-            Accepted = all.Count(s => s.Action == "accepted"),
-            Modified = all.Count(s => s.Action == "modified"),
-            Rejected = all.Count(s => s.Action == "rejected"),
+            Total = total,
+            Accepted = accepted,
+            Modified = modified,
+            Rejected = rejected,
         };
     }
 
