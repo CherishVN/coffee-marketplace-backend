@@ -402,11 +402,12 @@ FodyWeavers.xsd
 # macOS
 .DS_Store
 
-# appsettings with sensitive data
-appsettings.Development.json
-appsettings.Production.json
-appsettings.*.json
-!appsettings.json
+# appsettings — không commit bí mật; dùng appsettings.Example.json làm mẫu
+**/appsettings.json
+**/appsettings.Development.json
+**/appsettings.Production.json
+**/appsettings.Local.json
+!**/appsettings.Example.json
 
 # Environment variables
 .env
