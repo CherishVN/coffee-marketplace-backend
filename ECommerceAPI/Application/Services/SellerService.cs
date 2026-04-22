@@ -1,6 +1,7 @@
 using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
+using Microsoft.AspNetCore.Http;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Hubs;
@@ -23,6 +24,8 @@ public class SellerService : ISellerService
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly ISellerWalletReleaseService _walletRelease;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly ISellerProductContentAlignmentClient _productContentAlignment;
 
     public SellerService(
         ApplicationDbContext context,
@@ -31,7 +34,9 @@ public class SellerService : ISellerService
         IUserAuthEmailResolver authResolver,
         ISellerWalletReversalService walletReversal,
         ISellerWalletReleaseService walletRelease,
-        IOrderNotificationEmailComposer orderEmailComposer)
+        IOrderNotificationEmailComposer orderEmailComposer,
+        IHttpContextAccessor httpContextAccessor,
+        ISellerProductContentAlignmentClient productContentAlignment)
     {
         _context = context;
         _hubContext = hubContext;
@@ -40,6 +45,8 @@ public class SellerService : ISellerService
         _walletReversal = walletReversal;
         _walletRelease = walletRelease;
         _orderEmailComposer = orderEmailComposer;
+        _httpContextAccessor = httpContextAccessor;
+        _productContentAlignment = productContentAlignment;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -661,6 +668,16 @@ public class SellerService : ISellerService
             };
         }
 
+        if (product.CategoryId.HasValue && dto.CategoryId.HasValue
+            && dto.CategoryId.Value != product.CategoryId.Value)
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = "Không thể đổi danh mục (mặt hàng) của sản phẩm sau khi đã tạo. Vui lòng tạo sản phẩm mới nếu cần bán mặt hàng khác."
+            };
+        }
+
         var effectiveCategoryId = dto.CategoryId ?? product.CategoryId;
         if (shop.PrimaryCategoryId.HasValue && effectiveCategoryId.HasValue)
         {
@@ -670,6 +687,53 @@ public class SellerService : ISellerService
                 {
                     Success = false,
                     Message = "Danh mục sản phẩm phải nằm trong ngành hàng bạn đã chọn lúc đăng ký seller."
+                };
+            }
+        }
+
+        var currentImageUrls = await _context.ProductImages
+            .AsNoTracking()
+            .Where(i => i.ProductId == product.Id)
+            .OrderBy(i => i.SortOrder)
+            .Select(i => i.ImageUrl)
+            .ToListAsync();
+
+        var proposedName = !string.IsNullOrWhiteSpace(dto.Name) ? dto.Name.Trim() : product.Name;
+        var proposedDesc = dto.Description != null ? dto.Description : product.Description;
+        var proposedImageUrls = dto.ImageUrls != null ? dto.ImageUrls : currentImageUrls;
+
+        var nameChanged = !string.IsNullOrWhiteSpace(dto.Name)
+            && !string.Equals(dto.Name.Trim(), product.Name, StringComparison.Ordinal);
+        var descChanged = dto.Description != null
+            && !string.Equals(dto.Description, product.Description ?? string.Empty, StringComparison.Ordinal);
+        var imagesChanged = dto.ImageUrls != null
+            && !currentImageUrls.SequenceEqual(dto.ImageUrls, StringComparer.Ordinal);
+
+        if (product.CategoryId.HasValue && (nameChanged || descChanged || imagesChanged))
+        {
+            var auth = _httpContextAccessor.HttpContext?.Request.Headers.Authorization.ToString();
+            if (string.IsNullOrEmpty(auth))
+            {
+                return new ServiceResponse
+                {
+                    Success = false,
+                    Message = "Không thể xác thực nội dung sản phẩm. Vui lòng đăng nhập lại."
+                };
+            }
+
+            var (alignedOk, alignError) = await _productContentAlignment.ValidateContentMatchesCategoryAsync(
+                auth,
+                proposedName,
+                proposedDesc,
+                proposedImageUrls,
+                product.CategoryId.Value);
+
+            if (!alignedOk)
+            {
+                return new ServiceResponse
+                {
+                    Success = false,
+                    Message = alignError ?? "Nội dung tên, mô tả hoặc ảnh không phù hợp mặt hàng (danh mục) sản phẩm."
                 };
             }
         }
