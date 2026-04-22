@@ -14,9 +14,9 @@ public class AiSellerService : IAiSellerService
 {
     private const string DefaultSystemPrompt = "Bạn là AI hỗ trợ seller.";
     private const string ActionPending = "pending";
-    private const int MaxPromptCategories = 150;
-    private const int MaxPromptTags = 200;
-    private const int MaxPromptMaterials = 150;
+    private const int MaxPromptCategories = 120;
+    private const int MaxPromptTags = 100;
+    private const int MaxPromptMaterials = 80;
     private const int MaxAnalyzeImageUrls = 2;
     private static readonly TimeSpan CandidateCacheDuration = TimeSpan.FromHours(1);
 
