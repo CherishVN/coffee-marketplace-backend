@@ -26,7 +26,7 @@ public class OcrController : ControllerBase
     [RequestSizeLimit(MaxBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxBytes)]
     public async Task<IActionResult> ReadVietnamIdCard(
-        [FromForm(Name = "image")] IFormFile image,
+        IFormFile image,
         CancellationToken cancellationToken)
     {
         if (image == null || image.Length < 1)
