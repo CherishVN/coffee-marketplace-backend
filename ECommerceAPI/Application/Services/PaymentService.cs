@@ -29,6 +29,7 @@ public class PaymentService : IPaymentService
     private readonly ISellerWalletSettlementService _sellerWalletSettlement;
     private readonly IMemoryCache _memoryCache;
     private readonly HttpClient _httpClient;
+    private readonly IOrderStatusHistoryService _orderStatusHistory;
 
     public PaymentService(
         ApplicationDbContext context,
@@ -38,7 +39,8 @@ public class PaymentService : IPaymentService
         INotificationService notifications,
         ISellerWalletSettlementService sellerWalletSettlement,
         IMemoryCache memoryCache,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IOrderStatusHistoryService orderStatusHistory)
     {
         _context = context;
         _vnPaySettings = vnPaySettings.Value;
@@ -48,6 +50,7 @@ public class PaymentService : IPaymentService
         _sellerWalletSettlement = sellerWalletSettlement;
         _memoryCache = memoryCache;
         _httpClient = httpClientFactory.CreateClient("MoMoGateway");
+        _orderStatusHistory = orderStatusHistory;
     }
 
     private string VnPayHashSecret => (_vnPaySettings.HashSecret ?? string.Empty).Trim();
@@ -377,13 +380,21 @@ public class PaymentService : IPaymentService
                 if (payment.Status == (short)PaymentStatus.Paid) continue; // idempotent
 
                 var order = payment.Order;
+                var previousOrderStatus = order.Status;
 
                 payment.Status = (short)PaymentStatus.Paid;
                 payment.PaidAt = DateTime.UtcNow;
                 payment.ProviderRef = transactionNo;
 
-                order.Status = (short)OrderStatus.Confirmed;
+                // Đã thanh toán → chờ shop xác nhận (PendingConfirmation), khi đó seller mới chuyển sang Confirmed.
+                order.Status = (short)OrderStatus.PendingConfirmation;
                 order.UpdatedAt = DateTime.UtcNow;
+                _orderStatusHistory.AddEntry(
+                    order.Id,
+                    previousOrderStatus,
+                    (short)OrderStatus.PendingConfirmation,
+                    null,
+                    "Thanh toán thành công (VNPay)");
 
                 // Giảm tồn kho
                 foreach (var item in order.OrderItems)
@@ -466,8 +477,16 @@ public class PaymentService : IPaymentService
                 payment.PaidAt = DateTime.UtcNow;
                 payment.ProviderRef = transactionNo;
 
-                payment.Order.Status = (short)OrderStatus.PendingPayment;
-                payment.Order.UpdatedAt = DateTime.UtcNow;
+                var failOrder = payment.Order;
+                var previousFailStatus = failOrder.Status;
+                failOrder.Status = (short)OrderStatus.PendingPayment;
+                failOrder.UpdatedAt = DateTime.UtcNow;
+                _orderStatusHistory.AddEntry(
+                    failOrder.Id,
+                    previousFailStatus,
+                    (short)OrderStatus.PendingPayment,
+                    null,
+                    $"Thanh toán chưa hoàn tất (VNPay, mã lỗi: {responseCode})");
             }
 
             await _context.SaveChangesAsync();
@@ -497,7 +516,13 @@ public class PaymentService : IPaymentService
         }
     }
 
-    public async Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId)
+    public async Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(
+        Guid orderId,
+        Guid customerId,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? moMoReturnUrlOverride = null,
+        string? moMoNotifyUrlOverride = null)
     {
         var order = await _context.Orders
             .AsNoTracking()
@@ -563,14 +588,43 @@ public class PaymentService : IPaymentService
         var amount = ((long)order.Total).ToString();
         var extraData = string.Empty;
 
+        // Cho phép FE gửi override (dev) — cùng quy tắc với VNPay return URL; nếu không hợp lệ, dùng cấu hình.
+        var returnUrl = _moMoSettings.ReturnUrl;
+        if (!string.IsNullOrWhiteSpace(moMoReturnUrlOverride)
+            && IsAllowedMoMoReturnUrlOverride(moMoReturnUrlOverride.Trim(), out var safeReturn)
+            && !string.IsNullOrEmpty(safeReturn))
+        {
+            returnUrl = safeReturn;
+            _logger.LogInformation("[MoMo] redirectUrl override host: {Host}", new Uri(safeReturn).Host);
+        }
+        else if (!string.IsNullOrWhiteSpace(moMoReturnUrlOverride))
+            _logger.LogWarning("[MoMo] MoMoReturnUrlOverride bị từ chối, dùng MoMo:ReturnUrl");
+
+        var notifyUrl = _moMoSettings.NotifyUrl;
+        if (!string.IsNullOrWhiteSpace(moMoNotifyUrlOverride)
+            && IsAllowedMoMoNotifyUrlOverride(moMoNotifyUrlOverride.Trim(), out var safeNotify)
+            && !string.IsNullOrEmpty(safeNotify))
+        {
+            notifyUrl = safeNotify;
+            _logger.LogInformation("[MoMo] ipnUrl override host: {Host}", new Uri(safeNotify).Host);
+        }
+        else if (!string.IsNullOrWhiteSpace(moMoNotifyUrlOverride))
+            _logger.LogWarning("[MoMo] MoMoNotifyUrlOverride bị từ chối, dùng MoMo:NotifyUrl");
+
+        var momoCacheOpts = new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(15));
+        if (IsAllowedClientReturnUrl(clientReturnSuccessUrl))
+            _memoryCache.Set($"MomoClientSuccess_{momoOrderId}", clientReturnSuccessUrl!.Trim(), momoCacheOpts);
+        if (IsAllowedClientReturnUrl(clientReturnFailureUrl))
+            _memoryCache.Set($"MomoClientFailure_{momoOrderId}", clientReturnFailureUrl!.Trim(), momoCacheOpts);
+
         var rawSignature = $"accessKey={_moMoSettings.AccessKey}" +
                            $"&amount={amount}" +
                            $"&extraData={extraData}" +
-                           $"&ipnUrl={_moMoSettings.NotifyUrl}" +
+                           $"&ipnUrl={notifyUrl}" +
                            $"&orderId={momoOrderId}" +
                            $"&orderInfo={orderInfo}" +
                            $"&partnerCode={_moMoSettings.PartnerCode}" +
-                           $"&redirectUrl={_moMoSettings.ReturnUrl}" +
+                           $"&redirectUrl={returnUrl}" +
                            $"&requestId={requestId}" +
                            $"&requestType={_moMoSettings.RequestType}";
 
@@ -585,8 +639,8 @@ public class PaymentService : IPaymentService
             amount,
             orderId = momoOrderId,
             orderInfo,
-            redirectUrl = _moMoSettings.ReturnUrl,
-            ipnUrl = _moMoSettings.NotifyUrl,
+            redirectUrl = returnUrl,
+            ipnUrl = notifyUrl,
             lang = "vi",
             extraData,
             requestType = _moMoSettings.RequestType,
@@ -778,6 +832,7 @@ public class PaymentService : IPaymentService
         }
 
         var order = payment.Order;
+        var momoPreviousOrderStatus = order.Status;
 
         if (resultCode == 0)
         {
@@ -788,8 +843,14 @@ public class PaymentService : IPaymentService
                 payment.ProviderRef = providerRef;
             }
 
-            order.Status = (short)OrderStatus.Confirmed;
+            order.Status = (short)OrderStatus.PendingConfirmation;
             order.UpdatedAt = DateTime.UtcNow;
+            _orderStatusHistory.AddEntry(
+                order.Id,
+                momoPreviousOrderStatus,
+                (short)OrderStatus.PendingConfirmation,
+                null,
+                "Thanh toán thành công (MoMo)");
 
             foreach (var item in order.OrderItems)
             {
@@ -869,6 +930,12 @@ public class PaymentService : IPaymentService
         // Giữ đơn ở trạng thái chờ thanh toán để khách có thể thử lại.
         order.Status = (short)OrderStatus.PendingPayment;
         order.UpdatedAt = DateTime.UtcNow;
+        _orderStatusHistory.AddEntry(
+            order.Id,
+            momoPreviousOrderStatus,
+            (short)OrderStatus.PendingPayment,
+            null,
+            $"Thanh toán MoMo chưa hoàn tất (mã: {resultCode})");
 
         await _context.SaveChangesAsync();
 
@@ -1080,6 +1147,68 @@ public class PaymentService : IPaymentService
 
         if (Uri.TryCreate(_vnPaySettings.ReturnUrl, UriKind.Absolute, out var cfgUri)
             && string.Equals(host, cfgUri.Host, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private bool IsAllowedMoMoReturnUrlOverride(string url, out string? normalized)
+    {
+        normalized = null;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        const string expectedSuffix = "/api/payments/momo/return";
+        if (!path.EndsWith(expectedSuffix, StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (!IsSafeMoMoCallbackHost(uri.Host)) return false;
+
+        normalized = url;
+        return true;
+    }
+
+    private bool IsAllowedMoMoNotifyUrlOverride(string url, out string? normalized)
+    {
+        normalized = null;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        const string expectedSuffix = "/api/payments/momo/ipn";
+        if (!path.EndsWith(expectedSuffix, StringComparison.OrdinalIgnoreCase)) return false;
+
+        if (!IsSafeMoMoCallbackHost(uri.Host)) return false;
+
+        normalized = url;
+        return true;
+    }
+
+    private bool IsSafeMoMoCallbackHost(string host)
+    {
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(host, "10.0.2.2", StringComparison.OrdinalIgnoreCase)) return true;
+        if (host.EndsWith(".run.app", StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (IPAddress.TryParse(host, out var ip))
+        {
+            if (IPAddress.IsLoopback(ip)) return true;
+            var bytes = ip.GetAddressBytes();
+            if (bytes.Length == 4 && IsPrivateIPv4(bytes.AsSpan())) return true;
+        }
+
+        if (Uri.TryCreate(_moMoSettings.ReturnUrl, UriKind.Absolute, out var rUri)
+            && string.Equals(host, rUri.Host, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (Uri.TryCreate(_moMoSettings.NotifyUrl, UriKind.Absolute, out var nUri)
+            && string.Equals(host, nUri.Host, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (Uri.TryCreate(_vnPaySettings.ReturnUrl, UriKind.Absolute, out var vUri)
+            && string.Equals(host, vUri.Host, StringComparison.OrdinalIgnoreCase))
             return true;
 
         return false;

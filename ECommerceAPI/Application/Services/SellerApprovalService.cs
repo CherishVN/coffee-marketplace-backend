@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.Interfaces;
@@ -730,14 +731,7 @@ public class SellerApprovalService : ISellerApprovalService
 
         if (!response.IsSuccessStatusCode || ghnResponse?.Code != 200 || ghnResponse.Data?.ShopId is null || ghnResponse.Data.ShopId <= 0)
         {
-            var message = ghnResponse?.CodeMessageValue
-                ?? ghnResponse?.CodeMessage
-                ?? ghnResponse?.Message;
-
-            if (string.IsNullOrWhiteSpace(message))
-            {
-                message = $"GHN trả về HTTP {(int)response.StatusCode}";
-            }
+            var message = GhnApiErrorText.FromResponseBody(responseText, (int)response.StatusCode);
 
             _logger.LogWarning(
                 "GHN create-store failed for shop {ShopId}. StatusCode={StatusCode}, Response={Response}",

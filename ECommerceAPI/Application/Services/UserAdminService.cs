@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -65,7 +66,10 @@ public class UserAdminService : IUserAdminService
             .ToListAsync();
 
         foreach (var u in users)
+        {
+            u.Phone = PhoneVnHelper.NormalizeToLocal(u.Phone) ?? u.Phone;
             u.StatusName = GetStatusDisplayName(u.Status, u.SuspensionReason);
+        }
 
         return new UserListResponseDto
         {
@@ -121,9 +125,10 @@ public class UserAdminService : IUserAdminService
 
         var auditLogs = new List<UserAuditLog>();
 
-        if (dto.Phone != null && dto.Phone != user.Phone)
+        var normalizedPhone = dto.Phone != null ? PhoneVnHelper.NormalizeToLocal(dto.Phone) : null;
+        if (normalizedPhone != null && normalizedPhone != user.Phone)
         {
-            var phoneExists = await _context.Users.AnyAsync(u => u.Phone == dto.Phone && u.Id != userId);
+            var phoneExists = await _context.Users.AnyAsync(u => u.Phone == normalizedPhone && u.Id != userId);
             if (phoneExists)
             {
                 return new UserResponseDto
@@ -133,8 +138,8 @@ public class UserAdminService : IUserAdminService
                 };
             }
 
-            auditLogs.Add(CreateAuditLog(userId, editorId, "UPDATE", "Phone", user.Phone, dto.Phone));
-            user.Phone = dto.Phone;
+            auditLogs.Add(CreateAuditLog(userId, editorId, "UPDATE", "Phone", user.Phone, normalizedPhone));
+            user.Phone = normalizedPhone;
         }
 
         if (dto.FullName != null && dto.FullName != user.FullName)
@@ -326,29 +331,30 @@ public class UserAdminService : IUserAdminService
         if (!exists)
             return new UserAddressesResponseDto { Success = false, Message = "Không tìm thấy user" };
 
-        var list = await _context.Addresses
+        var rows = await _context.Addresses
             .AsNoTracking()
             .Where(a => a.UserId == userId)
             .OrderByDescending(a => a.IsDefault)
             .ThenByDescending(a => a.CreatedAt)
-            .Select(a => new AdminUserAddressDto
-            {
-                Id = a.Id,
-                Label = a.Label,
-                FullName = a.FullName,
-                Phone = a.Phone,
-                AddressLine1 = a.AddressLine1,
-                AddressLine2 = a.AddressLine2,
-                Ward = a.Ward,
-                District = a.District,
-                City = a.City,
-                Province = a.Province,
-                PostalCode = a.PostalCode,
-                Country = a.Country,
-                IsDefault = a.IsDefault,
-                CreatedAt = a.CreatedAt
-            })
             .ToListAsync();
+
+        var list = rows.Select(a => new AdminUserAddressDto
+        {
+            Id = a.Id,
+            Label = a.Label,
+            FullName = a.FullName,
+            Phone = PhoneVnHelper.NormalizeToLocal(a.Phone) ?? a.Phone,
+            AddressLine1 = a.AddressLine1,
+            AddressLine2 = a.AddressLine2,
+            Ward = a.Ward,
+            District = a.District,
+            City = a.City,
+            Province = a.Province,
+            PostalCode = a.PostalCode,
+            Country = a.Country,
+            IsDefault = a.IsDefault,
+            CreatedAt = a.CreatedAt
+        }).ToList();
 
         return new UserAddressesResponseDto { Success = true, Addresses = list };
     }
@@ -578,7 +584,7 @@ public class UserAdminService : IUserAdminService
             Id = user.Id,
             UserCode = user.UserCode,
             FullName = user.FullName,
-            Phone = user.Phone,
+            Phone = PhoneVnHelper.NormalizeToLocal(user.Phone) ?? user.Phone,
             Role = user.Role?.Code ?? string.Empty,
             Status = user.Status,
             StatusName = GetStatusDisplayName(user.Status, user.SuspensionReason),

@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.EmailTemplates;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Enums;
@@ -28,6 +29,7 @@ public class OrderNotificationEmailComposer : IOrderNotificationEmailComposer
             .AsNoTracking()
             .Include(o => o.Shop)
             .Include(o => o.Customer)
+            .Include(o => o.Shipments)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
                 .ThenInclude(p => p.ProductImages)
@@ -66,7 +68,7 @@ public class OrderNotificationEmailComposer : IOrderNotificationEmailComposer
         }
 
         var deliveryUtc = newStatus == OrderStatus.Delivered
-            ? order.ActualDeliveryDate?.UtcDateTime
+            ? order.PrimaryShipment()?.ActualDeliveryDate?.UtcDateTime
             : null;
 
         var html = OrderStatusEmailHtml.Build(

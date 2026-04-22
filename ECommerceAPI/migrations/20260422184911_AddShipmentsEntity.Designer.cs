@@ -4,18 +4,21 @@ using System.Collections.Generic;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
 
 #nullable disable
 
-namespace ECommerceAPI.Migrations
+namespace ECommerceAPI.migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260422184911_AddShipmentsEntity")]
+    partial class AddShipmentsEntity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1422,6 +1425,10 @@ namespace ECommerceAPI.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<DateTimeOffset?>("ActualDeliveryDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("actual_delivery_date");
+
                     b.Property<string>("CancelReason")
                         .HasColumnType("text")
                         .HasColumnName("cancel_reason");
@@ -1436,10 +1443,21 @@ namespace ECommerceAPI.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("customer_id");
 
+                    b.Property<DateTimeOffset?>("EstimatedDeliveryDate")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("estimated_delivery_date");
+
                     b.Property<string>("OrderCode")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("order_code");
+
+                    b.Property<decimal>("ProviderShippingFee")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("provider_shipping_fee");
 
                     b.Property<string>("ShipAddress")
                         .HasColumnType("text")
@@ -1462,6 +1480,14 @@ namespace ECommerceAPI.Migrations
                         .HasColumnType("numeric(12,2)")
                         .HasColumnName("shipping_fee");
 
+                    b.Property<string>("ShippingProvider")
+                        .HasColumnType("text")
+                        .HasColumnName("shipping_provider");
+
+                    b.Property<string>("ShippingServiceId")
+                        .HasColumnType("text")
+                        .HasColumnName("shipping_service_id");
+
                     b.Property<Guid>("ShopId")
                         .HasColumnType("uuid")
                         .HasColumnName("shop_id");
@@ -1481,6 +1507,10 @@ namespace ECommerceAPI.Migrations
                         .HasPrecision(12, 2)
                         .HasColumnType("numeric(12,2)")
                         .HasColumnName("total");
+
+                    b.Property<string>("TrackingCode")
+                        .HasColumnType("text")
+                        .HasColumnName("tracking_code");
 
                     b.Property<Guid?>("TransactionId")
                         .HasColumnType("uuid")
@@ -2383,46 +2413,6 @@ namespace ECommerceAPI.Migrations
                         .IsUnique();
 
                     b.ToTable("shipments", (string)null);
-                });
-
-            modelBuilder.Entity("ECommerceAPI.Domain.Entities.OrderStatusHistory", b =>
-                {
-                    b.Property<Guid?>("ChangedBy")
-                        .HasColumnType("uuid")
-                        .HasColumnName("changed_by");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id")
-                        .HasDefaultValueSql("gen_random_uuid()");
-
-                    b.Property<short>("NewStatus")
-                        .HasColumnType("smallint")
-                        .HasColumnName("new_status");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text")
-                        .HasColumnName("note");
-
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("order_id");
-
-                    b.Property<short?>("PreviousStatus")
-                        .HasColumnType("smallint")
-                        .HasColumnName("previous_status");
-
-                    b.HasKey("Id")
-                        .HasName("order_status_histories_pkey");
-
-                    b.ToTable("order_status_histories", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAPI.Domain.Entities.Shop", b =>
@@ -3703,26 +3693,6 @@ namespace ECommerceAPI.Migrations
                     b.Navigation("Shop");
                 });
 
-            modelBuilder.Entity("ECommerceAPI.Domain.Entities.OrderStatusHistory", b =>
-                {
-                    b.HasOne("ECommerceAPI.Domain.Entities.User", "ChangedByUser")
-                        .WithMany()
-                        .HasForeignKey("ChangedBy")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("order_status_histories_changed_by_fkey");
-
-                    b.HasOne("ECommerceAPI.Domain.Entities.Order", "Order")
-                        .WithMany("OrderStatusHistories")
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("order_status_histories_order_id_fkey");
-
-                    b.Navigation("ChangedByUser");
-
-                    b.Navigation("Order");
-                });
-
             modelBuilder.Entity("ECommerceAPI.Domain.Entities.Shop", b =>
                 {
                     b.HasOne("ECommerceAPI.Domain.Entities.User", "Owner")
@@ -3907,8 +3877,6 @@ namespace ECommerceAPI.Migrations
                     b.Navigation("Dispute");
 
                     b.Navigation("OrderItems");
-
-                    b.Navigation("OrderStatusHistories");
 
                     b.Navigation("Payments");
 

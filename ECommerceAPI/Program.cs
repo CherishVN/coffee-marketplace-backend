@@ -83,6 +83,9 @@ namespace ECommerceAPI
                 // Avoid hanging outbound payment calls for too long.
                 client.Timeout = TimeSpan.FromSeconds(10);
             });
+            builder.Services.AddScoped<IOrderStatusHistoryService, OrderStatusHistoryService>();
+
+            builder.Services.AddScoped<IGhnOrderWebhookService, GhnOrderWebhookService>();
             builder.Services.AddScoped<ISellerService, SellerService>();
             builder.Services.AddScoped<ICustomerOrderService, CustomerOrderService>();
             builder.Services.AddScoped<IReviewService, ReviewService>();

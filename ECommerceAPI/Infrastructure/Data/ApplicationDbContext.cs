@@ -64,6 +64,10 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<Order> Orders { get; set; }
 
+    public virtual DbSet<OrderStatusHistory> OrderStatusHistories { get; set; }
+
+    public virtual DbSet<Shipment> Shipments { get; set; }
+
     public virtual DbSet<OrderItem> OrderItems { get; set; }
 
     public virtual DbSet<ECommerceAPI.Domain.Entities.Payment> Payments { get; set; }
@@ -976,17 +980,6 @@ public partial class ApplicationDbContext : DbContext
                 .HasDefaultValueSql("now()")
                 .HasColumnName("updated_at");
 
-            // Shipping provider fields
-            entity.Property(e => e.ProviderShippingFee)
-                .HasPrecision(12, 2)
-                .HasDefaultValue(0m)
-                .HasColumnName("provider_shipping_fee");
-            entity.Property(e => e.ShippingProvider).HasColumnName("shipping_provider");
-            entity.Property(e => e.ShippingServiceId).HasColumnName("shipping_service_id");
-            entity.Property(e => e.TrackingCode).HasColumnName("tracking_code");
-            entity.Property(e => e.EstimatedDeliveryDate).HasColumnName("estimated_delivery_date");
-            entity.Property(e => e.ActualDeliveryDate).HasColumnName("actual_delivery_date");
-
             entity.HasOne(d => d.Customer).WithMany(p => p.Orders)
                 .HasForeignKey(d => d.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict)
@@ -1006,6 +999,86 @@ public partial class ApplicationDbContext : DbContext
                 .HasForeignKey(d => d.TransactionId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("orders_transaction_id_fkey");
+        });
+
+        modelBuilder.Entity<OrderStatusHistory>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("order_status_histories_pkey");
+
+            entity.ToTable("order_status_histories");
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.PreviousStatus).HasColumnName("previous_status");
+            entity.Property(e => e.NewStatus).HasColumnName("new_status");
+            entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Order)
+                .WithMany(p => p.OrderStatusHistories)
+                .HasForeignKey(d => d.OrderId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("order_status_histories_order_id_fkey");
+
+            entity.HasOne(d => d.ChangedByUser)
+                .WithMany()
+                .HasForeignKey(d => d.ChangedBy)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("order_status_histories_changed_by_fkey");
+        });
+
+        modelBuilder.Entity<Shipment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("shipments_pkey");
+
+            entity.ToTable("shipments");
+
+            entity.HasIndex(e => e.TrackingCode, "shipments_tracking_code_key").IsUnique();
+
+            entity.Property(e => e.Id)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("id");
+            entity.Property(e => e.OrderId).HasColumnName("order_id");
+            entity.Property(e => e.ShopId).HasColumnName("shop_id");
+            entity.Property(e => e.ShippingProvider)
+                .HasDefaultValueSql("'GHN'::text")
+                .HasColumnName("shipping_provider");
+            entity.Property(e => e.ShippingServiceId).HasColumnName("shipping_service_id");
+            entity.Property(e => e.TrackingCode).HasColumnName("tracking_code");
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.ProviderShippingFee)
+                .HasPrecision(12, 2)
+                .HasDefaultValue(0m)
+                .HasColumnName("provider_shipping_fee");
+            entity.Property(e => e.CodAmount)
+                .HasPrecision(12, 2)
+                .HasDefaultValue(0m)
+                .HasColumnName("cod_amount");
+            entity.Property(e => e.EstimatedDeliveryDate).HasColumnName("estimated_delivery_date");
+            entity.Property(e => e.ActualDeliveryDate).HasColumnName("actual_delivery_date");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Order)
+                .WithMany(p => p.Shipments)
+                .HasForeignKey(d => d.OrderId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("shipments_order_id_fkey");
+
+            entity.HasOne(d => d.Shop)
+                .WithMany(p => p.Shipments)
+                .HasForeignKey(d => d.ShopId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("shipments_shop_id_fkey");
         });
 
         modelBuilder.Entity<OrderItem>(entity =>

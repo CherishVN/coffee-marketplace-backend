@@ -14,25 +14,8 @@ namespace ECommerceAPI.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AlterDatabase()
-                .Annotation("Npgsql:Enum:auth.aal_level", "aal1,aal2,aal3")
-                .Annotation("Npgsql:Enum:auth.code_challenge_method", "s256,plain")
-                .Annotation("Npgsql:Enum:auth.factor_status", "unverified,verified")
-                .Annotation("Npgsql:Enum:auth.factor_type", "totp,webauthn,phone")
-                .Annotation("Npgsql:Enum:auth.oauth_authorization_status", "pending,approved,denied,expired")
-                .Annotation("Npgsql:Enum:auth.oauth_client_type", "public,confidential")
-                .Annotation("Npgsql:Enum:auth.oauth_registration_type", "dynamic,manual")
-                .Annotation("Npgsql:Enum:auth.oauth_response_type", "code")
-                .Annotation("Npgsql:Enum:auth.one_time_token_type", "confirmation_token,reauthentication_token,recovery_token,email_change_token_new,email_change_token_current,phone_change_token")
-                .Annotation("Npgsql:Enum:realtime.action", "INSERT,UPDATE,DELETE,TRUNCATE,ERROR")
-                .Annotation("Npgsql:Enum:realtime.equality_op", "eq,neq,lt,lte,gt,gte,in")
-                .Annotation("Npgsql:Enum:storage.buckettype", "STANDARD,ANALYTICS,VECTOR")
-                .Annotation("Npgsql:PostgresExtension:extensions.pg_stat_statements", ",,")
-                .Annotation("Npgsql:PostgresExtension:extensions.pgcrypto", ",,")
-                .Annotation("Npgsql:PostgresExtension:extensions.uuid-ossp", ",,")
-                .Annotation("Npgsql:PostgresExtension:graphql.pg_graphql", ",,")
-                .Annotation("Npgsql:PostgresExtension:unaccent", ",,")
-                .Annotation("Npgsql:PostgresExtension:vault.supabase_vault", ",,");
+            // BỎ AlterDatabase() + Npgsql:Enum:auth.* — Khi chạy migration trên Supabase, bước này khiến EF tạo
+            // TYPE trong schema auth; user kết nối từ ứng dụng không có quyền (42501). Enums này đã do Supabase quản lý.
 
             migrationBuilder.CreateTable(
                 name: "categories",

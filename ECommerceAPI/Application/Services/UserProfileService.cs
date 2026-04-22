@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -62,7 +63,7 @@ public class UserProfileService : IUserProfileService
             UserCode = user.UserCode,
             Email = authEmail,
             FullName = user.FullName,
-            Phone = user.Phone,
+            Phone = PhoneVnHelper.NormalizeToLocal(user.Phone) ?? user.Phone,
             Role = user.Role?.Code ?? string.Empty,
             Status = user.Status,
             CreatedAt = user.CreatedAt,
@@ -71,7 +72,7 @@ public class UserProfileService : IUserProfileService
                 Id = shop.Id,
                 Name = shop.Name,
                 Description = shop.Description,
-                Phone = shop.Phone,
+                Phone = PhoneVnHelper.NormalizeToLocal(shop.Phone) ?? shop.Phone,
                 AddressLine = shop.AddressLine,
                 WardCode = shop.WardCode,
                 DistrictId = shop.DistrictId,
@@ -110,7 +111,7 @@ public class UserProfileService : IUserProfileService
             user.FullName = dto.FullName;
 
         if (!string.IsNullOrEmpty(dto.Phone))
-            user.Phone = dto.Phone;
+            user.Phone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone;
 
         user.UpdatedAt = DateTime.UtcNow;
 
@@ -198,7 +199,7 @@ public class UserProfileService : IUserProfileService
             existingShopForUser.Name = dto.ShopName;
             existingShopForUser.Slug = slug;
             existingShopForUser.Description = dto.ShopDescription;
-            existingShopForUser.Phone = dto.Phone;
+            existingShopForUser.Phone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone;
             existingShopForUser.AddressLine = dto.AddressLine;
             existingShopForUser.WardCode = dto.WardCode;
             existingShopForUser.DistrictId = dto.DistrictId;
@@ -247,7 +248,7 @@ public class UserProfileService : IUserProfileService
             Name = dto.ShopName,
             Slug = newSlug,
             Description = dto.ShopDescription,
-            Phone = dto.Phone,
+            Phone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone,
             AddressLine = dto.AddressLine,
             WardCode = dto.WardCode,
             DistrictId = dto.DistrictId,
@@ -282,30 +283,29 @@ public class UserProfileService : IUserProfileService
 
     public async Task<List<AddressDto>> GetAddressesAsync(Guid userId)
     {
-        var addresses = await _context.Addresses
+        var rows = await _context.Addresses
             .Where(a => a.UserId == userId)
             .OrderByDescending(a => a.IsDefault)
             .ThenByDescending(a => a.CreatedAt)
-            .Select(a => new AddressDto
-            {
-                Id = a.Id,
-                Label = a.Label,
-                FullName = a.FullName,
-                Phone = a.Phone,
-                AddressLine1 = a.AddressLine1,
-                AddressLine2 = a.AddressLine2,
-                Ward = a.Ward,
-                District = a.District,
-                City = a.City,
-                Province = a.Province,
-                PostalCode = a.PostalCode,
-                Country = a.Country,
-                IsDefault = a.IsDefault,
-                CreatedAt = a.CreatedAt
-            })
             .ToListAsync();
 
-        return addresses;
+        return rows.Select(a => new AddressDto
+        {
+            Id = a.Id,
+            Label = a.Label,
+            FullName = a.FullName,
+            Phone = PhoneVnHelper.NormalizeToLocal(a.Phone) ?? a.Phone,
+            AddressLine1 = a.AddressLine1,
+            AddressLine2 = a.AddressLine2,
+            Ward = a.Ward,
+            District = a.District,
+            City = a.City,
+            Province = a.Province,
+            PostalCode = a.PostalCode,
+            Country = a.Country,
+            IsDefault = a.IsDefault,
+            CreatedAt = a.CreatedAt
+        }).ToList();
     }
 
     public async Task<ServiceResponse<AddressDto>> AddAddressAsync(Guid userId, AddAddressDto dto)
@@ -331,7 +331,7 @@ public class UserProfileService : IUserProfileService
             UserId = userId,
             Label = dto.Label,
             FullName = dto.FullName,
-            Phone = dto.Phone,
+            Phone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone,
             AddressLine1 = dto.AddressLine1,
             AddressLine2 = dto.AddressLine2,
             Ward = dto.Ward,
@@ -357,7 +357,7 @@ public class UserProfileService : IUserProfileService
                 Id = address.Id,
                 Label = address.Label,
                 FullName = address.FullName,
-                Phone = address.Phone,
+                Phone = PhoneVnHelper.NormalizeToLocal(address.Phone) ?? address.Phone,
                 AddressLine1 = address.AddressLine1,
                 AddressLine2 = address.AddressLine2,
                 Ward = address.Ward,
@@ -406,7 +406,7 @@ public class UserProfileService : IUserProfileService
         if (!string.IsNullOrEmpty(dto.FullName))
             address.FullName = dto.FullName;
         if (!string.IsNullOrEmpty(dto.Phone))
-            address.Phone = dto.Phone;
+            address.Phone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone;
         if (!string.IsNullOrEmpty(dto.AddressLine1))
             address.AddressLine1 = dto.AddressLine1;
         if (dto.AddressLine2 != null)

@@ -147,7 +147,13 @@ public class PaymentsController : ControllerBase
         if (customerId == null)
             return Unauthorized(new { success = false, message = "Token không hợp lệ" });
 
-        var result = await _paymentService.CreateMoMoPaymentAsync(dto.OrderId, customerId.Value);
+        var result = await _paymentService.CreateMoMoPaymentAsync(
+            dto.OrderId,
+            customerId.Value,
+            dto.ClientReturnSuccessUrl,
+            dto.ClientReturnFailureUrl,
+            dto.MoMoReturnUrlOverride,
+            dto.MoMoNotifyUrlOverride);
 
         if (!result.Success)
             return BadRequest(result);
@@ -178,13 +184,43 @@ public class PaymentsController : ControllerBase
     {
         _logger.LogInformation("[MoMo Return] Received: {QueryString}", Request.QueryString.Value);
 
+        var momoOrderIdStr = Request.Query["orderId"].ToString();
+        _memoryCache.TryGetValue($"MomoClientSuccess_{momoOrderIdStr}", out string? clientSuccess);
+        _memoryCache.TryGetValue($"MomoClientFailure_{momoOrderIdStr}", out string? clientFailure);
+
         var result = await _paymentService.ProcessMoMoReturnAsync(Request.Query);
 
         var frontendUrl = (_configuration["FrontendUrl"] ?? "https://ecomviet.vercel.app").TrimEnd('/');
 
         if (result.Success)
+        {
+            if (!string.IsNullOrWhiteSpace(clientSuccess))
+            {
+                var url = QueryHelpers.AddQueryString(
+                    clientSuccess.Trim(),
+                    new Dictionary<string, string?>
+                    {
+                        ["orderId"] = result.OrderId?.ToString(),
+                        ["amount"] = result.Amount.ToString(CultureInfo.InvariantCulture),
+                    });
+                return Redirect(url);
+            }
+
             return Redirect($"{frontendUrl}/payment/success?orderCode={result.OrderCode}&amount={result.Amount}");
-        else
-            return Redirect($"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}&orderCode={Uri.EscapeDataString(result.OrderCode ?? string.Empty)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(clientFailure))
+        {
+            var url = QueryHelpers.AddQueryString(
+                clientFailure.Trim(),
+                new Dictionary<string, string?>
+                {
+                    ["message"] = result.Message ?? "Thanh toán thất bại",
+                });
+            return Redirect(url);
+        }
+
+        return Redirect(
+            $"{frontendUrl}/payment/failed?message={Uri.EscapeDataString(result.Message ?? "Thanh toán thất bại")}&orderCode={Uri.EscapeDataString(result.OrderCode ?? string.Empty)}");
     }
 }

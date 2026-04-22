@@ -19,7 +19,6 @@ public class ShopShippingOptionDto
     public Guid ShopId { get; set; }
     public string? ShippingProvider { get; set; }
     public string? ShippingServiceId { get; set; }
-    public decimal ProviderShippingFee { get; set; }
     public decimal ShippingFee { get; set; }
     public DateTimeOffset? EstimatedDeliveryDate { get; set; }
 }

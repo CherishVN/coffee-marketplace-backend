@@ -17,6 +17,16 @@ public class CreatePaymentDto
     /// Web: để trống để dùng cấu hình VNPay:ReturnUrl.
     /// </summary>
     public string? VnPayReturnUrlOverride { get; set; }
+
+    /// <summary>
+    /// (Tùy chọn) Return URL (redirectUrl) gửi lên MoMo — phải trỏ tới <c>/api/payments/momo/return</c> trên API.
+    /// </summary>
+    public string? MoMoReturnUrlOverride { get; set; }
+
+    /// <summary>
+    /// (Tùy chọn) IPN (ipnUrl) cho MoMo — phải trỏ tới <c>/api/payments/momo/ipn</c> (môi trường local cần URL public kiểu ngrok).
+    /// </summary>
+    public string? MoMoNotifyUrlOverride { get; set; }
 }
 
 /// <summary>

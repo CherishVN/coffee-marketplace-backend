@@ -1,4 +1,5 @@
 using ECommerceAPI.Application;
+using ECommerceAPI.Application.DTOs.Orders;
 using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Http;
@@ -26,6 +27,7 @@ public class SellerService : ISellerService
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ISellerProductContentAlignmentClient _productContentAlignment;
+    private readonly IOrderStatusHistoryService _orderStatusHistory;
 
     public SellerService(
         ApplicationDbContext context,
@@ -36,7 +38,8 @@ public class SellerService : ISellerService
         ISellerWalletReleaseService walletRelease,
         IOrderNotificationEmailComposer orderEmailComposer,
         IHttpContextAccessor httpContextAccessor,
-        ISellerProductContentAlignmentClient productContentAlignment)
+        ISellerProductContentAlignmentClient productContentAlignment,
+        IOrderStatusHistoryService orderStatusHistory)
     {
         _context = context;
         _hubContext = hubContext;
@@ -46,6 +49,7 @@ public class SellerService : ISellerService
         _walletRelease = walletRelease;
         _orderEmailComposer = orderEmailComposer;
         _httpContextAccessor = httpContextAccessor;
+        _orderStatusHistory = orderStatusHistory;
         _productContentAlignment = productContentAlignment;
     }
 
@@ -75,7 +79,7 @@ public class SellerService : ISellerService
                 Slug = shop.Slug,
                 Description = shop.Description,
                 LogoUrl = shop.LogoUrl,
-                Phone = shop.Phone,
+                Phone = PhoneVnHelper.NormalizeToLocal(shop.Phone) ?? shop.Phone,
                 AddressLine = shop.AddressLine,
                 WardCode = shop.WardCode,
                 DistrictId = shop.DistrictId,
@@ -115,7 +119,7 @@ public class SellerService : ISellerService
             shop.LogoUrl = dto.LogoUrl;
 
         if (dto.Phone != null)
-            shop.Phone = dto.Phone;
+            shop.Phone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone;
 
         if (dto.AddressLine != null)
             shop.AddressLine = dto.AddressLine;
@@ -1041,6 +1045,7 @@ public class SellerService : ISellerService
         var query = _context.Orders
             .Include(o => o.Customer)
             .Include(o => o.ShippingAddress)
+            .Include(o => o.Shipments)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
                     .ThenInclude(p => p.ProductImages)
@@ -1064,29 +1069,35 @@ public class SellerService : ISellerService
 
         var totalCount = await query.CountAsync();
 
-        var orders = await query
+        var orderRows = await query
             .OrderByDescending(o => o.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(o => new OrderDto
+            .ToListAsync();
+
+        var orders = orderRows.Select(o =>
+        {
+            var s = o.ShipmentForDisplay();
+            return new OrderDto
             {
                 Id = o.Id,
                 OrderCode = o.OrderCode,
                 CustomerId = o.CustomerId,
                 CustomerName = o.Customer.FullName,
-                CustomerPhone = o.Customer.Phone,
+                CustomerPhone = CustomerPhoneForOrderDto(o),
+                ShipPhone = PhoneVnHelper.NormalizeToLocal(o.ShipPhone) ?? o.ShipPhone?.Trim(),
                 TotalAmount = o.Total,
                 Status = o.Status,
                 CancelReason = o.CancelReason,
-                ShippingAddress = o.ShippingAddress != null 
+                ShippingAddress = o.ShippingAddress != null
                     ? $"{o.ShippingAddress.AddressLine1}, {o.ShippingAddress.Ward}, {o.ShippingAddress.District}, {o.ShippingAddress.City}"
                     : o.ShipAddress,
-                ProviderShippingFee = o.ProviderShippingFee,
-                ShippingProvider = o.ShippingProvider,
-                ShippingServiceId = o.ShippingServiceId,
-                TrackingCode = o.TrackingCode,
-                EstimatedDeliveryDate = o.EstimatedDeliveryDate,
-                ActualDeliveryDate = o.ActualDeliveryDate,
+                ShippingFee = o.ShippingFee,
+                ShippingProvider = s?.ShippingProvider,
+                ShippingServiceId = s?.ShippingServiceId,
+                TrackingCode = s.GhnDisplayTrackingOrNull(),
+                EstimatedDeliveryDate = s?.EstimatedDeliveryDate,
+                ActualDeliveryDate = s?.ActualDeliveryDate,
                 CreatedAt = o.CreatedAt,
                 ShopGhnShopId = shop.GhnShopId,
                 ShopFromDistrictId = shop.DistrictId,
@@ -1105,8 +1116,8 @@ public class SellerService : ISellerService
                     UnitPrice = oi.UnitPrice,
                     TotalPrice = oi.LineTotal
                 }).ToList()
-            })
-            .ToListAsync();
+            };
+        }).ToList();
 
         var customerIds = orders.Select(o => o.CustomerId).Distinct().ToList();
         if (customerIds.Count > 0)
@@ -1153,6 +1164,8 @@ public class SellerService : ISellerService
         var order = await _context.Orders
             .Include(o => o.Customer)
             .Include(o => o.ShippingAddress)
+            .Include(o => o.Shipments)
+            .Include(o => o.OrderStatusHistories)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
                     .ThenInclude(p => p.ProductImages)
@@ -1169,6 +1182,12 @@ public class SellerService : ISellerService
             };
         }
 
+        var ship = order.ShipmentForDisplay();
+        var histories = order.OrderStatusHistories.OrderBy(x => x.CreatedAt).ToList();
+        var statusEnum = (OrderStatus)order.Status;
+        var statusHistoryDtos = OrderStatusTimelineBuilder.MapHistory(histories, order.CustomerId, shop.OwnerId, forSellerView: true);
+        var statusTimelineDtos = OrderStatusTimelineBuilder.BuildSteps(statusEnum, order, histories);
+
         return new ServiceResponse<OrderDto>
         {
             Success = true,
@@ -1180,20 +1199,24 @@ public class SellerService : ISellerService
                 CustomerName = order.Customer.FullName,
                 CustomerEmail = await _authResolver.GetEmailByUserIdAsync(order.CustomerId),
                 CustomerAvatarUrl = await _authResolver.GetAvatarUrlByUserIdAsync(order.CustomerId),
-                CustomerPhone = order.Customer.Phone,
+                CustomerPhone = CustomerPhoneForOrderDto(order),
+                ShipPhone = PhoneVnHelper.NormalizeToLocal(order.ShipPhone) ?? order.ShipPhone?.Trim(),
                 TotalAmount = order.Total,
                 Status = order.Status,
                 CancelReason = order.CancelReason,
-                ShippingAddress = order.ShippingAddress != null 
+                ShippingAddress = order.ShippingAddress != null
                     ? $"{order.ShippingAddress.AddressLine1}, {order.ShippingAddress.Ward}, {order.ShippingAddress.District}, {order.ShippingAddress.City}"
                     : order.ShipAddress,
-                ProviderShippingFee = order.ProviderShippingFee,
-                ShippingProvider = order.ShippingProvider,
-                ShippingServiceId = order.ShippingServiceId,
-                TrackingCode = order.TrackingCode,
-                EstimatedDeliveryDate = order.EstimatedDeliveryDate,
-                ActualDeliveryDate = order.ActualDeliveryDate,
+                ShippingFee = order.ShippingFee,
+                ShippingProvider = ship?.ShippingProvider,
+                ShippingServiceId = ship?.ShippingServiceId,
+                TrackingCode = ship.GhnDisplayTrackingOrNull(),
+                EstimatedDeliveryDate = ship?.EstimatedDeliveryDate,
+                ActualDeliveryDate = ship?.ActualDeliveryDate,
                 CreatedAt = order.CreatedAt,
+                UpdatedAt = order.UpdatedAt,
+                StatusHistory = statusHistoryDtos,
+                StatusTimeline = statusTimelineDtos,
                 ShopGhnShopId = shop.GhnShopId,
                 ShopFromDistrictId = shop.DistrictId,
                 ShopFromWardCode = shop.WardCode,
@@ -1231,6 +1254,7 @@ public class SellerService : ISellerService
 
         var order = await _context.Orders
             .Include(o => o.OrderItems)
+            .Include(o => o.Shipments)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.ShopId == shop.Id);
 
         if (order == null)
@@ -1244,7 +1268,23 @@ public class SellerService : ISellerService
 
         var oldStatus = (OrderStatus)order.Status;
         var newOrderStatus = (OrderStatus)dto.Status;
+        if (!IsAllowedSellerOrderTransition(oldStatus, newOrderStatus))
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message =
+                    $"Không thể chuyển từ {OrderStatusVnHelper.Vietnamese(oldStatus)} sang {OrderStatusVnHelper.Vietnamese(newOrderStatus)}"
+            };
+        }
+
         order.Status = dto.Status;
+        _orderStatusHistory.AddEntry(
+            order.Id,
+            (short)oldStatus,
+            (short)newOrderStatus,
+            userId,
+            dto.Note);
         if (newOrderStatus == OrderStatus.Cancelled)
         {
             order.CancelReason = string.IsNullOrWhiteSpace(dto.Note)
@@ -1255,12 +1295,22 @@ public class SellerService : ISellerService
 
         if (!string.IsNullOrEmpty(dto.TrackingCode))
         {
-            order.TrackingCode = dto.TrackingCode;
+            var s = order.PrimaryShipment();
+            if (s != null)
+            {
+                s.TrackingCode = dto.TrackingCode;
+                s.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         if (newOrderStatus == OrderStatus.Delivered && oldStatus != OrderStatus.Delivered)
         {
-            order.ActualDeliveryDate = DateTime.UtcNow;
+            var s = order.PrimaryShipment();
+            if (s != null)
+            {
+                s.ActualDeliveryDate = DateTimeOffset.UtcNow;
+                s.UpdatedAt = DateTime.UtcNow;
+            }
         }
 
         // Cộng SoldCount khi đơn lần đầu đạt Completed(6) — khách xác nhận nhận hàng
@@ -1294,7 +1344,7 @@ public class SellerService : ISellerService
             order.CustomerId,
             nameof(NotificationType.Order),
             "Cập nhật trạng thái đơn hàng",
-            $"Đơn #{code} chuyển từ {oldStatus} sang {newStatus}.",
+            $"Đơn #{code} chuyển từ {OrderStatusVnHelper.Vietnamese(oldStatus)} sang {OrderStatusVnHelper.Vietnamese(newStatus)}.",
             "Order",
             order.Id,
             queueEmail: true,
@@ -1438,6 +1488,24 @@ public class SellerService : ISellerService
         }
     }
 
+    /// <summary>Luồng seller: 1→2 (xác nhận), 2→3, 3→4, 4→5, 5→6; hủy ở một số bước.</summary>
+    private static bool IsAllowedSellerOrderTransition(OrderStatus from, OrderStatus to)
+    {
+        if (from == to) return true;
+        return (from, to) switch
+        {
+            (OrderStatus.PendingConfirmation, OrderStatus.Confirmed) => true,
+            (OrderStatus.PendingConfirmation, OrderStatus.Cancelled) => true,
+            (OrderStatus.Confirmed, OrderStatus.Processing) => true,
+            (OrderStatus.Confirmed, OrderStatus.Cancelled) => true,
+            (OrderStatus.Processing, OrderStatus.Shipping) => true,
+            (OrderStatus.Processing, OrderStatus.Cancelled) => true,
+            (OrderStatus.Shipping, OrderStatus.Delivered) => true,
+            (OrderStatus.Delivered, OrderStatus.Completed) => true,
+            _ => false
+        };
+    }
+
     private async Task NotifyStatusChanged(Order order, OrderStatus oldStatus, OrderStatus newStatus)
     {
         var groupName = OrderTrackingHub.GetUserGroupName(order.CustomerId);
@@ -1446,9 +1514,9 @@ public class SellerService : ISellerService
         {
             orderId = order.Id,
             oldStatus = (short)oldStatus,
-            oldStatusName = oldStatus.ToString(),
+            oldStatusName = OrderStatusVnHelper.Vietnamese(oldStatus),
             newStatus = (short)newStatus,
-            newStatusName = newStatus.ToString(),
+            newStatusName = OrderStatusVnHelper.Vietnamese(newStatus),
             updatedAt = order.UpdatedAt
         });
     }
@@ -1579,5 +1647,19 @@ public class SellerService : ISellerService
         slug = slug.Trim('-');
 
         return string.IsNullOrWhiteSpace(slug) ? "product" : slug;
+    }
+
+    /// <summary>
+    /// SĐT giao hàng cho seller / tạo vận đơn GHN: ưu tiên <see cref="Order.ShipPhone"/> (lúc checkout),
+    /// sau đó mới tới SĐT tài khoản khách.
+    /// </summary>
+    private static string? CustomerPhoneForOrderDto(Order order)
+    {
+        var raw = !string.IsNullOrWhiteSpace(order.ShipPhone)
+            ? order.ShipPhone
+            : order.Customer?.Phone;
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+        return PhoneVnHelper.NormalizeToLocal(raw) ?? raw.Trim();
     }
 }

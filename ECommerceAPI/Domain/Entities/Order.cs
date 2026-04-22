@@ -37,24 +37,6 @@ public partial class Order
 
     public Guid? TransactionId { get; set; }
 
-    /// <summary>Phí thực tế trả cho GHN</summary>
-    public decimal ProviderShippingFee { get; set; } = 0;
-
-    /// <summary>Đối tác vận chuyển (VD: 'GHN')</summary>
-    public string? ShippingProvider { get; set; }
-
-    /// <summary>Gói dịch vụ (VD: '53320')</summary>
-    public string? ShippingServiceId { get; set; }
-
-    /// <summary>Mã vận đơn GHN</summary>
-    public string? TrackingCode { get; set; }
-
-    /// <summary>Dự kiến giao hàng</summary>
-    public DateTimeOffset? EstimatedDeliveryDate { get; set; }
-
-    /// <summary>Thời gian giao thực tế</summary>
-    public DateTimeOffset? ActualDeliveryDate { get; set; }
-
     public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 
     public virtual User Customer { get; set; } = null!;
@@ -73,4 +55,8 @@ public partial class Order
 
     // Dispute (mỗi order chỉ có tối đa 1 dispute)
     public virtual Dispute? Dispute { get; set; }
+
+    public virtual ICollection<Shipment> Shipments { get; set; } = new List<Shipment>();
+
+    public virtual ICollection<OrderStatusHistory> OrderStatusHistories { get; set; } = new List<OrderStatusHistory>();
 }

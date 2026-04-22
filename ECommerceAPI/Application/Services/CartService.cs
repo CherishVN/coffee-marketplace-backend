@@ -11,12 +11,16 @@ public class CartService : ICartService
 {
     private readonly ApplicationDbContext _context;
     private readonly IConfiguration _configuration;
-    private const decimal ShippingFeePerShop = 30_000m;
+    private readonly IOrderStatusHistoryService _orderStatusHistory;
 
-    public CartService(ApplicationDbContext context, IConfiguration configuration)
+    public CartService(
+        ApplicationDbContext context,
+        IConfiguration configuration,
+        IOrderStatusHistoryService orderStatusHistory)
     {
         _context = context;
         _configuration = configuration;
+        _orderStatusHistory = orderStatusHistory;
     }
 
     // ── Xem giỏ hàng ────────────────────────────────────────────────────────
@@ -257,12 +261,31 @@ public class CartService : ICartService
         var totalAmount = 0m;
         var shipAddress = $"{address.AddressLine1}, {address.Ward}, {address.District}, {address.City}";
 
+        if (dto.ShippingOptions == null || dto.ShippingOptions.Count == 0)
+        {
+            return new CheckoutResponseDto
+            {
+                Success = false,
+                Message =
+                    "Thiếu phí vận chuyển theo từng shop. Vui lòng chọn địa chỉ hợp lệ và đợi hệ thống tính phí GHN (tỉnh/quận/xã phải khớp dữ liệu GHN)."
+            };
+        }
+
         foreach (var shopGroup in itemsByShop)
         {
             var shopId = shopGroup.Key;
-            var shippingOption = dto.ShippingOptions?.FirstOrDefault(x => x.ShopId == shopId);
-            var shippingFee = shippingOption?.ShippingFee ?? ShippingFeePerShop;
-            var providerShippingFee = shippingOption?.ProviderShippingFee ?? 0m;
+            var shippingOption = dto.ShippingOptions.FirstOrDefault(x => x.ShopId == shopId);
+            if (shippingOption == null)
+            {
+                return new CheckoutResponseDto
+                {
+                    Success = false,
+                    Message =
+                        "Thiếu phí vận chuyển cho một hoặc nhiều shop. Vui lòng tải lại trang checkout và tính lại phí GHN."
+                };
+            }
+
+            var shippingFee = shippingOption.ShippingFee;
             var subtotal = shopGroup.Sum(ci => ci.UnitPrice * ci.Quantity);
             var total = subtotal + shippingFee;
 
@@ -283,10 +306,6 @@ public class CartService : ICartService
                 Status = 0,
                 Subtotal = subtotal,
                 ShippingFee = shippingFee,
-                ProviderShippingFee = providerShippingFee,
-                ShippingProvider = "GHN",
-                ShippingServiceId = shippingOption?.ShippingServiceId,
-                EstimatedDeliveryDate = estimatedDelivery,
                 Total = total,
                 ShipFullName = address.FullName,
                 ShipPhone = address.Phone,
@@ -297,6 +316,12 @@ public class CartService : ICartService
             };
 
             _context.Orders.Add(order);
+            _orderStatusHistory.AddEntry(
+                order.Id,
+                null,
+                0,
+                customerId,
+                "Tạo đơn từ giỏ hàng");
 
             foreach (var ci in shopGroup)
             {
@@ -322,6 +347,22 @@ public class CartService : ICartService
                     inv.UpdatedAt = DateTime.UtcNow;
                 }
             }
+
+            _context.Shipments.Add(new Shipment
+            {
+                Id = Guid.NewGuid(),
+                OrderId = order.Id,
+                ShopId = shopId,
+                ShippingProvider = "GHN",
+                ShippingServiceId = shippingOption?.ShippingServiceId,
+                TrackingCode = $"PEND-{order.Id:N}",
+                Status = "pending_label",
+                ProviderShippingFee = shippingFee,
+                CodAmount = 0m,
+                EstimatedDeliveryDate = estimatedDelivery,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
 
             orderIds.Add(order.Id);
             totalAmount += total;

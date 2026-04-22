@@ -24,6 +24,7 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly ICustomerWalletService _customerWallet;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly IOrderStatusHistoryService _orderStatusHistory;
 
     public CustomerOrderService(
         ApplicationDbContext context,
@@ -34,7 +35,8 @@ public class CustomerOrderService : ICustomerOrderService
         IOrderNotificationEmailComposer orderEmailComposer,
         ICustomerWalletService customerWallet,
         IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IOrderStatusHistoryService orderStatusHistory)
     {
         _context = context;
         _hubContext = hubContext;
@@ -45,6 +47,7 @@ public class CustomerOrderService : ICustomerOrderService
         _customerWallet = customerWallet;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _orderStatusHistory = orderStatusHistory;
     }
 
     public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
@@ -106,6 +109,7 @@ public class CustomerOrderService : ICustomerOrderService
             ShopSlug = o.Shop.Slug,
             ShopName = o.Shop.Name,
             TotalAmount = o.Total,
+            ShippingFee = o.ShippingFee,
             Status = o.Status,
             CreatedAt = o.CreatedAt,
             Items = o.OrderItems.Select(oi => new CustomerOrderItemDto
@@ -137,6 +141,7 @@ public class CustomerOrderService : ICustomerOrderService
     {
         var order = await _context.Orders
             .Include(o => o.Shop)
+            .Include(o => o.OrderStatusHistories)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
                     .ThenInclude(p => p.ProductImages)
@@ -163,6 +168,9 @@ public class CustomerOrderService : ICustomerOrderService
                 .ToListAsync())
                 .ToHashSet();
 
+        var histories = order.OrderStatusHistories.OrderBy(x => x.CreatedAt).ToList();
+        var shopOwnerId = order.Shop?.OwnerId;
+
         var detail = new CustomerOrderDetailDto
         {
             Id = order.Id,
@@ -177,10 +185,14 @@ public class CustomerOrderService : ICustomerOrderService
             ShopSlug = order.Shop.Slug,
             ShopName = order.Shop.Name,
             TotalAmount = order.Total,
+            ShippingFee = order.ShippingFee,
             Status = order.Status,
             CreatedAt = order.CreatedAt,
+            UpdatedAt = order.UpdatedAt,
+            StatusHistory = OrderStatusTimelineBuilder.MapHistory(histories, order.CustomerId, shopOwnerId, forSellerView: false),
+            StatusTimeline = OrderStatusTimelineBuilder.BuildSteps((OrderStatus)order.Status, order, histories),
             ShipFullName = order.ShipFullName,
-            ShipPhone = order.ShipPhone,
+            ShipPhone = PhoneVnHelper.NormalizeToLocal(order.ShipPhone) ?? order.ShipPhone,
             ShipAddress = order.ShipAddress,
             Items = order.OrderItems.Select(oi => new CustomerOrderItemDto
             {
@@ -207,20 +219,21 @@ public class CustomerOrderService : ICustomerOrderService
     public async Task<OrderTrackingDto?> GetOrderTrackingAsync(Guid customerId, Guid orderId)
     {
         var order = await _context.Orders
+            .Include(o => o.OrderStatusHistories)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
 
         if (order == null)
             return null;
 
         var statusEnum = (OrderStatus)order.Status;
-
-        var steps = BuildTimeline(statusEnum, order);
+        var historyList = order.OrderStatusHistories.OrderBy(x => x.CreatedAt).ToList();
+        var steps = OrderStatusTimelineBuilder.BuildSteps(statusEnum, order, historyList);
 
         return new OrderTrackingDto
         {
             OrderId = order.Id,
             CurrentStatus = order.Status,
-            CurrentStatusName = statusEnum.ToString(),
+            CurrentStatusName = OrderStatusVnHelper.Vietnamese(statusEnum),
             CreatedAt = order.CreatedAt,
             UpdatedAt = order.UpdatedAt,
             Timeline = steps
@@ -253,6 +266,12 @@ public class CustomerOrderService : ICustomerOrderService
 
         order.Status = (short)OrderStatus.Completed;
         order.UpdatedAt = DateTime.UtcNow;
+        _orderStatusHistory.AddEntry(
+            order.Id,
+            (short)OrderStatus.Delivered,
+            (short)OrderStatus.Completed,
+            customerId,
+            "Khách xác nhận đã nhận hàng");
 
         // Delivered → Completed: cộng SoldCount (chưa cộng khi ở Delivered)
         foreach (var item in order.OrderItems)
@@ -290,89 +309,9 @@ public class CustomerOrderService : ICustomerOrderService
             Message = "Xác nhận đã nhận hàng thành công",
             OrderId = order.Id,
             NewStatus = order.Status,
-            NewStatusName = OrderStatus.Completed.ToString(),
+            NewStatusName = OrderStatusVnHelper.Vietnamese(OrderStatus.Completed),
             UpdatedAt = order.UpdatedAt
         };
-    }
-
-    private static List<OrderStatusStepDto> BuildTimeline(OrderStatus currentStatus, Order order)
-    {
-        // Normal flow steps (theo đúng OrderStatus enum)
-        var normalFlow = new List<OrderStatus>
-        {
-            OrderStatus.PendingPayment,
-            OrderStatus.PendingConfirmation,
-            OrderStatus.Confirmed,
-            OrderStatus.Processing,
-            OrderStatus.Shipping,
-            OrderStatus.Delivered,
-            OrderStatus.Completed,
-        };
-
-        // Terminal / out-of-flow statuses
-        var terminalStatuses = new[]
-        {
-            OrderStatus.Cancelled,
-            OrderStatus.Refunded,
-        };
-
-        var result = new List<OrderStatusStepDto>();
-
-        // Build normal flow steps
-        foreach (var status in normalFlow)
-        {
-            string state;
-
-            if (currentStatus == OrderStatus.Cancelled || currentStatus == OrderStatus.Refunded)
-            {
-                // Order ended abnormally — mark all normal steps as cancelled
-                state = "cancelled";
-            }
-            else if (currentStatus == status)
-            {
-                state = "current";
-            }
-            else if (currentStatus > status)
-            {
-                state = "completed";
-            }
-            else
-            {
-                state = "upcoming";
-            }
-
-            result.Add(new OrderStatusStepDto
-            {
-                Code = status.ToString(),
-                DisplayName = status.ToString(),
-                Value = (short)status,
-                State = state,
-                ReachedAt = state is "completed" or "current" ? order.UpdatedAt : null
-            });
-        }
-
-        // Build terminal steps (Cancelled, Refunded)
-        foreach (var status in terminalStatuses)
-        {
-            string state;
-            if (currentStatus == status)
-                state = "current";
-            else if (currentStatus == OrderStatus.Cancelled || currentStatus == OrderStatus.Refunded)
-                state = "upcoming";
-            else
-                state = "upcoming";
-
-            result.Add(new OrderStatusStepDto
-            {
-                Code = status.ToString(),
-                DisplayName = status.ToString(),
-                Value = (short)status,
-                State = state,
-                ReachedAt = state == "current" ? order.UpdatedAt : null
-            });
-        }
-
-        return result;
     }
 
     public Task<ServiceResponse> CancelOrderAsync(Guid customerId, Guid orderId, string? reason = null)
@@ -390,6 +329,7 @@ public class CustomerOrderService : ICustomerOrderService
         var order = await _context.Orders
             .Include(o => o.OrderItems)
             .Include(o => o.Payments)
+            .Include(o => o.Shipments)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
 
         if (order == null)
@@ -456,6 +396,12 @@ public class CustomerOrderService : ICustomerOrderService
         order.Status = (short)OrderStatus.Cancelled;
         order.CancelReason = normalizedReason;
         order.UpdatedAt = now;
+        _orderStatusHistory.AddEntry(
+            order.Id,
+            (short)oldStatus,
+            (short)OrderStatus.Cancelled,
+            customerId,
+            string.IsNullOrWhiteSpace(normalizedReason) ? "Khách hủy đơn" : $"Khách hủy đơn: {normalizedReason}");
 
         decimal paidAmount = 0;
         if (hasPaidPayment)
@@ -509,12 +455,12 @@ public class CustomerOrderService : ICustomerOrderService
 
     private async Task<ServiceResponse> CancelGhnOrderIfRequiredAsync(Order order)
     {
-        if (!string.Equals(order.ShippingProvider, "GHN", StringComparison.OrdinalIgnoreCase))
+        if (order.Shipments is not { } list || !list.Any(s => string.Equals(s.ShippingProvider, "GHN", StringComparison.OrdinalIgnoreCase)))
         {
             return new ServiceResponse { Success = true };
         }
 
-        var trackingCode = order.TrackingCode?.Trim();
+        var trackingCode = OrderShipmentHelper.GhnTrackingOrNull(order.Shipments);
         if (string.IsNullOrWhiteSpace(trackingCode))
         {
             return new ServiceResponse
@@ -586,9 +532,7 @@ public class CustomerOrderService : ICustomerOrderService
 
         if (!response.IsSuccessStatusCode || ghn?.Code != 200)
         {
-            var message = ghn?.Message;
-            if (string.IsNullOrWhiteSpace(message))
-                message = $"GHN trả về HTTP {(int)response.StatusCode}.";
+            var message = GhnApiErrorText.FromResponseBody(responseText, (int)response.StatusCode);
 
             return new ServiceResponse
             {
@@ -637,9 +581,9 @@ public class CustomerOrderService : ICustomerOrderService
         {
             orderId = order.Id,
             oldStatus = (short)oldStatus,
-            oldStatusName = oldStatus.ToString(),
+            oldStatusName = OrderStatusVnHelper.Vietnamese(oldStatus),
             newStatus = (short)newStatus,
-            newStatusName = newStatus.ToString(),
+            newStatusName = OrderStatusVnHelper.Vietnamese(newStatus),
             updatedAt = order.UpdatedAt
         });
     }

@@ -23,7 +23,13 @@ public interface IPaymentService
 
     Task<VNPayReturnDto> ProcessVNPayReturnAsync(IQueryCollection queryParams, string rawQueryString);
 
-    Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId);
+    Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(
+        Guid orderId,
+        Guid customerId,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? moMoReturnUrlOverride = null,
+        string? moMoNotifyUrlOverride = null);
     Task<MoMoReturnDto> ProcessMoMoIpnAsync(MoMoIpnRequest request);
     Task<MoMoReturnDto> ProcessMoMoReturnAsync(IQueryCollection queryParams);
     Task<int> ExpireStalePendingPaymentsAsync(CancellationToken cancellationToken = default);

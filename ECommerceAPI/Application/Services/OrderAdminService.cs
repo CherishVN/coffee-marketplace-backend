@@ -18,6 +18,7 @@ public class OrderAdminService : IOrderAdminService
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly ISellerWalletReleaseService _walletRelease;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
+    private readonly IOrderStatusHistoryService _orderStatusHistory;
 
     public OrderAdminService(
         ApplicationDbContext context,
@@ -26,7 +27,8 @@ public class OrderAdminService : IOrderAdminService
         INotificationService notifications,
         ISellerWalletReversalService walletReversal,
         ISellerWalletReleaseService walletRelease,
-        IOrderNotificationEmailComposer orderEmailComposer)
+        IOrderNotificationEmailComposer orderEmailComposer,
+        IOrderStatusHistoryService orderStatusHistory)
     {
         _context = context;
         _logger = logger;
@@ -35,6 +37,7 @@ public class OrderAdminService : IOrderAdminService
         _walletReversal = walletReversal;
         _walletRelease = walletRelease;
         _orderEmailComposer = orderEmailComposer;
+        _orderStatusHistory = orderStatusHistory;
     }
 
     public async Task<AdminOrderListResponseDto> GetAllOrdersAsync(
@@ -94,7 +97,7 @@ public class OrderAdminService : IOrderAdminService
                     ShopId = o.ShopId,
                     ShopName = o.Shop.Name,
                     Status = o.Status,
-                    StatusName = ((OrderStatus)o.Status).ToString(),
+                    StatusName = OrderStatusVnHelper.Vietnamese((OrderStatus)o.Status),
                     Subtotal = o.Subtotal,
                     ShippingFee = o.ShippingFee,
                     Total = o.Total,
@@ -106,6 +109,11 @@ public class OrderAdminService : IOrderAdminService
                     UpdatedAt = o.UpdatedAt,
                 })
                 .ToListAsync();
+
+            foreach (var o in orders)
+            {
+                o.ShipPhone = PhoneVnHelper.NormalizeToLocal(o.ShipPhone) ?? o.ShipPhone;
+            }
 
             return new AdminOrderListResponseDto
             {
@@ -159,12 +167,12 @@ public class OrderAdminService : IOrderAdminService
                     ShopId = order.ShopId,
                     ShopName = order.Shop.Name,
                     Status = order.Status,
-                    StatusName = ((OrderStatus)order.Status).ToString(),
+                    StatusName = OrderStatusVnHelper.Vietnamese((OrderStatus)order.Status),
                     Subtotal = order.Subtotal,
                     ShippingFee = order.ShippingFee,
                     Total = order.Total,
                     ShipFullName = order.ShipFullName,
-                    ShipPhone = order.ShipPhone,
+                    ShipPhone = PhoneVnHelper.NormalizeToLocal(order.ShipPhone) ?? order.ShipPhone,
                     ShipAddress = order.ShipAddress,
                     ItemCount = order.OrderItems.Count,
                     CreatedAt = order.CreatedAt,
@@ -224,6 +232,12 @@ public class OrderAdminService : IOrderAdminService
             var oldStatus = (OrderStatus)order.Status;
             var newOrderStatus = (OrderStatus)dto.NewStatus;
             order.Status = dto.NewStatus;
+            _orderStatusHistory.AddEntry(
+                order.Id,
+                (short)oldStatus,
+                dto.NewStatus,
+                adminId,
+                dto.Reason);
             if (newOrderStatus == OrderStatus.Cancelled)
             {
                 order.CancelReason = string.IsNullOrWhiteSpace(dto.Reason)
@@ -271,7 +285,7 @@ public class OrderAdminService : IOrderAdminService
                 order.CustomerId,
                 nameof(NotificationType.Order),
                 "Cập nhật đơn hàng (Admin)",
-                $"Đơn #{code} được cập nhật trạng thái: {newStatus}.{reasonPart}",
+                $"Đơn #{code} được cập nhật trạng thái: {OrderStatusVnHelper.Vietnamese(newStatus)}.{reasonPart}",
                 "Order",
                 order.Id,
                 queueEmail: true,
@@ -285,7 +299,8 @@ public class OrderAdminService : IOrderAdminService
             return new AdminOrderResponseDto
             {
                 Success = true,
-                Message = $"Cập nhật trạng thái đơn hàng thành '{((OrderStatus)dto.NewStatus).ToString()}'",
+                Message =
+                    $"Cập nhật trạng thái đơn hàng thành công — {OrderStatusVnHelper.Vietnamese((OrderStatus)dto.NewStatus)}",
                 Order = new AdminOrderDetailDto
                 {
                     Id = order.Id,
@@ -295,12 +310,12 @@ public class OrderAdminService : IOrderAdminService
                     ShopId = order.ShopId,
                     ShopName = order.Shop.Name,
                     Status = order.Status,
-                    StatusName = ((OrderStatus)order.Status).ToString(),
+                    StatusName = OrderStatusVnHelper.Vietnamese((OrderStatus)order.Status),
                     Subtotal = order.Subtotal,
                     ShippingFee = order.ShippingFee,
                     Total = order.Total,
                     ShipFullName = order.ShipFullName,
-                    ShipPhone = order.ShipPhone,
+                    ShipPhone = PhoneVnHelper.NormalizeToLocal(order.ShipPhone) ?? order.ShipPhone,
                     ShipAddress = order.ShipAddress,
                     ItemCount = order.OrderItems.Count,
                     CreatedAt = order.CreatedAt,
@@ -336,9 +351,9 @@ public class OrderAdminService : IOrderAdminService
         {
             orderId = order.Id,
             oldStatus = (short)oldStatus,
-            oldStatusName = oldStatus.ToString(),
+            oldStatusName = OrderStatusVnHelper.Vietnamese(oldStatus),
             newStatus = (short)newStatus,
-            newStatusName = newStatus.ToString(),
+            newStatusName = OrderStatusVnHelper.Vietnamese(newStatus),
             updatedAt = order.UpdatedAt
         });
     }

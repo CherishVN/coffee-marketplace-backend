@@ -63,7 +63,6 @@ public class SystemController : ControllerBase
                 maxImageUploadMb = 5,
                 maxImagesPerProduct = 10,
                 maxCartItems = 50,
-                shippingFeeDefault = 30000,
                 currency = "VND",
                 disputeWindowDays = 7,
                 supportEmail = _configuration["Support:Email"] ?? "support@ecap.vn",

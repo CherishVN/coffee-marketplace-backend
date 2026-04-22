@@ -24,19 +24,22 @@ public class DisputeAdminService : IDisputeAdminService
     private readonly INotificationService _notifications;
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly ICustomerWalletService _customerWallet;
+    private readonly IOrderStatusHistoryService _orderStatusHistory;
 
     public DisputeAdminService(
         ApplicationDbContext context,
         ILogger<DisputeAdminService> logger,
         INotificationService notifications,
         ISellerWalletReversalService walletReversal,
-        ICustomerWalletService customerWallet)
+        ICustomerWalletService customerWallet,
+        IOrderStatusHistoryService orderStatusHistory)
     {
         _context = context;
         _logger = logger;
         _notifications = notifications;
         _walletReversal = walletReversal;
         _customerWallet = customerWallet;
+        _orderStatusHistory = orderStatusHistory;
     }
 
     public async Task<DisputeListResponseDto> GetAllDisputesAsync(
@@ -324,8 +327,15 @@ public class DisputeAdminService : IDisputeAdminService
             dispute.UpdatedAt = DateTime.UtcNow;
 
             // Update order status
+            var orderPrevStatus = dispute.Order.Status;
             dispute.Order.Status = (short)OrderStatus.Refunded;
             dispute.Order.UpdatedAt = DateTime.UtcNow;
+            _orderStatusHistory.AddEntry(
+                dispute.OrderId,
+                orderPrevStatus,
+                (short)OrderStatus.Refunded,
+                adminId,
+                "Hoàn tiền khiếu nại (admin duyệt)");
 
             await _walletReversal.TryReverseSettlementForOrderAsync(dispute.OrderId, "Hoàn tiền khiếu nại");
 

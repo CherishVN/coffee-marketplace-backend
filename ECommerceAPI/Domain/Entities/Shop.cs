@@ -83,6 +83,8 @@ public partial class Shop
 
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
 
+    public virtual ICollection<Shipment> Shipments { get; set; } = new List<Shipment>();
+
     public virtual User Owner { get; set; } = null!;
 
     public virtual ICollection<Product> Products { get; set; } = new List<Product>();

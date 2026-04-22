@@ -1,3 +1,4 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Domain.Enums;
 
 namespace ECommerceAPI.Application.DTOs.Orders;
@@ -9,6 +10,18 @@ public class OrderStatusStepDto
     public short Value { get; set; }
     public string State { get; set; } = string.Empty;
     public DateTime? ReachedAt { get; set; }
+}
+
+public class OrderStatusHistoryItemDto
+{
+    public short? PreviousStatus { get; set; }
+    public string? PreviousStatusLabel { get; set; }
+    public short NewStatus { get; set; }
+    public string NewStatusLabel { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public string? Note { get; set; }
+    /// <summary>system, customer, shop, other</summary>
+    public string Source { get; set; } = "system";
 }
 
 public class CustomerOrderItemDto
@@ -35,8 +48,9 @@ public class CustomerOrderSummaryDto
     public string ShopSlug { get; set; } = string.Empty;
     public string ShopName { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
+    public decimal ShippingFee { get; set; }
     public short Status { get; set; }
-    public string StatusName => ((OrderStatus)Status).ToString();
+    public string StatusName => OrderStatusVnHelper.Vietnamese((OrderStatus)Status);
     public DateTime CreatedAt { get; set; }
     public List<CustomerOrderItemDto> Items { get; set; } = new();
 }
@@ -46,6 +60,9 @@ public class CustomerOrderDetailDto : CustomerOrderSummaryDto
     public string? ShipFullName { get; set; }
     public string? ShipPhone { get; set; }
     public string? ShipAddress { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public List<OrderStatusHistoryItemDto> StatusHistory { get; set; } = new();
+    public List<OrderStatusStepDto> StatusTimeline { get; set; } = new();
 }
 
 public class OrderTrackingDto

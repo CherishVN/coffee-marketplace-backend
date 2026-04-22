@@ -1,3 +1,4 @@
+using ECommerceAPI.Application.DTOs.Orders;
 using ECommerceAPI.Domain.Enums;
 using FluentValidation;
 
@@ -149,17 +150,21 @@ public class OrderDto
     public string? CustomerEmail { get; set; }
     public string? CustomerAvatarUrl { get; set; }
     public string? CustomerPhone { get; set; }
+    public string? ShipPhone { get; set; }
     public decimal TotalAmount { get; set; }
     public short Status { get; set; }
     public string? CancelReason { get; set; }
     public string? ShippingAddress { get; set; }
-    public decimal ProviderShippingFee { get; set; }
+    public decimal ShippingFee { get; set; }
     public string? ShippingProvider { get; set; }
     public string? ShippingServiceId { get; set; }
     public string? TrackingCode { get; set; }
     public DateTimeOffset? EstimatedDeliveryDate { get; set; }
     public DateTimeOffset? ActualDeliveryDate { get; set; }
     public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public List<OrderStatusHistoryItemDto> StatusHistory { get; set; } = new();
+    public List<OrderStatusStepDto> StatusTimeline { get; set; } = new();
     public List<OrderItemDto>? Items { get; set; }
 
     public int? ShopGhnShopId { get; set; }
