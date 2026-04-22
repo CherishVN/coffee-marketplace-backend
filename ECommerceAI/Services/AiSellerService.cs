@@ -1120,6 +1120,7 @@ public class AiSellerService : IAiSellerService
             result.SuggestedCategories = RecoverAndValidateCategories(result.SuggestedCategories, validCatIds2, catByPath2, catByName2, 3);
             result.SuggestedTags = RecoverAndValidateTags(result.SuggestedTags, validTagIds2, tagByName2, 8);
             result.SuggestedMaterials = RecoverAndValidateMaterials(result.SuggestedMaterials, validMatIds2, matByName2, 3);
+            result.SuggestedMaterials = MergeDescriptionMatchedMaterials(result.SuggestedMaterials, promptSlice.Materials, request.ProductTitle, request.ProductDescription, 3);
 
             result.Success = true;
             return result;
@@ -1232,6 +1233,7 @@ public class AiSellerService : IAiSellerService
             result.Categories = RecoverAndValidateCategories(result.Categories, validCatIds, catByPath, catByName, 3);
             result.Tags = RecoverAndValidateTags(result.Tags, validTagIds, tagByName, 10);
             result.Materials = RecoverAndValidateMaterials(result.Materials, validMatIds, matByName, 5);
+            result.Materials = MergeDescriptionMatchedMaterials(result.Materials, promptSlice.Materials, request.Title, request.Description, 5);
 
             result.Success = true;
             return result;
@@ -1397,6 +1399,55 @@ public class AiSellerService : IAiSellerService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Sau khi AI trả về materials, quét title + description để bổ sung những chất liệu
+    /// được đề cập trực tiếp nhưng AI bỏ qua. Dùng keyword matching: tên chất liệu chứa
+    /// token từ text hoặc ngược lại (token chứa tên chất liệu không dấu).
+    /// </summary>
+    private static List<MaterialSuggestionItem> MergeDescriptionMatchedMaterials(
+        List<MaterialSuggestionItem> aiSuggested,
+        IEnumerable<MaterialCandidate> catalogMaterials,
+        string? title,
+        string? description,
+        int maxCount)
+    {
+        var tokens = ExtractSearchTokens(title, description);
+        if (tokens.Count == 0) return aiSuggested;
+
+        var alreadyIn = new HashSet<Guid>(aiSuggested.Select(m => m.MaterialId ?? Guid.Empty));
+        var toAdd = new List<MaterialSuggestionItem>();
+
+        foreach (var mat in catalogMaterials)
+        {
+            if (alreadyIn.Contains(mat.Id)) continue;
+
+            var matNameLower = mat.Name.ToLowerInvariant();
+            // Khớp nếu tên chất liệu chứa token (vd: "Vải Kaki" chứa "kaki")
+            // hoặc token chứa tên chất liệu (vd: token "cotton" khớp tên "Cotton")
+            var matched = tokens.Any(tok =>
+                matNameLower.Contains(tok, StringComparison.OrdinalIgnoreCase) ||
+                tok.Contains(matNameLower, StringComparison.OrdinalIgnoreCase));
+
+            if (!matched) continue;
+
+            toAdd.Add(new MaterialSuggestionItem
+            {
+                MaterialId = mat.Id,
+                MaterialName = mat.Name,
+                ConfidenceScore = 0.85m
+            });
+            alreadyIn.Add(mat.Id);
+        }
+
+        if (toAdd.Count == 0) return aiSuggested;
+
+        return aiSuggested
+            .Concat(toAdd)
+            .OrderByDescending(m => m.ConfidenceScore)
+            .Take(maxCount)
+            .ToList();
     }
 
     private static AnalyzeImageResponseDto NormalizeAnalyzeImageResult(AnalyzeImageResponseDto result)
