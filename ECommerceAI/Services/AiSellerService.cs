@@ -515,46 +515,29 @@ public class AiSellerService : IAiSellerService
     public async Task<SuggestTagsResponseDto> SuggestTagsAsync(SuggestTagsRequestDto request, Guid sellerId)
     {
         var candidates = await GetPromptCandidatesAsync();
-        var catById = candidates.CatById;
-        string BuildPath(long id)
-        {
-            var parts = new List<string>();
-            var cur = catById.GetValueOrDefault(id);
-            while (cur != null)
-            {
-                parts.Insert(0, cur.Name);
-                cur = cur.ParentId is long p ? catById.GetValueOrDefault(p) : null;
-            }
-            return string.Join(" > ", parts);
-        }
-
-        // Thu hẹp theo category đang chọn (cùng logic analyze-product) để tag khớp ngành hơn
-        var promptTags = NarrowCatalogForPrompt(
+            var promptTags = NarrowCatalogForPrompt(
             candidates,
-            BuildPath,
+            _ => "",
             request.Title,
             request.Description,
-            preferredCategoryId: request.CategoryId,
+            preferredCategoryId: null,
             maxCategories: 0,
             maxTags: MaxPromptTags,
-            maxMaterials: 0,
-            restrictCategoriesToDescendantsOf: await GetShopPrimaryCategoryIdForSellerAsync(sellerId)).Tags;
+            maxMaterials: 0).Tags;
 
         var tagList = string.Join(", ", promptTags.Select(t => $"{t.Name}(ID:{t.Id})"));
         var historyHint = await BuildSellerTagHistoryHintAsync(sellerId);
 
-        var categoryHint = string.Empty;
-        if (request.CategoryId is { } cid && catById.ContainsKey(cid))
-            categoryHint = $"\nNgười bán đang gợi ý/đứng trong danh mục: {BuildPath(cid)} (ID:{cid}) — ưu tiên tag phù hợp sản phẩm thuộc danh mục này.\n";
+        
 
         var tagJsonExample = """{"suggestions":[{"tagId":1,"tagName":"Tên tag","confidenceScore":0.95}]}""";
         var userMessage = $"""
             Gợi ý tags phù hợp cho sản phẩm sau (chọn tối đa 10 tags):
-            Chỉ được dùng tagId từ danh sách bên dưới, không tự tạo ID.
+            
 
             Tên: {request.Title}
             Mô tả: {request.Description ?? "Không có"}
-            {categoryHint}
+           
             Tags có trong hệ thống: {tagList}{historyHint}
 
             Trả về JSON theo format: {tagJsonExample}
@@ -565,32 +548,7 @@ public class AiSellerService : IAiSellerService
             var raw = await _gemini.GenerateAsync(_sellerPrompt.Value, userMessage);
             var result = ParseJsonResponse<SuggestTagsResponseDto>(raw, "SuggestTags") ?? new SuggestTagsResponseDto();
 
-            // Đồng bộ với analyze-product: thử parse snake_case nếu camelCase rỗng; khôi phục tag theo tên nếu ID lệch
-            if (result.Suggestions is not { Count: > 0 })
-            {
-                try
-                {
-                    var norm = NormalizeModelJson(raw);
-                    if (!string.IsNullOrWhiteSpace(norm))
-                    {
-                        var alt = JsonSerializer.Deserialize<SuggestTagsResponseDto>(norm, _jsonSnakeReadOptions);
-                        if (alt?.Suggestions is { Count: > 0 })
-                            result = alt;
-                    }
-                }
-                catch
-                { /* bỏ qua */ }
-            }
-
-            var validTagIds = new HashSet<long>(promptTags.Select(t => t.Id));
-            var tagByName = promptTags
-                .GroupBy(t => t.Name.Trim().ToLowerInvariant())
-                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            result.Suggestions = RecoverAndValidateTags(
-                result.Suggestions ?? new List<TagSuggestionItem>(),
-                validTagIds,
-                tagByName,
-                10);
+            
 
             // Lưu lịch sử gợi ý nếu seller đã có product (productId được truyền lên)
             if (request.ProductId.HasValue)
@@ -917,52 +875,36 @@ public class AiSellerService : IAiSellerService
     public async Task<SuggestMaterialsResponseDto> SuggestMaterialsAsync(SuggestMaterialsRequestDto request, Guid sellerId)
     {
         var candidates = await GetPromptCandidatesAsync();
-        var catById = candidates.CatById;
-        string BuildPath(long id)
-        {
-            var parts = new List<string>();
-            var cur = catById.GetValueOrDefault(id);
-            while (cur != null)
-            {
-                parts.Insert(0, cur.Name);
-                cur = cur.ParentId is long p ? catById.GetValueOrDefault(p) : null;
-            }
-            return string.Join(" > ", parts);
-        }
-
-        var shopPrimary = await GetShopPrimaryCategoryIdForSellerAsync(sellerId);
+        
         var promptMats = NarrowCatalogForPrompt(
             candidates,
-            BuildPath,
+            _ => "",
             request.Title,
             request.Description,
-            preferredCategoryId: request.CategoryId,
+            preferredCategoryId: null,
             maxCategories: 0,
             maxTags: 0,
-            maxMaterials: MaxPromptMaterials,
-            restrictCategoriesToDescendantsOf: shopPrimary).Materials;
+            maxMaterials: MaxPromptMaterials).Materials;
 
         var materialList = string.Join(", ", promptMats.Select(m => $"{m.Name}(ID:{m.Id})"));
         var materialById = candidates.AllMaterials.ToDictionary(m => m.Id, m => m.Name);
         var historyHint = await BuildSellerMaterialHistoryHintAsync(sellerId, materialById);
 
-        var categoryHint = string.Empty;
-        if (request.CategoryId is { } cid && catById.ContainsKey(cid))
-            categoryHint = $"\nDanh mục đang chọn: {BuildPath(cid)} (ID:{cid}) — ưu tiên chất liệu đúng loại sản phẩm này.\n";
+        
 
         var matJsonExample = """{"suggestions":[{"materialId":"uuid-here","materialName":"Tên chất liệu","confidenceScore":0.95}]}""";
         var userMessage = $"""
-            Gợi ý chất liệu (materials) phù hợp cho sản phẩm sau (tối đa 5):
-            Nếu trong tên hoặc mô tả có từ khóa chất liệu (cotton, polyester, kaki, denim, v.v.), HÃY khớp với entry tương ứng trong danh sách (theo tên), dùng đúng materialId kèm theo.
+            
+            Gợi ý chất liệu (materials) phù hợp cho sản phẩm sau:
 
             Tên: {request.Title}
             Mô tả: {request.Description ?? "Không có"}
-            {categoryHint}
+           
             Materials có trong hệ thống: {materialList}{historyHint}
 
             Trả về JSON theo format: {matJsonExample}
 
-            BẮT BUỘC: mỗi gợi ý, materialId phải trùng GUID trong danh sách (sau "ID:") và trùng materialName — không tự bịa UUID. Chỉ trả số gợi ý cần thiết, ưu tiên mô tả rõ vật liệu.
+            BẮT BUỘC: với mỗi gợi ý, materialId phải là đúng GUID trong danh sách (phần sau "ID:"), trùng với materialName — không được bỏ trống hoặc tự bịa UUID.
             """;
 
         try
@@ -970,31 +912,6 @@ public class AiSellerService : IAiSellerService
             var raw = await _gemini.GenerateAsync(_sellerPrompt.Value, userMessage);
             var result = ParseJsonResponse<SuggestMaterialsResponseDto>(raw, "SuggestMaterials") ?? new SuggestMaterialsResponseDto();
 
-            if (result.Suggestions is not { Count: > 0 })
-            {
-                try
-                {
-                    var norm = NormalizeModelJson(raw);
-                    if (!string.IsNullOrWhiteSpace(norm))
-                    {
-                        var alt = JsonSerializer.Deserialize<SuggestMaterialsResponseDto>(norm, _jsonSnakeReadOptions);
-                        if (alt?.Suggestions is { Count: > 0 })
-                            result = alt;
-                    }
-                }
-                catch
-                { /* bỏ qua */ }
-            }
-
-            var validMatIds = new HashSet<Guid>(promptMats.Select(m => m.Id));
-            var matByName = promptMats
-                .GroupBy(m => m.Name.Trim().ToLowerInvariant())
-                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            result.Suggestions = RecoverAndValidateMaterials(
-                result.Suggestions ?? new List<MaterialSuggestionItem>(),
-                validMatIds,
-                matByName,
-                5);
 
             // Lưu log gợi ý nếu seller đã có product
             if (request.ProductId.HasValue)
