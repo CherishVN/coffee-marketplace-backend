@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -44,6 +45,7 @@ public class UserProfileService : IUserProfileService
         var user = await _context.Users
             .Include(u => u.Role)
             .Include(u => u.ShopOwners)
+                .ThenInclude(s => s.PrimaryCategory)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
         if (user == null)
@@ -84,7 +86,9 @@ public class UserProfileService : IUserProfileService
                 TaxCode = shop.TaxCode,
                 BankName = shop.BankName,
                 BankAccountNumber = shop.BankAccountNumber,
-                BankAccountName = shop.BankAccountName
+                BankAccountName = shop.BankAccountName,
+                PrimaryCategoryId = shop.PrimaryCategoryId,
+                PrimaryCategoryName = shop.PrimaryCategory?.Name
             } : null
         };
     }
@@ -121,6 +125,33 @@ public class UserProfileService : IUserProfileService
 
     public async Task<ServiceResponse> RegisterAsSellerAsync(Guid userId, RegisterSellerDto dto)
     {
+        if (dto.PrimaryCategoryId <= 0)
+        {
+            return new ServiceResponse { Success = false, Message = "Vui lòng chọn ngành hàng bán (danh mục gốc)" };
+        }
+
+        var rootCat = await _context.Categories
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == dto.PrimaryCategoryId);
+        if (rootCat == null)
+        {
+            return new ServiceResponse { Success = false, Message = "Danh mục không tồn tại" };
+        }
+
+        if (rootCat.ParentId.HasValue)
+        {
+            return new ServiceResponse
+            {
+                Success = false,
+                Message = "Chỉ được chọn danh mục cấp cao nhất (ví dụ: Nông sản, Thủy sản) — không chọn danh mục con"
+            };
+        }
+
+        if (!rootCat.IsActive)
+        {
+            return new ServiceResponse { Success = false, Message = "Danh mục này đang tắt, vui lòng chọn danh mục khác" };
+        }
+
         var user = await _context.Users
             .Include(u => u.Role)
             .Include(u => u.ShopOwners)
@@ -179,34 +210,19 @@ public class UserProfileService : IUserProfileService
             existingShopForUser.BankName = dto.BankName;
             existingShopForUser.BankAccountNumber = dto.BankAccountNumber;
             existingShopForUser.BankAccountName = dto.BankAccountName;
+            existingShopForUser.PrimaryCategoryId = dto.PrimaryCategoryId;
+            existingShopForUser.IdentitySnapshotJson = SerializeSellerIdentity(dto.Identity);
             existingShopForUser.VerificationStatus = 0; // Pending again
             existingShopForUser.RejectionReason = null;
             existingShopForUser.UpdatedAt = DateTime.UtcNow;
 
-            // Xóa tài liệu cũ và thêm tài liệu mới
+            // Xóa tài liệu file cũ (GPKD…) — không lưu ảnh CCCD
             var oldDocs = await _context.ShopDocuments
                 .Where(d => d.ShopId == existingShopForUser.Id)
                 .ToListAsync();
             _context.ShopDocuments.RemoveRange(oldDocs);
 
-            if (dto.Documents != null && dto.Documents.Count > 0)
-            {
-                var allowedDocTypes = new[] { "cccd_front", "cccd_back", "business_license", "tax_cert" };
-                foreach (var doc in dto.Documents)
-                {
-                    if (!allowedDocTypes.Contains(doc.DocType)) continue;
-                    if (string.IsNullOrWhiteSpace(doc.FileUrl)) continue;
-                    _context.ShopDocuments.Add(new ShopDocument
-                    {
-                        Id = Guid.NewGuid(),
-                        ShopId = existingShopForUser.Id,
-                        DocType = doc.DocType,
-                        FileUrl = doc.FileUrl,
-                        Status = 0,
-                        SubmittedAt = DateTime.UtcNow,
-                    });
-                }
-            }
+            AddShopFileDocumentsOnly(existingShopForUser.Id, dto.Documents);
 
             await _context.SaveChangesAsync();
             return new ServiceResponse { Success = true, Message = "Đã gửi lại đơn đăng ký. Vui lòng chờ admin phê duyệt." };
@@ -243,6 +259,8 @@ public class UserProfileService : IUserProfileService
             BankName = dto.BankName,
             BankAccountNumber = dto.BankAccountNumber,
             BankAccountName = dto.BankAccountName,
+            PrimaryCategoryId = dto.PrimaryCategoryId,
+            IdentitySnapshotJson = SerializeSellerIdentity(dto.Identity),
             Status = 0,
             VerificationStatus = 0,
             CreatedAt = DateTime.UtcNow,
@@ -251,24 +269,7 @@ public class UserProfileService : IUserProfileService
 
         _context.Shops.Add(shop);
 
-        if (dto.Documents != null && dto.Documents.Count > 0)
-        {
-            var allowedDocTypes = new[] { "cccd_front", "cccd_back", "business_license", "tax_cert" };
-            foreach (var doc in dto.Documents)
-            {
-                if (!allowedDocTypes.Contains(doc.DocType)) continue;
-                if (string.IsNullOrWhiteSpace(doc.FileUrl)) continue;
-                _context.ShopDocuments.Add(new ShopDocument
-                {
-                    Id = Guid.NewGuid(),
-                    ShopId = shop.Id,
-                    DocType = doc.DocType,
-                    FileUrl = doc.FileUrl,
-                    Status = 0,
-                    SubmittedAt = DateTime.UtcNow,
-                });
-            }
-        }
+        AddShopFileDocumentsOnly(shop.Id, dto.Documents);
 
         await _context.SaveChangesAsync();
 
@@ -585,5 +586,36 @@ public class UserProfileService : IUserProfileService
         slug = new string(slug.Where(c => char.IsLetterOrDigit(c) || c == '-').ToArray());
 
         return slug;
+    }
+
+    private static string? SerializeSellerIdentity(SellerIdentityInfoDto? identity)
+    {
+        if (identity == null) return null;
+        return JsonSerializer.Serialize(identity, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+    }
+
+    /// <summary>Chỉ lưu URL file GPKD/giấy tờ — không nhận cccd_front/cccd_back.</summary>
+    private void AddShopFileDocumentsOnly(Guid shopId, List<ShopDocumentInputDto>? documents)
+    {
+        if (documents == null || documents.Count == 0) return;
+        var allowed = new[] { "business_license", "tax_cert" };
+        foreach (var doc in documents)
+        {
+            if (!allowed.Contains(doc.DocType)) continue;
+            if (string.IsNullOrWhiteSpace(doc.FileUrl)) continue;
+            _context.ShopDocuments.Add(new ShopDocument
+            {
+                Id = Guid.NewGuid(),
+                ShopId = shopId,
+                DocType = doc.DocType,
+                FileUrl = doc.FileUrl,
+                Status = 0,
+                SubmittedAt = DateTime.UtcNow,
+            });
+        }
     }
 }

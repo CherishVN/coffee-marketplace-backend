@@ -67,6 +67,18 @@ public partial class Shop
 
     public string? BankAccountName { get; set; }
 
+    /// <summary>
+    /// Danh mục gốc mà shop cam kết bán (cùng nhánh con). Null = dữ liệu cũ, không giới hạn.
+    /// </summary>
+    public long? PrimaryCategoryId { get; set; }
+
+    public virtual Category? PrimaryCategory { get; set; }
+
+    /// <summary>
+    /// JSON thông tin trích từ CCCD/CMND (chỉ chữ, không lưu file ảnh thẻ).
+    /// </summary>
+    public string? IdentitySnapshotJson { get; set; }
+
     public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();

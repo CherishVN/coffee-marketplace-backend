@@ -95,6 +95,8 @@ public class ShopDto
     public int? GhnShopId { get; set; }
     public short Status { get; set; }
     public short VerificationStatus { get; set; }
+    public long? PrimaryCategoryId { get; set; }
+    public string? PrimaryCategoryName { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 

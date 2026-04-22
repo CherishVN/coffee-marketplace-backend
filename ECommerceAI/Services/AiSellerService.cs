@@ -44,6 +44,21 @@ public class AiSellerService : IAiSellerService
     private static readonly object _analyzeProductSchema = BuildAnalyzeProductSchema();
 
     private const string CandidateCacheKey = "PromptCandidates";
+    private const string ShopPrimaryCategoryCachePrefix = "shop_primary_category:";
+
+    /// <summary>Cache 5 phút — mỗi lần bấm phân tích không cần query DB lại.</summary>
+    private async Task<long?> GetShopPrimaryCategoryIdForSellerAsync(Guid sellerId)
+    {
+        var key = ShopPrimaryCategoryCachePrefix + sellerId;
+        return await _cache.GetOrCreateAsync(key, async entry =>
+        {
+            entry.SetAbsoluteExpiration(TimeSpan.FromMinutes(5));
+            return await _context.Shops.AsNoTracking()
+                .Where(s => s.OwnerId == sellerId)
+                .Select(s => s.PrimaryCategoryId)
+                .FirstOrDefaultAsync();
+        });
+    }
 
     private readonly AiDbContext _context;
     private readonly GeminiClientService _gemini;
@@ -221,6 +236,8 @@ public class AiSellerService : IAiSellerService
 
     /// <summary>
     /// Thu hẹp catalog đưa vào prompt: ưu tiên nhánh category đã chọn, khớp từ khóa từ title/description, rồi pad còn lại.
+    /// <paramref name="restrictCategoriesToDescendantsOf"/> = ngành đăng ký seller: chỉ đưa category thuộc nhánh cây đó
+    /// (không pad ra toàn sàn) — prompt nhỏ hơn, model không còn gợi ý sai ngành, khớp rule BE.
     /// </summary>
     private static PromptCatalogSlice NarrowCatalogForPrompt(
         CandidateSet src,
@@ -230,10 +247,20 @@ public class AiSellerService : IAiSellerService
         long? preferredCategoryId,
         int maxCategories,
         int maxTags,
-        int maxMaterials)
+        int maxMaterials,
+        long? restrictCategoriesToDescendantsOf = null)
     {
         var tokens = ExtractSearchTokens(title, description);
         var catById = src.CatById;
+
+        IEnumerable<CategoryCandidate> AllCatsForNarrowing()
+        {
+            if (restrictCategoriesToDescendantsOf is not long root || !catById.ContainsKey(root))
+                return src.AllCatsOrdered;
+            return src.AllCatsOrdered.Where(c => IsSelfOrDescendantOf(c.Id, root, catById));
+        }
+
+        var catPool = AllCatsForNarrowing().ToList();
 
         var categories = new List<CategoryCandidate>();
         if (maxCategories > 0)
@@ -251,10 +278,27 @@ public class AiSellerService : IAiSellerService
                 }
             }
 
-            if (preferredCategoryId.HasValue && catById.ContainsKey(preferredCategoryId.Value))
+            // Ưu tiên focus: gợi ý từ request, nhưng phải nằm trong nhánh shop; nếu ngoài nhánh thì dùng gốc shop.
+            long? focusId = null;
+            if (preferredCategoryId is long p && catById.ContainsKey(p))
             {
-                var scoped = src.AllCatsOrdered
-                    .Where(c => IsSelfOrDescendantOf(c.Id, preferredCategoryId.Value, catById))
+                if (!restrictCategoriesToDescendantsOf.HasValue
+                    || !catById.TryGetValue(restrictCategoriesToDescendantsOf.Value, out _)
+                    || IsSelfOrDescendantOf(p, restrictCategoriesToDescendantsOf.Value, catById))
+                {
+                    focusId = p;
+                }
+            }
+            if (focusId is null
+                && restrictCategoriesToDescendantsOf is { } r
+                && catById.ContainsKey(r))
+            {
+                focusId = r;
+            }
+            if (focusId is { } f)
+            {
+                var scoped = catPool
+                    .Where(c => IsSelfOrDescendantOf(c.Id, f, catById))
                     .OrderByDescending(c => c.Level)
                     .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase);
                 AddCats(scoped);
@@ -262,7 +306,7 @@ public class AiSellerService : IAiSellerService
 
             if (categories.Count < maxCategories && tokens.Count > 0)
             {
-                var kwMatches = src.AllCatsOrdered
+                var kwMatches = catPool
                     .Where(c => !seenCat.Contains(c.Id))
                     .Where(c => tokens.Any(t =>
                         buildPath(c.Id).Contains(t, StringComparison.OrdinalIgnoreCase) ||
@@ -274,7 +318,7 @@ public class AiSellerService : IAiSellerService
 
             if (categories.Count < maxCategories)
             {
-                var fallback = src.AllCatsOrdered
+                var fallback = catPool
                     .Where(c => !seenCat.Contains(c.Id))
                     .OrderByDescending(c => c.Level)
                     .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase);
@@ -402,6 +446,7 @@ public class AiSellerService : IAiSellerService
     // ── Gợi ý Category ─────────────────────────────────────────────────────────────
     public async Task<SuggestCategoryResponseDto> SuggestCategoryAsync(SuggestCategoryRequestDto request, Guid sellerId)
     {
+        var shopPrimary = await GetShopPrimaryCategoryIdForSellerAsync(sellerId);
         var candidates = await GetPromptCandidatesAsync();
         var catById = candidates.CatById;
 
@@ -427,7 +472,8 @@ public class AiSellerService : IAiSellerService
             preferredCategoryId: null,
             maxCategories: MaxPromptCategories,
             maxTags: 0,
-            maxMaterials: 0).Categories;
+            maxMaterials: 0,
+            restrictCategoriesToDescendantsOf: shopPrimary).Categories;
 
         var categoryList = string.Join("\n", promptCats.Select(c =>
             $"ID:{c.Id} | {BuildPath(c.Id)} (Level {c.Level})"));
@@ -923,6 +969,8 @@ public class AiSellerService : IAiSellerService
         if (request.ImageUrls.Count > MaxAnalyzeImageUrls)
             request.ImageUrls = request.ImageUrls.Take(MaxAnalyzeImageUrls).ToList();
 
+        // Không dùng Task.WhenAll: cùng một DbContext không cho phép 2 truy vấn song song.
+        var shopPrimary = await GetShopPrimaryCategoryIdForSellerAsync(sellerId);
         var candidates = await GetPromptCandidatesAsync();
         var catById2 = candidates.CatById;
 
@@ -946,13 +994,14 @@ public class AiSellerService : IAiSellerService
             preferredCategoryId: null,
             maxCategories: MaxPromptCategories,
             maxTags: MaxPromptTags,
-            maxMaterials: MaxPromptMaterials);
+            maxMaterials: MaxPromptMaterials,
+            restrictCategoriesToDescendantsOf: shopPrimary);
 
         var categoryList = string.Join("\n", promptSlice.Categories.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
         var tagList = string.Join(", ", promptSlice.Tags.Select(t => $"{t.Name}(ID:{t.Id})"));
         var materialList = string.Join(", ", promptSlice.Materials.Select(m => $"{m.Name}(ID:{m.Id})"));
-        var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
         var matNameById = candidates.AllMaterials.ToDictionary(m => m.Id, m => m.Name);
+        var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
         var matHistoryHint = await BuildSellerMaterialHistoryHintAsync(sellerId, matNameById);
         const string sellerHabitBalanceNoteImage = """
 
@@ -1075,6 +1124,7 @@ public class AiSellerService : IAiSellerService
     // ── Phân tích sản phẩm (text-only, 1 Gemini call) ────────────────────────────
     public async Task<AnalyzeProductResponseDto> AnalyzeProductAsync(AnalyzeProductRequestDto request, Guid sellerId)
     {
+        var shopPrimary = await GetShopPrimaryCategoryIdForSellerAsync(sellerId);
         var candidates = await GetPromptCandidatesAsync();
         var catById = candidates.CatById;
 
@@ -1093,6 +1143,8 @@ public class AiSellerService : IAiSellerService
         var categoryHint = string.Empty;
         if (request.CategoryId.HasValue && catById.TryGetValue(request.CategoryId.Value, out var hintCat))
             categoryHint = $"\nNgười dùng đã chọn category: {BuildPath(hintCat.Id)} — dùng đây làm ngữ cảnh để chọn tags và materials phù hợp.\n";
+        if (shopPrimary is long pRoot && catById.ContainsKey(pRoot))
+            categoryHint += $"\nShop cam kết ngành hàng: {BuildPath(pRoot)}. Chỉ dùng category từ danh sách (cùng nhánh).\n";
 
         var promptSlice = NarrowCatalogForPrompt(
             candidates,
@@ -1102,14 +1154,15 @@ public class AiSellerService : IAiSellerService
             preferredCategoryId: request.CategoryId,
             maxCategories: MaxPromptCategories,
             maxTags: MaxPromptTags,
-            maxMaterials: MaxPromptMaterials);
+            maxMaterials: MaxPromptMaterials,
+            restrictCategoriesToDescendantsOf: shopPrimary);
 
         var catLines = string.Join("\n", promptSlice.Categories.Select(c => $"ID:{c.Id} | {BuildPath(c.Id)} | Cấp {c.Level}"));
         var tagLines = string.Join("\n", promptSlice.Tags.Select(t => $"ID:{t.Id} | {t.Name}"));
         var matLines = string.Join("\n", promptSlice.Materials.Select(m => $"ID:{m.Id} | {m.Name}"));
 
-        var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
         var matNameById = candidates.AllMaterials.ToDictionary(m => m.Id, m => m.Name);
+        var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
         var matHistoryHint = await BuildSellerMaterialHistoryHintAsync(sellerId, matNameById);
         const string sellerHabitBalanceNote = """
 

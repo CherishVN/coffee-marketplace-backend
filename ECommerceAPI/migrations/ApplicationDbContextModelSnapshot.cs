@@ -2333,6 +2333,10 @@ namespace ECommerceAPI.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("ghn_shop_id");
 
+                    b.Property<string>("IdentitySnapshotJson")
+                        .HasColumnType("text")
+                        .HasColumnName("identity_snapshot_json");
+
                     b.Property<string>("LogoUrl")
                         .HasColumnType("text")
                         .HasColumnName("logo_url");
@@ -2349,6 +2353,10 @@ namespace ECommerceAPI.Migrations
                     b.Property<string>("Phone")
                         .HasColumnType("text")
                         .HasColumnName("phone");
+
+                    b.Property<long?>("PrimaryCategoryId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("primary_category_id");
 
                     b.Property<int?>("ProvinceId")
                         .HasColumnType("integer")
@@ -2418,6 +2426,8 @@ namespace ECommerceAPI.Migrations
                         .HasName("shops_pkey");
 
                     b.HasIndex("VerifiedBy");
+
+                    b.HasIndex(new[] { "PrimaryCategoryId" }, "idx_shops_primary_category");
 
                     b.HasIndex(new[] { "OwnerId" }, "idx_shops_owner");
 
@@ -3570,6 +3580,12 @@ namespace ECommerceAPI.Migrations
 
             modelBuilder.Entity("ECommerceAPI.Domain.Entities.Shop", b =>
                 {
+                    b.HasOne("ECommerceAPI.Domain.Entities.Category", "PrimaryCategory")
+                        .WithMany()
+                        .HasForeignKey("PrimaryCategoryId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("shops_primary_category_id_fkey");
+
                     b.HasOne("ECommerceAPI.Domain.Entities.User", "Owner")
                         .WithMany("ShopOwners")
                         .HasForeignKey("OwnerId")
@@ -3584,6 +3600,8 @@ namespace ECommerceAPI.Migrations
                         .HasConstraintName("shops_verified_by_fkey");
 
                     b.Navigation("Owner");
+
+                    b.Navigation("PrimaryCategory");
 
                     b.Navigation("VerifiedByNavigation");
                 });

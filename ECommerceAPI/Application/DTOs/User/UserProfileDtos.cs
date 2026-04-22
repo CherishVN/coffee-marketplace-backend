@@ -21,18 +21,39 @@ public class RegisterSellerDto
     public string? BusinessLicenseNumber { get; set; }
     public string? TaxCode { get; set; }
     public string BusinessType { get; set; } = string.Empty;
+    public long PrimaryCategoryId { get; set; }
     public string? BankName { get; set; }
     public string? BankAccountNumber { get; set; }
     public string? BankAccountName { get; set; }
-    /// <summary>Hồ sơ xác minh đã upload lên Supabase Storage</summary>
+    public SellerIdentityInfoDto? Identity { get; set; }
     public List<ShopDocumentInputDto>? Documents { get; set; }
+}
+
+public class SellerIdentityInfoDto
+{
+    public string? FullName { get; set; }
+    public string? IdNumber { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? Sex { get; set; }
+    public string? Nationality { get; set; }
+    public string? HomeTown { get; set; }
+    public string? PermanentAddress { get; set; }
+    public string? AddrProvince { get; set; }
+    public string? AddrDistrict { get; set; }
+    public string? AddrWard { get; set; }
+    public string? AddrStreet { get; set; }
+    public string? DateOfExpiry { get; set; }
+    public string? CardType { get; set; }
+    public string? IssueDate { get; set; }
+    public string? IssuePlace { get; set; }
+    public string? Religion { get; set; }
+    public string? Ethnicity { get; set; }
+    public string? Features { get; set; }
 }
 
 public class ShopDocumentInputDto
 {
-    /// <summary>cccd_front | cccd_back | business_license | tax_cert</summary>
     public string DocType { get; set; } = string.Empty;
-    /// <summary>Public URL của file đã upload lên Supabase Storage</summary>
     public string FileUrl { get; set; } = string.Empty;
 }
 
@@ -134,6 +155,19 @@ public class RegisterSellerDtoValidator : AbstractValidator<RegisterSellerDto>
             .NotEmpty().WithMessage("Loại hình kinh doanh không được để trống")
             .Must(x => new[] { "individual", "company", "household" }.Contains(x))
             .WithMessage("Loại hình kinh doanh không hợp lệ (individual, company, household)");
+
+        RuleFor(x => x.PrimaryCategoryId)
+            .GreaterThan(0).WithMessage("Vui lòng chọn một ngành hàng (danh mục gốc) để bán");
+
+        RuleFor(x => x.Identity)
+            .NotNull()
+            .WithMessage("Vui lòng điền thông tin định danh từ CCCD (họ tên tối thiểu)");
+
+        RuleFor(x => x.Identity!.FullName)
+            .NotEmpty()
+            .WithMessage("Họ tên theo CCCD không được để trống")
+            .MaximumLength(255)
+            .When(x => x.Identity != null);
 
         RuleFor(x => x.TaxCode)
             .Matches(@"^[0-9]{10}(-[0-9]{3})?$").WithMessage("Mã số thuế không hợp lệ")

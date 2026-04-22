@@ -45,6 +45,7 @@ public class SellerService : ISellerService
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
     {
         var shop = await _context.Shops
+            .Include(s => s.PrimaryCategory)
             .FirstOrDefaultAsync(s => s.OwnerId == userId);
 
         if (shop == null)
@@ -76,6 +77,8 @@ public class SellerService : ISellerService
                 GhnShopId = shop.GhnShopId,
                 Status = shop.Status,
                 VerificationStatus = shop.VerificationStatus,
+                PrimaryCategoryId = shop.PrimaryCategoryId,
+                PrimaryCategoryName = shop.PrimaryCategory?.Name,
                 CreatedAt = shop.CreatedAt
             }
         };
@@ -476,6 +479,18 @@ public class SellerService : ISellerService
             };
         }
 
+        if (shop.PrimaryCategoryId.HasValue)
+        {
+            if (!await ProductCategoryBelongsToShopPrimaryRootAsync(shop, dto.CategoryId))
+            {
+                return new ServiceResponse<ProductDto>
+                {
+                    Success = false,
+                    Message = "Sản phẩm phải thuộc ngành hàng bạn đã chọn lúc đăng ký seller."
+                };
+            }
+        }
+
         if (!dto.CategoryId.HasValue)
         {
             return new ServiceResponse<ProductDto>
@@ -644,6 +659,19 @@ public class SellerService : ISellerService
                 Success = false,
                 Message = "Không tìm thấy sản phẩm"
             };
+        }
+
+        var effectiveCategoryId = dto.CategoryId ?? product.CategoryId;
+        if (shop.PrimaryCategoryId.HasValue && effectiveCategoryId.HasValue)
+        {
+            if (!await ProductCategoryBelongsToShopPrimaryRootAsync(shop, effectiveCategoryId))
+            {
+                return new ServiceResponse
+                {
+                    Success = false,
+                    Message = "Danh mục sản phẩm phải nằm trong ngành hàng bạn đã chọn lúc đăng ký seller."
+                };
+            }
         }
 
         if (dto.CategoryId.HasValue)
@@ -1421,6 +1449,35 @@ public class SellerService : ISellerService
         }
 
         throw new InvalidOperationException("Không thể sinh mã sản phẩm PRD duy nhất.");
+    }
+
+    /// <summary>
+    /// Kiểm tra danh mục sản phẩm có thuộc nhánh <see cref="Shop.PrimaryCategoryId"/> (đi lên parent tối đa 64 bước).
+    /// </summary>
+    private async Task<bool> ProductCategoryBelongsToShopPrimaryRootAsync(Shop shop, long? productCategoryId)
+    {
+        if (!shop.PrimaryCategoryId.HasValue)
+            return true;
+        if (!productCategoryId.HasValue)
+            return false;
+
+        var rootId = shop.PrimaryCategoryId.Value;
+        var current = productCategoryId.Value;
+
+        for (var depth = 0; depth < 64; depth++)
+        {
+            if (current == rootId)
+                return true;
+
+            var cat = await _context.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == current);
+            if (cat == null)
+                return false;
+            if (!cat.ParentId.HasValue)
+                return cat.Id == rootId;
+            current = cat.ParentId.Value;
+        }
+
+        return false;
     }
 
     private async Task<string> GenerateUniqueProductSlugAsync(string productName, Guid? excludeProductId = null)

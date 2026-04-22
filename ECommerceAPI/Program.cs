@@ -54,6 +54,9 @@ namespace ECommerceAPI
             builder.Services.Configure<PlatformFeeSettings>(
                 builder.Configuration.GetSection(PlatformFeeSettings.SectionName));
 
+            builder.Services.Configure<FptAiSettings>(
+                builder.Configuration.GetSection(FptAiSettings.SectionName));
+
             builder.Services.AddScoped<IUserRepository, UserRepository>();
 
             builder.Services.AddHttpContextAccessor();
@@ -74,6 +77,7 @@ namespace ECommerceAPI
             builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddScoped<IUserAuthEmailResolver, SupabaseAuthEmailResolver>();
             builder.Services.AddHttpClient();
+            builder.Services.AddScoped<IFptVietnamIdCardOcrService, FptVietnamIdCardOcrService>();
             builder.Services.AddHttpClient("MoMoGateway", client =>
             {
                 // Avoid hanging outbound payment calls for too long.

@@ -7,4 +7,5 @@ public class Shop
     public string Name { get; set; } = null!;
     public short Status { get; set; }
     public DateTime CreatedAt { get; set; }
+    public long? PrimaryCategoryId { get; set; }
 }

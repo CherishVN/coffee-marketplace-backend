@@ -1,4 +1,5 @@
 using ECommerceAPI.Application.DTOs.Admin;
+using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Infrastructure.Data;
@@ -379,6 +380,7 @@ public class SellerApprovalService : ISellerApprovalService
             VerifiedBy = s.VerifiedBy,
             VerifiedByName = s.VerifiedByNavigation?.FullName,
             CreatedAt = s.CreatedAt,
+            Identity = TryDeserializeIdentity(s.IdentitySnapshotJson),
             Documents = s.ShopDocuments?.Select(d => new ShopDocumentDto
             {
                 Id = d.Id,
@@ -609,6 +611,22 @@ public class SellerApprovalService : ISellerApprovalService
 
         var resolved = await Task.WhenAll(tasks);
         return resolved.ToDictionary(x => x.Id, x => x.Email);
+    }
+
+    private static SellerIdentityInfoDto? TryDeserializeIdentity(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<SellerIdentityInfoDto>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string GetStatusName(short status)

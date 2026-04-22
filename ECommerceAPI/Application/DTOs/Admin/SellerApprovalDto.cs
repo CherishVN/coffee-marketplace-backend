@@ -1,3 +1,5 @@
+using ECommerceAPI.Application.DTOs.User;
+
 namespace ECommerceAPI.Application.DTOs.Admin;
 
 public class ShopVerificationDto
@@ -34,6 +36,8 @@ public class ShopVerificationDto
     public string? VerifiedByName { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<ShopDocumentDto> Documents { get; set; } = new();
+    /// <summary>Snapshot nội dung CCCD/CMND (JSON) từ đăng ký — không có URL ảnh thẻ.</summary>
+    public SellerIdentityInfoDto? Identity { get; set; }
 }
 
 public class ShopDocumentDto
