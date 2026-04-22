@@ -220,6 +220,9 @@ namespace ECommerceAPI
             
             builder.Services.AddSwaggerGen(options =>
             {
+                // Tránh trùng schemaId (cùng tên class ở namespace khác) — lỗi phổ biến khiến GET /swagger/v1/swagger.json trả 500.
+                options.CustomSchemaIds(type => type.FullName!.Replace("+", "."));
+
                 options.SwaggerDoc("v1", new OpenApiInfo
                 {
                     Title = "E-Commerce API",

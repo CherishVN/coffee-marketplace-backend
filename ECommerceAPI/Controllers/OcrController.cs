@@ -22,9 +22,12 @@ public class OcrController : ControllerBase
     }
 
     [HttpPost("vnm-id-card")]
+    [Consumes("multipart/form-data")]
     [RequestSizeLimit(MaxBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxBytes)]
-    public async Task<IActionResult> ReadVietnamIdCard([FromForm] IFormFile? image, CancellationToken cancellationToken)
+    public async Task<IActionResult> ReadVietnamIdCard(
+        [FromForm(Name = "image")] IFormFile image,
+        CancellationToken cancellationToken)
     {
         if (image == null || image.Length < 1)
         {
