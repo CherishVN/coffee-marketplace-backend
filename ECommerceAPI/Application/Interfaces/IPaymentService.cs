@@ -12,6 +12,15 @@ public interface IPaymentService
         string? clientReturnSuccessUrl = null,
         string? clientReturnFailureUrl = null,
         string? vnPayReturnUrlOverride = null);
+
+    Task<CreatePaymentResponseDto> CreateVNPayBatchPaymentAsync(
+        List<Guid> orderIds,
+        Guid customerId,
+        string ipAddress,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? vnPayReturnUrlOverride = null);
+
     Task<VNPayReturnDto> ProcessVNPayReturnAsync(IQueryCollection queryParams, string rawQueryString);
 
     Task<CreatePaymentResponseDto> CreateMoMoPaymentAsync(Guid orderId, Guid customerId);

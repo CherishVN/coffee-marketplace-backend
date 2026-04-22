@@ -170,6 +170,127 @@ public class PaymentService : IPaymentService
         };
     }
 
+    // ── 1b. Tạo VNPay Payment URL cho NHIỀU đơn (multi-shop checkout) ─────────
+    public async Task<CreatePaymentResponseDto> CreateVNPayBatchPaymentAsync(
+        List<Guid> orderIds,
+        Guid customerId,
+        string ipAddress,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? vnPayReturnUrlOverride = null)
+    {
+        if (orderIds == null || orderIds.Count == 0)
+            return new CreatePaymentResponseDto { Success = false, Message = "Không có đơn hàng nào" };
+
+        // Nếu chỉ 1 đơn → delegate sang method cũ
+        if (orderIds.Count == 1)
+            return await CreateVNPayPaymentAsync(orderIds[0], customerId, ipAddress,
+                clientReturnSuccessUrl, clientReturnFailureUrl, vnPayReturnUrlOverride);
+
+        // Lấy tất cả orders
+        var orders = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Where(o => orderIds.Contains(o.Id) && o.CustomerId == customerId)
+            .ToListAsync();
+
+        if (orders.Count != orderIds.Count)
+            return new CreatePaymentResponseDto { Success = false, Message = "Một hoặc nhiều đơn hàng không tồn tại" };
+
+        // Kiểm tra tất cả đều PendingPayment
+        var nonPending = orders.FirstOrDefault(o => (OrderStatus)o.Status != OrderStatus.PendingPayment);
+        if (nonPending != null)
+            return new CreatePaymentResponseDto
+            {
+                Success = false,
+                Message = $"Đơn #{nonPending.OrderCode} không ở trạng thái chờ thanh toán"
+            };
+
+        // Kiểm tra chưa có đơn nào đã thanh toán
+        var paidOrderIds = await _context.Payments
+            .Where(p => orderIds.Contains(p.OrderId) && p.Status == (short)PaymentStatus.Paid)
+            .Select(p => p.OrderId)
+            .ToListAsync();
+
+        if (paidOrderIds.Any())
+            return new CreatePaymentResponseDto { Success = false, Message = "Một hoặc nhiều đơn hàng đã được thanh toán" };
+
+        // Tính tổng tiền
+        var totalAmount = orders.Sum(o => o.Total);
+
+        // Tạo Payment record cho TỪNG order
+        var paymentIds = new List<Guid>();
+        foreach (var order in orders)
+        {
+            var payment = new Payment
+            {
+                Id = Guid.NewGuid(),
+                OrderId = order.Id,
+                Provider = "VNPAY",
+                Amount = order.Total,
+                Currency = "VND",
+                Status = (short)PaymentStatus.Pending,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Payments.Add(payment);
+            paymentIds.Add(payment.Id);
+        }
+        await _context.SaveChangesAsync();
+
+        // Tạo TxnRef
+        var txnRef = DateTime.Now.Ticks.ToString();
+        var txnSliding = new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(15));
+
+        // Cache: txnRef → List<Guid> paymentIds (batch)
+        _memoryCache.Set($"TxnRef_Batch_{txnRef}", paymentIds, txnSliding);
+
+        if (IsAllowedClientReturnUrl(clientReturnSuccessUrl))
+            _memoryCache.Set($"VnpayClientSuccess_{txnRef}", clientReturnSuccessUrl!.Trim(), txnSliding);
+        if (IsAllowedClientReturnUrl(clientReturnFailureUrl))
+            _memoryCache.Set($"VnpayClientFailure_{txnRef}", clientReturnFailureUrl!.Trim(), txnSliding);
+
+        var vnpReturnUrl = _vnPaySettings.ReturnUrl;
+        if (!string.IsNullOrWhiteSpace(vnPayReturnUrlOverride)
+            && IsAllowedVnPayReturnUrlOverride(vnPayReturnUrlOverride.Trim(), out var safeReturn)
+            && safeReturn != null)
+        {
+            vnpReturnUrl = safeReturn;
+        }
+
+        // Gộp mã đơn hàng để hiển thị trên VNPay
+        var orderCodes = string.Join(", ", orders.Select(o => o.OrderCode));
+
+        // Build VNPay request với TỔNG SỐ TIỀN
+        var vnpay = new VNPayLibrary();
+        vnpay.AddRequestData("vnp_Version", _vnPaySettings.Version);
+        vnpay.AddRequestData("vnp_Command", _vnPaySettings.Command);
+        vnpay.AddRequestData("vnp_TmnCode", _vnPaySettings.TmnCode);
+        vnpay.AddRequestData("vnp_Amount", ((long)(totalAmount * 100)).ToString());
+        var vnNow = GetVietnamDateTimeNow();
+        vnpay.AddRequestData("vnp_CreateDate", vnNow.ToString("yyyyMMddHHmmss"));
+        vnpay.AddRequestData("vnp_ExpireDate", vnNow.AddMinutes(15).ToString("yyyyMMddHHmmss"));
+        vnpay.AddRequestData("vnp_CurrCode", _vnPaySettings.CurrCode);
+        vnpay.AddRequestData("vnp_IpAddr", ipAddress);
+        vnpay.AddRequestData("vnp_Locale", _vnPaySettings.Locale);
+        vnpay.AddRequestData("vnp_OrderInfo", $"Thanh toan {orders.Count} don hang: {orderCodes}");
+        vnpay.AddRequestData("vnp_OrderType", "other");
+        vnpay.AddRequestData("vnp_ReturnUrl", vnpReturnUrl);
+        vnpay.AddRequestData("vnp_TxnRef", txnRef);
+
+        string paymentUrl = vnpay.CreateRequestUrl(_vnPaySettings.Url, VnPayHashSecret);
+
+        _logger.LogInformation(
+            "[VNPay Batch] Created payment URL for {Count} orders, Total: {Total}, PaymentIds: {Ids}",
+            orders.Count, totalAmount, string.Join(",", paymentIds));
+
+        return new CreatePaymentResponseDto
+        {
+            Success = true,
+            PaymentUrl = paymentUrl,
+            PaymentId = paymentIds.First(),
+            Message = $"Tạo URL thanh toán cho {orders.Count} đơn hàng thành công"
+        };
+    }
+
     // ── 2. Xử lý VNPay Return URL ────────────────────────────────────────────
     public async Task<VNPayReturnDto> ProcessVNPayReturnAsync(IQueryCollection queryParams, string rawQueryString)
     {
@@ -196,167 +317,181 @@ public class PaymentService : IPaymentService
             return new VNPayReturnDto { Success = false, Message = "Chữ ký không hợp lệ", ResponseCode = "97" };
         }
 
-        // Lấy PaymentId từ cache
-        if (!_memoryCache.TryGetValue($"TxnRef_{txnRef}", out Guid paymentId))
+        // Lấy PaymentId(s) từ cache — batch trước, fallback single
+        List<Guid> paymentIds;
+        if (_memoryCache.TryGetValue($"TxnRef_Batch_{txnRef}", out List<Guid>? batchIds) && batchIds is { Count: > 0 })
+        {
+            paymentIds = batchIds;
+            _logger.LogInformation("[VNPay Return] Batch payment detected: {Count} payments", paymentIds.Count);
+        }
+        else if (_memoryCache.TryGetValue($"TxnRef_{txnRef}", out Guid singleId))
+        {
+            paymentIds = new List<Guid> { singleId };
+        }
+        else
         {
             _logger.LogError("[VNPay Return] No matching payment for TxnRef: {TxnRef}", txnRef);
             return new VNPayReturnDto { Success = false, Message = "Không tìm thấy giao dịch", ResponseCode = "01" };
         }
 
-        // Lấy Payment và Order
-        var payment = await _context.Payments
+        // Lấy tất cả Payments + Orders
+        var payments = await _context.Payments
             .Include(p => p.Order)
                 .ThenInclude(o => o.OrderItems)
             .Include(p => p.Order)
                 .ThenInclude(o => o.Customer)
             .Include(p => p.Order)
                 .ThenInclude(o => o.Shop)
-            .FirstOrDefaultAsync(p => p.Id == paymentId);
+            .Where(p => paymentIds.Contains(p.Id))
+            .ToListAsync();
 
-        if (payment == null)
+        if (payments.Count == 0)
         {
-            _logger.LogError("[VNPay Return] Payment {PaymentId} not found", paymentId);
+            _logger.LogError("[VNPay Return] No payments found for IDs: {Ids}", string.Join(",", paymentIds));
             return new VNPayReturnDto { Success = false, Message = "Không tìm thấy thanh toán", ResponseCode = "01" };
         }
 
-        // Idempotent: nếu đã xử lý rồi thì return luôn
-        if (payment.Status == (short)PaymentStatus.Paid)
-        {
-            if (!payment.TransactionId.HasValue || !payment.Order.TransactionId.HasValue)
-            {
-                await EnsureTransactionLinkedAsync(
-                    payment,
-                    payment.Order,
-                    payment.ProviderRef,
-                    payment.PaidAt ?? DateTime.UtcNow);
-                await _context.SaveChangesAsync();
-            }
+        // Dùng payment đầu tiên làm đại diện cho response
+        var primaryPayment = payments.First();
 
+        // Idempotent: nếu ĐÃ xử lý rồi (tất cả đều Paid)
+        if (payments.All(p => p.Status == (short)PaymentStatus.Paid))
+        {
             return new VNPayReturnDto
             {
                 Success = true,
                 Message = "Thanh toán đã được xử lý trước đó",
-                OrderId = payment.OrderId,
-                PaymentId = payment.Id,
-                Amount = payment.Amount
+                OrderId = primaryPayment.OrderId,
+                PaymentId = primaryPayment.Id,
+                Amount = payments.Sum(p => p.Amount)
             };
         }
 
-        var order = payment.Order;
-        decimal amount = long.TryParse(vnpAmountStr, out long rawAmount) ? rawAmount / 100m : payment.Amount;
+        decimal amount = long.TryParse(vnpAmountStr, out long rawAmount) ? rawAmount / 100m : payments.Sum(p => p.Amount);
 
         if (responseCode == "00")
         {
-            // ── THANH TOÁN THÀNH CÔNG ────────────────────────────────────────
-            payment.Status = (short)PaymentStatus.Paid;
-            payment.PaidAt = DateTime.UtcNow;
-            payment.ProviderRef = transactionNo;
-
-            order.Status = (short)OrderStatus.Confirmed;
-            order.UpdatedAt = DateTime.UtcNow;
-
-            // Giảm tồn kho (ReservedQuantity đã cộng lúc checkout, giờ trừ Quantity thật)
-            foreach (var item in order.OrderItems)
+            // ── THANH TOÁN THÀNH CÔNG — xử lý TẤT CẢ payments/orders ──────
+            foreach (var payment in payments)
             {
-                var inv = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
+                if (payment.Status == (short)PaymentStatus.Paid) continue; // idempotent
 
-                if (inv != null)
+                var order = payment.Order;
+
+                payment.Status = (short)PaymentStatus.Paid;
+                payment.PaidAt = DateTime.UtcNow;
+                payment.ProviderRef = transactionNo;
+
+                order.Status = (short)OrderStatus.Confirmed;
+                order.UpdatedAt = DateTime.UtcNow;
+
+                // Giảm tồn kho
+                foreach (var item in order.OrderItems)
                 {
-                    inv.Quantity -= item.Quantity;
-                    inv.ReservedQuantity -= item.Quantity;
-                    if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
-                    inv.UpdatedAt = DateTime.UtcNow;
+                    var inv = await _context.Inventories
+                        .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
+
+                    if (inv != null)
+                    {
+                        inv.Quantity -= item.Quantity;
+                        inv.ReservedQuantity -= item.Quantity;
+                        if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
+                        inv.UpdatedAt = DateTime.UtcNow;
+                    }
                 }
-            }
 
-            await EnsureTransactionLinkedAsync(
-                payment,
-                order,
-                transactionNo,
-                payment.PaidAt ?? DateTime.UtcNow);
+                await EnsureTransactionLinkedAsync(
+                    payment,
+                    order,
+                    transactionNo,
+                    payment.PaidAt ?? DateTime.UtcNow);
 
-            var settlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
+                var settlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
 
-            await _context.SaveChangesAsync();
-
-            var oid = order.OrderCode;
-            await _notifications.PublishAsync(
-                order.CustomerId,
-                nameof(NotificationType.Payment),
-                "Thanh toán thành công",
-                $"Đơn #{oid} đã thanh toán thành công. Số tiền: {amount:N0} VND.",
-                "Order",
-                order.Id,
-                queueEmail: true);
-
-            await _notifications.PublishAsync(
-                order.Shop.OwnerId,
-                nameof(NotificationType.Order),
-                "Đơn hàng mới",
-                $"Đơn #{oid} vừa thanh toán thành công — vui lòng xử lý trong mục Đơn hàng.",
-                "Order",
-                order.Id,
-                queueEmail: false);
-
-            if (settlement is { NetAmount: > 0 })
-            {
+                var oid = order.OrderCode;
                 await _notifications.PublishAsync(
-                    settlement.SellerId,
+                    order.CustomerId,
                     nameof(NotificationType.Payment),
-                    "Nhận tiền từ đơn hàng",
-                    $"Đơn #{oid}: +{settlement.NetAmount:N0} VND vào ví khả dụng (tiền hàng {settlement.GrossSubtotal:N0} VND, phí sàn {settlement.CommissionPercent}%: {settlement.PlatformFeeAmount:N0} VND).",
+                    "Thanh toán thành công",
+                    $"Đơn #{oid} đã thanh toán thành công. Số tiền: {payment.Amount:N0} VND.",
                     "Order",
                     order.Id,
                     queueEmail: true);
+
+                await _notifications.PublishAsync(
+                    order.Shop.OwnerId,
+                    nameof(NotificationType.Order),
+                    "Đơn hàng mới",
+                    $"Đơn #{oid} vừa thanh toán thành công — vui lòng xử lý trong mục Đơn hàng.",
+                    "Order",
+                    order.Id,
+                    queueEmail: false);
+
+                if (settlement is { NetAmount: > 0 })
+                {
+                    await _notifications.PublishAsync(
+                        settlement.SellerId,
+                        nameof(NotificationType.Payment),
+                        "Nhận tiền từ đơn hàng",
+                        $"Đơn #{oid}: +{settlement.NetAmount:N0} VND vào ví khả dụng (tiền hàng {settlement.GrossSubtotal:N0} VND, phí sàn {settlement.CommissionPercent}%: {settlement.PlatformFeeAmount:N0} VND).",
+                        "Order",
+                        order.Id,
+                        queueEmail: true);
+                }
             }
 
-            _logger.LogInformation("[VNPay Return] Payment SUCCESS for OrderId: {OrderId}", order.Id);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("[VNPay Return] Payment SUCCESS for {Count} order(s)", payments.Count);
 
             return new VNPayReturnDto
             {
                 Success = true,
                 Message = "Thanh toán thành công",
                 ResponseCode = responseCode,
-                OrderId = order.Id,
-                OrderCode = order.OrderCode,
-                PaymentId = payment.Id,
+                OrderId = primaryPayment.OrderId,
+                OrderCode = primaryPayment.Order.OrderCode,
+                PaymentId = primaryPayment.Id,
                 Amount = amount
             };
         }
         else
         {
-            // ── THANH TOÁN CHƯA HOÀN TẤT ────────────────────────────────────
-            payment.Status = (short)PaymentStatus.Failed;
-            payment.PaidAt = DateTime.UtcNow;
-            payment.ProviderRef = transactionNo;
+            // ── THANH TOÁN CHƯA HOÀN TẤT — xử lý TẤT CẢ ────────────────
+            foreach (var payment in payments)
+            {
+                if (payment.Status != (short)PaymentStatus.Pending) continue;
 
-            // Giữ đơn ở trạng thái chờ thanh toán để khách có thể thử lại.
-            order.Status = (short)OrderStatus.PendingPayment;
-            order.UpdatedAt = DateTime.UtcNow;
+                payment.Status = (short)PaymentStatus.Failed;
+                payment.PaidAt = DateTime.UtcNow;
+                payment.ProviderRef = transactionNo;
+
+                payment.Order.Status = (short)OrderStatus.PendingPayment;
+                payment.Order.UpdatedAt = DateTime.UtcNow;
+            }
 
             await _context.SaveChangesAsync();
 
-            var oidFail = order.OrderCode;
+            var firstOrder = primaryPayment.Order;
             await _notifications.PublishAsync(
-                order.CustomerId,
+                firstOrder.CustomerId,
                 nameof(NotificationType.Payment),
                 "Thanh toán chưa hoàn tất",
-                $"Đơn #{oidFail} chưa thanh toán thành công (mã: {responseCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeoutMinutes} phút.",
+                $"Thanh toán chưa thành công (mã: {responseCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeoutMinutes} phút.",
                 "Order",
-                order.Id,
+                firstOrder.Id,
                 queueEmail: true);
 
-            _logger.LogWarning("[VNPay Return] Payment NOT completed for OrderId: {OrderId}, Code: {Code}", order.Id, responseCode);
+            _logger.LogWarning("[VNPay Return] Payment NOT completed for {Count} order(s), Code: {Code}", payments.Count, responseCode);
 
             return new VNPayReturnDto
             {
                 Success = false,
                 Message = $"Thanh toán chưa hoàn tất. Mã: {responseCode}",
                 ResponseCode = responseCode,
-                OrderId = order.Id,
-                OrderCode = order.OrderCode,
-                PaymentId = payment.Id,
+                OrderId = firstOrder.Id,
+                OrderCode = firstOrder.OrderCode,
+                PaymentId = primaryPayment.Id,
                 Amount = amount
             };
         }

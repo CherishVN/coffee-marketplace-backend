@@ -19,6 +19,17 @@ public class CreatePaymentDto
     public string? VnPayReturnUrlOverride { get; set; }
 }
 
+/// <summary>
+/// DTO cho thanh toán gộp nhiều đơn hàng (multi-shop checkout) trong 1 giao dịch VNPay.
+/// </summary>
+public class CreateBatchPaymentDto
+{
+    public List<Guid> OrderIds { get; set; } = new();
+    public string? ClientReturnSuccessUrl { get; set; }
+    public string? ClientReturnFailureUrl { get; set; }
+    public string? VnPayReturnUrlOverride { get; set; }
+}
+
 public class CreatePaymentResponseDto
 {
     public bool Success { get; set; }

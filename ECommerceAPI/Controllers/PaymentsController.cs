@@ -63,6 +63,33 @@ public class PaymentsController : ControllerBase
     }
 
     /// <summary>
+    /// Tạo URL thanh toán VNPay cho NHIỀU đơn hàng (multi-shop checkout)
+    /// </summary>
+    [HttpPost("vnpay/create-batch")]
+    [Authorize]
+    public async Task<IActionResult> CreateVNPayBatchPayment([FromBody] CreateBatchPaymentDto dto)
+    {
+        var customerId = _userClaims.GetUserId();
+        if (customerId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        string ipAddress = HttpContext.GetClientIpAddress();
+
+        var result = await _paymentService.CreateVNPayBatchPaymentAsync(
+            dto.OrderIds,
+            customerId.Value,
+            ipAddress,
+            dto.ClientReturnSuccessUrl,
+            dto.ClientReturnFailureUrl,
+            dto.VnPayReturnUrlOverride);
+
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// VNPay redirect về sau khi user thanh toán (Return URL)
     /// </summary>
     [HttpGet("vnpay/return")]
