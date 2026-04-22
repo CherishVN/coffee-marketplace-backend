@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using ECommerceAI.Data;
 using ECommerceAI.Data.Entities;
 using ECommerceAI.DTOs.Seller;
@@ -16,6 +17,8 @@ public class AiSellerService : IAiSellerService
     private const int MaxPromptCategories = 150;
     private const int MaxPromptTags = 200;
     private const int MaxPromptMaterials = 150;
+    private const int MaxAnalyzeImageUrls = 2;
+    private static readonly TimeSpan CandidateCacheDuration = TimeSpan.FromHours(1);
 
     /// <summary>Parse JSON từ Gemini khi model trả camelCase (suggest-* endpoints).</summary>
     private static readonly JsonSerializerOptions _jsonReadOptions = new()
@@ -144,13 +147,18 @@ public class AiSellerService : IAiSellerService
     // ── Candidate loading (full catalog for prompt) ─────────────────────────
     private sealed record CandidateSet(
         Dictionary<long, CategoryCandidate> CatById,
-        List<CategoryCandidate> PromptCats,
-        List<TagCandidate> PromptTags,
-        List<MaterialCandidate> PromptMats);
+        List<CategoryCandidate> AllCatsOrdered,
+        List<TagCandidate> AllTags,
+        List<MaterialCandidate> AllMaterials);
+
+    private sealed record PromptCatalogSlice(
+        List<CategoryCandidate> Categories,
+        List<TagCandidate> Tags,
+        List<MaterialCandidate> Materials);
 
     /// <summary>
-    /// Loads every active category, every tag, and every active material for the AI prompt.
-    /// Kết quả được cache 5 phút để tránh query DB lặp lại cho mỗi request analyze.
+    /// Loads full active catalog (categories, tags, materials) để build path và thu hẹp theo từng request.
+    /// Cache lâu hơn để giảm tải DB; prompt gửi Gemini chỉ dùng subset qua <see cref="NarrowCatalogForPrompt"/>.
     /// </summary>
     private async Task<CandidateSet> GetPromptCandidatesAsync()
     {
@@ -163,27 +171,172 @@ public class AiSellerService : IAiSellerService
             .ToListAsync();
         var catById = allCats.ToDictionary(c => c.Id);
 
-        var promptCats = allCats
+        var allCatsOrdered = allCats
             .OrderByDescending(c => c.Level)
             .ThenBy(c => c.Name)
             .ToList();
 
-        var promptTags = await _context.Tags
+        var allTags = await _context.Tags
             .OrderBy(t => t.Name)
             .Select(t => new TagCandidate(t.Id, t.Name))
             .ToListAsync();
 
-        var promptMats = await _context.Materials
+        var allMaterials = await _context.Materials
             .Where(m => m.IsActive)
             .OrderBy(m => m.Name)
             .Select(m => new MaterialCandidate(m.Id, m.Name))
             .ToListAsync();
 
-        var result = new CandidateSet(catById, promptCats, promptTags, promptMats);
+        var result = new CandidateSet(catById, allCatsOrdered, allTags, allMaterials);
 
-        _cache.Set(CandidateCacheKey, result, TimeSpan.FromMinutes(5));
+        _cache.Set(CandidateCacheKey, result, CandidateCacheDuration);
 
         return result;
+    }
+
+    private static List<string> ExtractSearchTokens(string? title, string? description, int maxTokens = 16)
+    {
+        var text = $"{title} {description}";
+        if (string.IsNullOrWhiteSpace(text))
+            return new List<string>();
+
+        return Regex.Split(text.ToLowerInvariant(), @"\W+")
+            .Where(t => t.Length >= 2)
+            .Distinct()
+            .Take(maxTokens)
+            .ToList();
+    }
+
+    private static bool IsSelfOrDescendantOf(long categoryId, long ancestorId, Dictionary<long, CategoryCandidate> catById)
+    {
+        var cur = catById.GetValueOrDefault(categoryId);
+        while (cur != null)
+        {
+            if (cur.Id == ancestorId)
+                return true;
+            cur = cur.ParentId is long p ? catById.GetValueOrDefault(p) : null;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Thu hẹp catalog đưa vào prompt: ưu tiên nhánh category đã chọn, khớp từ khóa từ title/description, rồi pad còn lại.
+    /// </summary>
+    private static PromptCatalogSlice NarrowCatalogForPrompt(
+        CandidateSet src,
+        Func<long, string> buildPath,
+        string? title,
+        string? description,
+        long? preferredCategoryId,
+        int maxCategories,
+        int maxTags,
+        int maxMaterials)
+    {
+        var tokens = ExtractSearchTokens(title, description);
+        var catById = src.CatById;
+
+        var categories = new List<CategoryCandidate>();
+        if (maxCategories > 0)
+        {
+            var seenCat = new HashSet<long>();
+            void AddCats(IEnumerable<CategoryCandidate> sequence)
+            {
+                foreach (var c in sequence)
+                {
+                    if (categories.Count >= maxCategories)
+                        return;
+                    if (!seenCat.Add(c.Id))
+                        continue;
+                    categories.Add(c);
+                }
+            }
+
+            if (preferredCategoryId.HasValue && catById.ContainsKey(preferredCategoryId.Value))
+            {
+                var scoped = src.AllCatsOrdered
+                    .Where(c => IsSelfOrDescendantOf(c.Id, preferredCategoryId.Value, catById))
+                    .OrderByDescending(c => c.Level)
+                    .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase);
+                AddCats(scoped);
+            }
+
+            if (categories.Count < maxCategories && tokens.Count > 0)
+            {
+                var kwMatches = src.AllCatsOrdered
+                    .Where(c => !seenCat.Contains(c.Id))
+                    .Where(c => tokens.Any(t =>
+                        buildPath(c.Id).Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                        c.Name.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                    .OrderByDescending(c => c.Level)
+                    .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase);
+                AddCats(kwMatches);
+            }
+
+            if (categories.Count < maxCategories)
+            {
+                var fallback = src.AllCatsOrdered
+                    .Where(c => !seenCat.Contains(c.Id))
+                    .OrderByDescending(c => c.Level)
+                    .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase);
+                AddCats(fallback);
+            }
+        }
+
+        var tags = new List<TagCandidate>();
+        if (maxTags > 0)
+        {
+            var seenTag = new HashSet<long>();
+            void AddTags(IEnumerable<TagCandidate> sequence)
+            {
+                foreach (var t in sequence)
+                {
+                    if (tags.Count >= maxTags)
+                        return;
+                    if (!seenTag.Add(t.Id))
+                        continue;
+                    tags.Add(t);
+                }
+            }
+
+            if (tokens.Count > 0)
+            {
+                var kw = src.AllTags
+                    .Where(t => tokens.Any(tok => t.Name.Contains(tok, StringComparison.OrdinalIgnoreCase)))
+                    .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase);
+                AddTags(kw);
+            }
+
+            AddTags(src.AllTags.Where(t => !seenTag.Contains(t.Id)));
+        }
+
+        var materials = new List<MaterialCandidate>();
+        if (maxMaterials > 0)
+        {
+            var seenMat = new HashSet<Guid>();
+            void AddMats(IEnumerable<MaterialCandidate> sequence)
+            {
+                foreach (var m in sequence)
+                {
+                    if (materials.Count >= maxMaterials)
+                        return;
+                    if (!seenMat.Add(m.Id))
+                        continue;
+                    materials.Add(m);
+                }
+            }
+
+            if (tokens.Count > 0)
+            {
+                var kw = src.AllMaterials
+                    .Where(m => tokens.Any(tok => m.Name.Contains(tok, StringComparison.OrdinalIgnoreCase)))
+                    .OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase);
+                AddMats(kw);
+            }
+
+            AddMats(src.AllMaterials.Where(m => !seenMat.Contains(m.Id)));
+        }
+
+        return new PromptCatalogSlice(categories, tags, materials);
     }
 
     /// <summary>Ngữ cảnh từ lịch sử tag (accepted/modified) — dùng chung cho suggest-tags và analyze-*.</summary>
@@ -249,14 +402,8 @@ public class AiSellerService : IAiSellerService
     // ── Gợi ý Category ─────────────────────────────────────────────────────────────
     public async Task<SuggestCategoryResponseDto> SuggestCategoryAsync(SuggestCategoryRequestDto request, Guid sellerId)
     {
-        // Lấy danh sách categories từ DB kèm parent để build đường dẫn
-        var allCats = await _context.Categories
-            .Where(c => c.IsActive)
-            .OrderBy(c => c.Level).ThenBy(c => c.Name)
-            .Take(MaxPromptCategories)
-            .ToListAsync();
-
-        var catById = allCats.ToDictionary(c => c.Id);
+        var candidates = await GetPromptCandidatesAsync();
+        var catById = candidates.CatById;
 
         string BuildPath(long id)
         {
@@ -272,7 +419,17 @@ public class AiSellerService : IAiSellerService
             return string.Join(" > ", parts);
         }
 
-        var categoryList = string.Join("\n", allCats.Select(c =>
+        var promptCats = NarrowCatalogForPrompt(
+            candidates,
+            BuildPath,
+            request.Title,
+            request.Description,
+            preferredCategoryId: null,
+            maxCategories: MaxPromptCategories,
+            maxTags: 0,
+            maxMaterials: 0).Categories;
+
+        var categoryList = string.Join("\n", promptCats.Select(c =>
             $"ID:{c.Id} | {BuildPath(c.Id)} (Level {c.Level})"));
 
         var jsonExample = """{"suggestions":[{"categoryId":123,"categoryName":"Tên danh mục","categoryPath":"Đường dẫn đầy đủ","confidenceScore":0.95}]}""";
@@ -311,8 +468,18 @@ public class AiSellerService : IAiSellerService
     // ── Gợi ý Tags ───────────────────────────────────────────────────────────
     public async Task<SuggestTagsResponseDto> SuggestTagsAsync(SuggestTagsRequestDto request, Guid sellerId)
     {
-        var tags = await _context.Tags.OrderBy(t => t.Name).ToListAsync();
-        var tagList = string.Join(", ", tags.Select(t => $"{t.Name}(ID:{t.Id})"));
+        var candidates = await GetPromptCandidatesAsync();
+        var promptTags = NarrowCatalogForPrompt(
+            candidates,
+            _ => "",
+            request.Title,
+            request.Description,
+            preferredCategoryId: null,
+            maxCategories: 0,
+            maxTags: MaxPromptTags,
+            maxMaterials: 0).Tags;
+
+        var tagList = string.Join(", ", promptTags.Select(t => $"{t.Name}(ID:{t.Id})"));
         var historyHint = await BuildSellerTagHistoryHintAsync(sellerId);
 
         var tagJsonExample = """{"suggestions":[{"tagId":1,"tagName":"Tên tag","confidenceScore":0.95}]}""";
@@ -656,13 +823,19 @@ public class AiSellerService : IAiSellerService
     // ── Gợi ý Materials ──────────────────────────────────────────────────────
     public async Task<SuggestMaterialsResponseDto> SuggestMaterialsAsync(SuggestMaterialsRequestDto request, Guid sellerId)
     {
-        var materials = await _context.Materials
-            .Where(m => m.IsActive)
-            .OrderBy(m => m.Name)
-            .ToListAsync();
+        var candidates = await GetPromptCandidatesAsync();
+        var promptMats = NarrowCatalogForPrompt(
+            candidates,
+            _ => "",
+            request.Title,
+            request.Description,
+            preferredCategoryId: null,
+            maxCategories: 0,
+            maxTags: 0,
+            maxMaterials: MaxPromptMaterials).Materials;
 
-        var materialList = string.Join(", ", materials.Select(m => $"{m.Name}(ID:{m.Id})"));
-        var materialById = materials.ToDictionary(m => m.Id, m => m.Name);
+        var materialList = string.Join(", ", promptMats.Select(m => $"{m.Name}(ID:{m.Id})"));
+        var materialById = candidates.AllMaterials.ToDictionary(m => m.Id, m => m.Name);
         var historyHint = await BuildSellerMaterialHistoryHintAsync(sellerId, materialById);
 
         var matJsonExample = """{"suggestions":[{"materialId":"uuid-here","materialName":"Tên chất liệu","confidenceScore":0.95}]}""";
@@ -747,8 +920,8 @@ public class AiSellerService : IAiSellerService
         if (request.ImageUrls == null || request.ImageUrls.Count == 0)
             return new AnalyzeImageResponseDto { Success = false, ErrorMessage = "Vui lòng cung cấp ít nhất 1 URL ảnh." };
 
-        if (request.ImageUrls.Count > 3)
-            request.ImageUrls = request.ImageUrls.Take(3).ToList();
+        if (request.ImageUrls.Count > MaxAnalyzeImageUrls)
+            request.ImageUrls = request.ImageUrls.Take(MaxAnalyzeImageUrls).ToList();
 
         var candidates = await GetPromptCandidatesAsync();
         var catById2 = candidates.CatById;
@@ -765,11 +938,21 @@ public class AiSellerService : IAiSellerService
             return string.Join(" > ", parts);
         }
 
-        var categoryList = string.Join("\n", candidates.PromptCats.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
-        var tagList = string.Join(", ", candidates.PromptTags.Select(t => $"{t.Name}(ID:{t.Id})"));
-        var materialList = string.Join(", ", candidates.PromptMats.Select(m => $"{m.Name}(ID:{m.Id})"));
+        var promptSlice = NarrowCatalogForPrompt(
+            candidates,
+            BuildImagePath,
+            request.ProductTitle,
+            request.ProductDescription,
+            preferredCategoryId: null,
+            maxCategories: MaxPromptCategories,
+            maxTags: MaxPromptTags,
+            maxMaterials: MaxPromptMaterials);
+
+        var categoryList = string.Join("\n", promptSlice.Categories.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
+        var tagList = string.Join(", ", promptSlice.Tags.Select(t => $"{t.Name}(ID:{t.Id})"));
+        var materialList = string.Join(", ", promptSlice.Materials.Select(m => $"{m.Name}(ID:{m.Id})"));
         var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
-        var matNameById = candidates.PromptMats.ToDictionary(m => m.Id, m => m.Name);
+        var matNameById = candidates.AllMaterials.ToDictionary(m => m.Id, m => m.Name);
         var matHistoryHint = await BuildSellerMaterialHistoryHintAsync(sellerId, matNameById);
         const string sellerHabitBalanceNoteImage = """
 
@@ -858,20 +1041,20 @@ public class AiSellerService : IAiSellerService
             result = NormalizeAnalyzeImageResult(result);
 
             // Post-validate within the candidate set that was shown to the model
-            var validCatIds2 = new HashSet<long>(candidates.PromptCats.Select(c => c.Id));
-            var validTagIds2 = new HashSet<long>(candidates.PromptTags.Select(t => t.Id));
-            var validMatIds2 = new HashSet<Guid>(candidates.PromptMats.Select(m => m.Id));
+            var validCatIds2 = new HashSet<long>(promptSlice.Categories.Select(c => c.Id));
+            var validTagIds2 = new HashSet<long>(promptSlice.Tags.Select(t => t.Id));
+            var validMatIds2 = new HashSet<Guid>(promptSlice.Materials.Select(m => m.Id));
 
-            var catByPath2 = candidates.PromptCats
+            var catByPath2 = promptSlice.Categories
                 .GroupBy(c => BuildImagePath(c.Id).Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            var catByName2 = candidates.PromptCats
+            var catByName2 = promptSlice.Categories
                 .GroupBy(c => c.Name.Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            var tagByName2 = candidates.PromptTags
+            var tagByName2 = promptSlice.Tags
                 .GroupBy(t => t.Name.Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            var matByName2 = candidates.PromptMats
+            var matByName2 = promptSlice.Materials
                 .GroupBy(m => m.Name.Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
 
@@ -907,16 +1090,26 @@ public class AiSellerService : IAiSellerService
             return string.Join(" > ", parts);
         }
 
-        var catLines = string.Join("\n", candidates.PromptCats.Select(c => $"ID:{c.Id} | {BuildPath(c.Id)} | Cấp {c.Level}"));
-        var tagLines = string.Join("\n", candidates.PromptTags.Select(t => $"ID:{t.Id} | {t.Name}"));
-        var matLines = string.Join("\n", candidates.PromptMats.Select(m => $"ID:{m.Id} | {m.Name}"));
-
         var categoryHint = string.Empty;
         if (request.CategoryId.HasValue && catById.TryGetValue(request.CategoryId.Value, out var hintCat))
             categoryHint = $"\nNgười dùng đã chọn category: {BuildPath(hintCat.Id)} — dùng đây làm ngữ cảnh để chọn tags và materials phù hợp.\n";
 
+        var promptSlice = NarrowCatalogForPrompt(
+            candidates,
+            BuildPath,
+            request.Title,
+            request.Description,
+            preferredCategoryId: request.CategoryId,
+            maxCategories: MaxPromptCategories,
+            maxTags: MaxPromptTags,
+            maxMaterials: MaxPromptMaterials);
+
+        var catLines = string.Join("\n", promptSlice.Categories.Select(c => $"ID:{c.Id} | {BuildPath(c.Id)} | Cấp {c.Level}"));
+        var tagLines = string.Join("\n", promptSlice.Tags.Select(t => $"ID:{t.Id} | {t.Name}"));
+        var matLines = string.Join("\n", promptSlice.Materials.Select(m => $"ID:{m.Id} | {m.Name}"));
+
         var tagHistoryHint = await BuildSellerTagHistoryHintAsync(sellerId);
-        var matNameById = candidates.PromptMats.ToDictionary(m => m.Id, m => m.Name);
+        var matNameById = candidates.AllMaterials.ToDictionary(m => m.Id, m => m.Name);
         var matHistoryHint = await BuildSellerMaterialHistoryHintAsync(sellerId, matNameById);
         const string sellerHabitBalanceNote = """
 
@@ -956,20 +1149,20 @@ public class AiSellerService : IAiSellerService
                 return new AnalyzeProductResponseDto { Success = false, ErrorMessage = "Không thể xử lý phản hồi từ AI. Vui lòng thử lại." };
 
             // Post-validate within the candidate set that was shown to the model
-            var validCatIds = new HashSet<long>(candidates.PromptCats.Select(c => c.Id));
-            var validTagIds = new HashSet<long>(candidates.PromptTags.Select(t => t.Id));
-            var validMatIds = new HashSet<Guid>(candidates.PromptMats.Select(m => m.Id));
+            var validCatIds = new HashSet<long>(promptSlice.Categories.Select(c => c.Id));
+            var validTagIds = new HashSet<long>(promptSlice.Tags.Select(t => t.Id));
+            var validMatIds = new HashSet<Guid>(promptSlice.Materials.Select(m => m.Id));
 
-            var catByPath = candidates.PromptCats
+            var catByPath = promptSlice.Categories
                 .GroupBy(c => BuildPath(c.Id).Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            var catByName = candidates.PromptCats
+            var catByName = promptSlice.Categories
                 .GroupBy(c => c.Name.Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            var tagByName = candidates.PromptTags
+            var tagByName = promptSlice.Tags
                 .GroupBy(t => t.Name.Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-            var matByName = candidates.PromptMats
+            var matByName = promptSlice.Materials
                 .GroupBy(m => m.Name.Trim().ToLowerInvariant())
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
 
