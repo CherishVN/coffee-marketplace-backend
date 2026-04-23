@@ -128,7 +128,7 @@ public class CartService : ICartService
         {
             var newQty = existingItem.Quantity + dto.Quantity;
             if (available < newQty)
-                return (false, $"Số lượng tồn kho không đủ (còn {available})", null);
+                return (false, $"Số lượng tồn kho không đủ", null);
 
             existingItem.Quantity = newQty;
             existingItem.UpdatedAt = DateTime.UtcNow;
@@ -355,7 +355,7 @@ public class CartService : ICartService
                 ShopId = shopId,
                 ShippingProvider = "GHN",
                 ShippingServiceId = shippingOption?.ShippingServiceId,
-                TrackingCode = $"PEND-{order.Id:N}",
+                TrackingCode = $"PEND-{order.OrderCode}",
                 Status = "pending_label",
                 ProviderShippingFee = shippingFee,
                 CodAmount = 0m,
