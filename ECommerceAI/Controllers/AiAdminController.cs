@@ -27,6 +27,7 @@ public class AiAdminController : ControllerBase
         return Ok(new { models = result.Split('\n') });
     }
 
+
     [HttpPost("generate-report")]
     public async Task<IActionResult> GenerateReport([FromBody] GenerateReportRequestDto dto)
     {
