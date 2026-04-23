@@ -11,7 +11,7 @@ public partial class SellerWallet
 
     public decimal AvailableBalance { get; set; }
 
-    /// <summary>Tiền tạm giữ sau thanh toán; chuyển sang Available khi đơn Completed.</summary>
+    /// <summary>Tiền tạm giữ sau thanh toán; chuyển sang Available khi đơn Hoàn thành (sau cửa sổ khiếu nại) và không khiếu nại mở.</summary>
     public decimal HeldBalance { get; set; }
 
     public decimal PendingBalance { get; set; }

@@ -84,9 +84,10 @@ public class SellerWalletSettlementService : ISellerWalletSettlementService
             wallet.UpdatedAt = DateTime.UtcNow;
         }
 
+        var d = SellerWalletLedgerPolicies.ReleaseDaysAfterOrderDelivered;
         var note = pct > 0
-            ? $"Tạm giữ sau thanh toán (payment {payment.Id}). Subtotal {gross:N0} VND, phí sàn {pct}% = {fee:N0} VND, net {net:N0} VND — giải ngân khi đơn hoàn thành."
-            : $"Tạm giữ sau thanh toán (payment {payment.Id}). Subtotal {gross:N0} VND (không phí sàn) — giải ngân khi đơn hoàn thành.";
+            ? $"Tạm giữ sau thanh toán (payment {payment.Id}). Subtotal {gross:N0} VND, phí sàn {pct}% = {fee:N0} VND, net {net:N0} VND — rút được khi đơn hoàn thành sau {d} ngày từ Đã giao và không khiếu nại mở."
+            : $"Tạm giữ sau thanh toán (payment {payment.Id}). Subtotal {gross:N0} VND (không phí sàn) — rút được khi đơn hoàn thành sau {d} ngày từ Đã giao và không khiếu nại mở.";
 
         var ledger = new SellerWalletLedger
         {

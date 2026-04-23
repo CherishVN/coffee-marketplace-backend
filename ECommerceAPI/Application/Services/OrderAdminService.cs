@@ -16,7 +16,6 @@ public class OrderAdminService : IOrderAdminService
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
     private readonly ISellerWalletReversalService _walletReversal;
-    private readonly ISellerWalletReleaseService _walletRelease;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
 
@@ -26,7 +25,6 @@ public class OrderAdminService : IOrderAdminService
         IHubContext<OrderTrackingHub> hubContext,
         INotificationService notifications,
         ISellerWalletReversalService walletReversal,
-        ISellerWalletReleaseService walletRelease,
         IOrderNotificationEmailComposer orderEmailComposer,
         IOrderStatusHistoryService orderStatusHistory)
     {
@@ -35,7 +33,6 @@ public class OrderAdminService : IOrderAdminService
         _hubContext = hubContext;
         _notifications = notifications;
         _walletReversal = walletReversal;
-        _walletRelease = walletRelease;
         _orderEmailComposer = orderEmailComposer;
         _orderStatusHistory = orderStatusHistory;
     }
@@ -257,11 +254,6 @@ public class OrderAdminService : IOrderAdminService
                         .Where(p => p.Id == item.ProductId)
                         .ExecuteUpdateAsync(s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity));
                 }
-            }
-
-            if (newOrderStatus == OrderStatus.Completed)
-            {
-                await _walletRelease.TryReleaseSettlementForOrderAsync(order.Id);
             }
 
             if (newOrderStatus is OrderStatus.Cancelled or OrderStatus.Refunded)

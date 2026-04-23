@@ -31,7 +31,7 @@ public class WalletDto
 {
     public Guid Id { get; set; }
     public decimal AvailableBalance { get; set; }
-    /// <summary>Tiền tạm giữ (đã thanh toán, chờ đơn Completed mới rút được).</summary>
+    /// <summary>Tiền tạm giữ (đã thanh toán; rút được khi đơn hoàn thành sau cửa sổ khiếu nại và không khiếu nại mở).</summary>
     public decimal HeldBalance { get; set; }
     /// <summary>Tiền đang chờ duyệt rút (yêu cầu rút).</summary>
     public decimal PendingBalance { get; set; }

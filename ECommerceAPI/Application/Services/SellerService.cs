@@ -23,7 +23,6 @@ public class SellerService : ISellerService
     private readonly INotificationService _notifications;
     private readonly IUserAuthEmailResolver _authResolver;
     private readonly ISellerWalletReversalService _walletReversal;
-    private readonly ISellerWalletReleaseService _walletRelease;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ISellerProductContentAlignmentClient _productContentAlignment;
@@ -35,7 +34,6 @@ public class SellerService : ISellerService
         INotificationService notifications,
         IUserAuthEmailResolver authResolver,
         ISellerWalletReversalService walletReversal,
-        ISellerWalletReleaseService walletRelease,
         IOrderNotificationEmailComposer orderEmailComposer,
         IHttpContextAccessor httpContextAccessor,
         ISellerProductContentAlignmentClient productContentAlignment,
@@ -46,7 +44,6 @@ public class SellerService : ISellerService
         _notifications = notifications;
         _authResolver = authResolver;
         _walletReversal = walletReversal;
-        _walletRelease = walletRelease;
         _orderEmailComposer = orderEmailComposer;
         _httpContextAccessor = httpContextAccessor;
         _orderStatusHistory = orderStatusHistory;
@@ -1319,11 +1316,6 @@ public class SellerService : ISellerService
         if (nowFulfilled && !alreadyFulfilled)
         {
             await IncrementSoldCountAsync(order.OrderItems);
-        }
-
-        if (newOrderStatus == OrderStatus.Completed)
-        {
-            await _walletRelease.TryReleaseSettlementForOrderAsync(order.Id);
         }
 
         if (newOrderStatus is OrderStatus.Cancelled or OrderStatus.Refunded)

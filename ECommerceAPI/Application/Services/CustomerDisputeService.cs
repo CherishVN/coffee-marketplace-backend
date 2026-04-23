@@ -13,7 +13,13 @@ public class CustomerDisputeService : ICustomerDisputeService
 {
     private readonly ApplicationDbContext _context;
     private readonly INotificationService _notifications;
-    private const int DisputeWindowDays = 7;
+
+    /// <summary>Cửa sổ khiếu nại sau khi nhận hàng (mốc từ lịch sử Đã giao / Hoàn thành).</summary>
+    private const int DisputeWindowDaysAfterReceipt = 7;
+
+    private const int NotReceivedMinDaysInShipping = 5;
+    private const int NotReceivedMinDaysInProcessing = 7;
+    private const int NotReceivedDaysPastEta = 2;
 
     // Terminal statuses where evidence can no longer be updated
     private static readonly DisputeStatus[] FinalStatuses =
@@ -47,6 +53,8 @@ public class CustomerDisputeService : ICustomerDisputeService
         var order = await _context.Orders
             .Include(o => o.OrderItems)
             .Include(o => o.Shop)
+            .Include(o => o.OrderStatusHistories)
+            .Include(o => o.Shipments)
             .FirstOrDefaultAsync(o => o.Id == dto.OrderId && o.CustomerId == customerId);
 
         if (order == null)
@@ -54,24 +62,10 @@ public class CustomerDisputeService : ICustomerDisputeService
             return Fail("Không tìm thấy đơn hàng");
         }
 
-        // BR: Order status must be Delivered or Completed
-        var allowedStatuses = new short[]
-        {
-            (short)OrderStatus.Delivered,
-            (short)OrderStatus.Completed
-        };
-
-        if (!allowedStatuses.Contains(order.Status))
-        {
-            return Fail("Chỉ có thể khiếu nại đơn hàng đã giao (Delivered) hoặc đã hoàn thành (Completed)");
-        }
-
-        // BR: Must be within 7 days after delivery/completion
-        var daysSinceUpdate = (DateTime.UtcNow - order.UpdatedAt).TotalDays;
-        if (daysSinceUpdate > DisputeWindowDays)
-        {
-            return Fail($"Đã quá thời hạn khiếu nại ({DisputeWindowDays} ngày kể từ khi đơn được giao/hoàn thành)");
-        }
+        var now = DateTime.UtcNow;
+        var typeErr = ValidateCreateRulesForDisputeType(order, dto.Type, now);
+        if (typeErr != null)
+            return Fail(typeErr);
 
         // BR: Một đơn — một khiếu nại (đang mở)
         var existingDispute = await _context.Disputes
@@ -425,4 +419,151 @@ public class CustomerDisputeService : ICustomerDisputeService
         Success = false,
         Message = message
     };
+
+    /// <summary>
+    /// Các loại cần đã nhận hàng (hoặc đã xác nhận hoàn tất) mới khiếu nại được.
+    /// <see cref="DisputeType.NotReceived"/> xử lý riêng.
+    /// </summary>
+    private string? ValidateCreateRulesForDisputeType(Order order, short disputeTypeRaw, DateTime utcNow)
+    {
+        if (!Enum.IsDefined(typeof(DisputeType), disputeTypeRaw))
+            return "Loại khiếu nại không hợp lệ.";
+
+        var disputeType = (DisputeType)disputeTypeRaw;
+        if (disputeType == DisputeType.NotReceived)
+            return ValidateNotReceivedCreateRules(order, utcNow);
+
+        var allowedPostReceipt = new[]
+        {
+            (short)OrderStatus.Delivered,
+            (short)OrderStatus.Completed
+        };
+
+        if (!allowedPostReceipt.Contains(order.Status))
+        {
+            return "Với loại khiếu nại này, chỉ có thể khiếu nại khi đơn đã giao (Delivered) hoặc đã hoàn thành (Completed).";
+        }
+
+        var receiptAnchor = GetReceiptAnchorUtc(order);
+        if ((utcNow - receiptAnchor).TotalDays > DisputeWindowDaysAfterReceipt)
+        {
+            return $"Đã quá thời hạn khiếu nại ({DisputeWindowDaysAfterReceipt} ngày kể từ khi nhận hàng — theo thời điểm đơn Đã giao hoặc bạn xác nhận Hoàn thành).";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Không nhận được hàng: cho phép khi đang chuẩn bị / đang giao (sau ngưỡng ngày hoặc quá ETA),
+    /// hoặc khi shop đã báo Delivered nhưng khách phản đối (trong 7 ngày kể từ Đã giao).
+    /// Không cho khi đơn đã Completed (đã xác nhận nhận hàng), đã hủy / hoàn tiền, hoặc chưa thanh toán xác nhận.
+    /// </summary>
+    private string? ValidateNotReceivedCreateRules(Order order, DateTime utcNow)
+    {
+        var st = (OrderStatus)order.Status;
+
+        if (st is OrderStatus.PendingPayment or OrderStatus.PendingConfirmation or OrderStatus.Cancelled
+            or OrderStatus.Refunded)
+        {
+            return "Không thể khiếu nại «Không nhận được hàng» ở trạng thái đơn hiện tại.";
+        }
+
+        if (st == OrderStatus.Completed)
+        {
+            return "Đơn đã hoàn thành (bạn đã xác nhận nhận hàng). Không thể tạo khiếu nại «Không nhận được hàng».";
+        }
+
+        if (st == OrderStatus.Confirmed)
+        {
+            return "Đơn mới được xác nhận, chưa giao. Vui lòng đợi shop chuẩn bị / gửi hàng; nếu quá lâu không cập nhật, liên hệ hỗ trợ.";
+        }
+
+        if (st == OrderStatus.Delivered)
+        {
+            var deliveredAt = FirstEnteredStatusAtUtc(order, OrderStatus.Delivered) ?? order.UpdatedAt;
+            if ((utcNow - deliveredAt).TotalDays > DisputeWindowDaysAfterReceipt)
+            {
+                return $"Đã quá thời hạn khiếu nại ({DisputeWindowDaysAfterReceipt} ngày kể từ khi đơn chuyển sang Đã giao / nhận hàng).";
+            }
+
+            return null;
+        }
+
+        if (st == OrderStatus.Processing)
+        {
+            if (NotReceivedDelayElapsedForStatus(order, OrderStatus.Processing, utcNow, NotReceivedMinDaysInProcessing))
+                return null;
+
+            return $"Khiếu nại «Không nhận được hàng» khi đơn đang chuẩn bị chỉ được sau ít nhất {NotReceivedMinDaysInProcessing} ngày kể từ khi đơn vào trạng thái này (tránh khiếu nại sớm).";
+        }
+
+        if (st == OrderStatus.Shipping)
+        {
+            if (NotReceivedShippingDelayOrEtaElapsed(order, utcNow))
+                return null;
+
+            return
+                $"Khiếu nại «Không nhận được hàng» khi đơn đang giao chỉ được sau ít nhất {NotReceivedMinDaysInShipping} ngày kể từ khi đơn chuyển sang Đang giao, " +
+                $"hoặc sau {NotReceivedDaysPastEta} ngày kể từ ngày dự kiến giao (nếu có).";
+        }
+
+        return "Không thể khiếu nại «Không nhận được hàng» ở trạng thái đơn hiện tại.";
+    }
+
+    private static DateTime? FirstEnteredStatusAtUtc(Order order, OrderStatus status)
+    {
+        var list = order.OrderStatusHistories;
+        if (list == null || list.Count == 0)
+            return null;
+
+        var target = (short)status;
+        return list
+            .Where(h => h.NewStatus == target)
+            .OrderBy(h => h.CreatedAt)
+            .Select(h => (DateTime?)h.CreatedAt)
+            .FirstOrDefault();
+    }
+
+    private static bool NotReceivedDelayElapsedForStatus(
+        Order order,
+        OrderStatus status,
+        DateTime utcNow,
+        int minWholeDays)
+    {
+        var entered = FirstEnteredStatusAtUtc(order, status);
+        var anchor = entered ?? order.UpdatedAt;
+        return (utcNow - anchor).TotalDays >= minWholeDays;
+    }
+
+    private static bool NotReceivedShippingDelayOrEtaElapsed(Order order, DateTime utcNow)
+    {
+        if (NotReceivedDelayElapsedForStatus(order, OrderStatus.Shipping, utcNow, NotReceivedMinDaysInShipping))
+            return true;
+
+        var ship = order.ShipmentForDisplay();
+        if (ship?.EstimatedDeliveryDate is { } eta)
+        {
+            var deadline = eta.AddDays(NotReceivedDaysPastEta);
+            if (DateTimeOffset.UtcNow >= deadline)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Mốc «nhận hàng» cho cửa sổ khiếu nại: sớm nhất trong (lần đầu Đã giao, lần đầu Hoàn thành).
+    /// Không có lịch sử → <see cref="Order.UpdatedAt"/> (dữ liệu cũ).
+    /// </summary>
+    private static DateTime GetReceiptAnchorUtc(Order order)
+    {
+        var deliveredAt = FirstEnteredStatusAtUtc(order, OrderStatus.Delivered);
+        var completedAt = FirstEnteredStatusAtUtc(order, OrderStatus.Completed);
+        var candidates = new List<DateTime>();
+        if (deliveredAt.HasValue) candidates.Add(deliveredAt.Value);
+        if (completedAt.HasValue) candidates.Add(completedAt.Value);
+        if (candidates.Count > 0)
+            return candidates.Min();
+        return order.UpdatedAt;
+    }
 }

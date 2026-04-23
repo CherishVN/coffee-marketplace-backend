@@ -8,6 +8,8 @@ public interface ICustomerOrderService
     Task<CustomerOrderDetailResponseDto> GetOrderByIdAsync(Guid customerId, Guid orderId);
     Task<OrderTrackingDto?> GetOrderTrackingAsync(Guid customerId, Guid orderId);
     Task<ConfirmOrderResponseDto> ConfirmOrderAsync(Guid customerId, Guid orderId);
+    /// <summary>Đơn Delivered đủ điều kiện → Completed (hệ thống). Dùng background job.</summary>
+    Task<int> AutoCompleteDeliveredOrdersPastDisputeWindowAsync(CancellationToken cancellationToken = default);
     Task<ServiceResponse> CancelOrderAsync(Guid customerId, Guid orderId, string? reason = null);
     Task<ServiceResponse> CancelPendingOrderAsync(Guid customerId, Guid orderId, string? reason = null);
 }

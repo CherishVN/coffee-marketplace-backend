@@ -108,6 +108,8 @@ namespace ECommerceAPI
             builder.Services.AddSingleton<INotificationQueue, NotificationQueue>();
             builder.Services.AddHostedService<NotificationEmailBackgroundService>();
             builder.Services.AddHostedService<PaymentTimeoutBackgroundService>();
+            builder.Services.AddHostedService<SellerWalletReleaseBackgroundService>();
+            builder.Services.AddHostedService<OrderAutoCompleteBackgroundService>();
             builder.Services.AddMemoryCache();
 
             builder.Services.Configure<ForwardedHeadersOptions>(opts =>

@@ -18,7 +18,6 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly ApplicationDbContext _context;
     private readonly IHubContext<OrderTrackingHub> _hubContext;
     private readonly INotificationService _notifications;
-    private readonly ISellerWalletReleaseService _walletRelease;
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly ICustomerWalletService _customerWallet;
@@ -30,7 +29,6 @@ public class CustomerOrderService : ICustomerOrderService
         ApplicationDbContext context,
         IHubContext<OrderTrackingHub> hubContext,
         INotificationService notifications,
-        ISellerWalletReleaseService walletRelease,
         ISellerWalletReversalService walletReversal,
         IOrderNotificationEmailComposer orderEmailComposer,
         ICustomerWalletService customerWallet,
@@ -41,7 +39,6 @@ public class CustomerOrderService : ICustomerOrderService
         _context = context;
         _hubContext = hubContext;
         _notifications = notifications;
-        _walletRelease = walletRelease;
         _walletReversal = walletReversal;
         _orderEmailComposer = orderEmailComposer;
         _customerWallet = customerWallet;
@@ -264,6 +261,29 @@ public class CustomerOrderService : ICustomerOrderService
             };
         }
 
+        var deliverAnchor = await OrderPostDeliveryHelper.GetDeliveryAnchorUtcAsync(
+            _context,
+            order.Id,
+            order.UpdatedAt);
+        if ((DateTime.UtcNow - deliverAnchor).TotalDays < SellerWalletLedgerPolicies.ReleaseDaysAfterOrderDelivered)
+        {
+            return new ConfirmOrderResponseDto
+            {
+                Success = false,
+                Message =
+                    $"Chỉ có thể xác nhận hoàn thành sau {SellerWalletLedgerPolicies.ReleaseDaysAfterOrderDelivered} ngày kể từ khi đơn đã giao (hết thời hạn khiếu nại)."
+            };
+        }
+
+        if (await OrderPostDeliveryHelper.HasOpenDisputeAsync(_context, order.Id))
+        {
+            return new ConfirmOrderResponseDto
+            {
+                Success = false,
+                Message = "Đơn đang có khiếu nại chưa kết thúc. Không thể xác nhận hoàn thành."
+            };
+        }
+
         order.Status = (short)OrderStatus.Completed;
         order.UpdatedAt = DateTime.UtcNow;
         _orderStatusHistory.AddEntry(
@@ -280,8 +300,6 @@ public class CustomerOrderService : ICustomerOrderService
                 .Where(p => p.Id == item.ProductId)
                 .ExecuteUpdateAsync(s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity));
         }
-
-        await _walletRelease.TryReleaseSettlementForOrderAsync(order.Id);
 
         await _context.SaveChangesAsync();
 
@@ -312,6 +330,90 @@ public class CustomerOrderService : ICustomerOrderService
             NewStatusName = OrderStatusVnHelper.Vietnamese(OrderStatus.Completed),
             UpdatedAt = order.UpdatedAt
         };
+    }
+
+    public async Task<int> AutoCompleteDeliveredOrdersPastDisputeWindowAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var deliveredIds = await _context.Orders
+            .AsNoTracking()
+            .Where(o => o.Status == (short)OrderStatus.Delivered)
+            .Select(o => o.Id)
+            .ToListAsync(cancellationToken);
+
+        var n = 0;
+        foreach (var id in deliveredIds)
+        {
+            if (await TryAutoCompleteDeliveredOrderAsync(id, cancellationToken))
+                n++;
+        }
+
+        return n;
+    }
+
+    /// <summary>
+    /// Hoàn thành đơn khi đã Đã giao đủ ngày và không còn khiếu nại mở (đồng bộ nghiệp vụ rút tiền seller).
+    /// </summary>
+    private async Task<bool> TryAutoCompleteDeliveredOrderAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.Status == (short)OrderStatus.Delivered, cancellationToken);
+
+        if (order == null)
+            return false;
+
+        var anchor = await OrderPostDeliveryHelper.GetDeliveryAnchorUtcAsync(
+            _context,
+            order.Id,
+            order.UpdatedAt,
+            cancellationToken);
+
+        if ((DateTime.UtcNow - anchor).TotalDays < SellerWalletLedgerPolicies.ReleaseDaysAfterOrderDelivered)
+            return false;
+
+        if (await OrderPostDeliveryHelper.HasOpenDisputeAsync(_context, order.Id, cancellationToken))
+            return false;
+
+        order.Status = (short)OrderStatus.Completed;
+        order.UpdatedAt = DateTime.UtcNow;
+        _orderStatusHistory.AddEntry(
+            order.Id,
+            (short)OrderStatus.Delivered,
+            (short)OrderStatus.Completed,
+            null,
+            "Tự động hoàn thành sau thời hạn khiếu nại (không còn khiếu nại mở)");
+
+        foreach (var item in order.OrderItems)
+        {
+            await _context.Products
+                .Where(p => p.Id == item.ProductId)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(p => p.SoldCount, p => p.SoldCount + item.Quantity),
+                    cancellationToken);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        await NotifyStatusChanged(order, OrderStatus.Delivered, OrderStatus.Completed);
+
+        var code = NotificationFormatting.ShortEntityId(order.Id);
+        var composed = await _orderEmailComposer.TryComposeAsync(
+            order.Id,
+            OrderStatus.Delivered,
+            OrderStatus.Completed);
+        await _notifications.PublishAsync(
+            order.CustomerId,
+            nameof(NotificationType.Order),
+            "Đơn hàng đã hoàn thành",
+            $"Đơn #{code} đã tự động hoàn thành sau thời hạn khiếu nại.",
+            "Order",
+            order.Id,
+            queueEmail: true,
+            emailHtmlBody: composed?.Html,
+            emailSubjectOverride: composed?.Subject);
+
+        return true;
     }
 
     public Task<ServiceResponse> CancelOrderAsync(Guid customerId, Guid orderId, string? reason = null)
