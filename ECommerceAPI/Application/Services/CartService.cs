@@ -404,6 +404,7 @@ public class CartService : ICartService
                 StockAvailable = 0,
                 ShopId = ci.Product.ShopId,
                 ShopName = ci.Product.Shop?.Name,
+                ShopSlug = ci.Product.Shop?.Slug,
                 GhnShopId = ci.Product.Shop?.GhnShopId,
                 FromDistrictId = ci.Product.Shop?.DistrictId,
                 FromWardCode = ci.Product.Shop?.WardCode,

@@ -58,6 +58,8 @@ public class CartItemDto
 
     public Guid? ShopId { get; set; }
     public string? ShopName { get; set; }
+    /// <summary>Slug công khai của shop — dùng cho URL storefront, không dùng Guid.</summary>
+    public string? ShopSlug { get; set; }
     public int? GhnShopId { get; set; }
     public int? FromDistrictId { get; set; }
     public string? FromWardCode { get; set; }
