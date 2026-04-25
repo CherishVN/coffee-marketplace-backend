@@ -19,7 +19,7 @@ public class CustomerDisputeService : ICustomerDisputeService
 
     private const int NotReceivedMinDaysInShipping = 5;
     private const int NotReceivedMinDaysInProcessing = 7;
-    private const int NotReceivedDaysPastEta = 2;
+    private const int NotReceivedDaysPastEta = 1;
 
     // Terminal statuses where evidence can no longer be updated
     private static readonly DisputeStatus[] FinalStatuses =
