@@ -2,7 +2,6 @@ using ECommerceAPI.Domain.Entities;
 
 namespace ECommerceAPI.Application;
 
-/// <summary>Đọc thông tin vận chuyển từ bảng <c>shipments</c> (không còn trùng cột trên <c>orders</c>).</summary>
 public static class OrderShipmentHelper
 {
     public static Shipment? PrimaryShipment(this Order order)
@@ -15,9 +14,6 @@ public static class OrderShipmentHelper
         return shipments?.OrderBy(s => s.CreatedAt).FirstOrDefault();
     }
 
-    /// <summary>
-    /// Mã tạm lúc checkout (PEND-*); không phải mã vận đơn từ GHN.
-    /// </summary>
     public static bool IsPendingPlaceholderTracking(string? trackingCode)
     {
         var t = trackingCode?.Trim();
@@ -25,10 +21,6 @@ public static class OrderShipmentHelper
         return t.StartsWith("PEND-", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Một bản ghi dùng cho API/ UI: ưu tiên bản đã có mã thật từ GHN (bỏ qua bản tạm PEND-*).
-    /// Có thể là bản tạo sau (webhook) trong khi bản cũ vẫn là PEND.
-    /// </summary>
     public static Shipment? ShipmentForDisplay(this Order order) =>
         ShipmentForDisplay(order.Shipments);
 
@@ -46,7 +38,6 @@ public static class OrderShipmentHelper
         return list.OrderBy(s => s.CreatedAt).FirstOrDefault();
     }
 
-    /// <summary>Chỉ trả mã vận đơn nếu đã là mã từ GHN (ẩn PEND-*)</summary>
     public static string? GhnDisplayTrackingOrNull(this Shipment? s)
     {
         if (s == null) return null;
@@ -55,9 +46,6 @@ public static class OrderShipmentHelper
         return t;
     }
 
-    /// <summary>
-    /// Mã GHN thật trên bất kỳ bản ghi shipment nào (dùng khi cần cancel API, v.v.).
-    /// </summary>
     public static string? GhnTrackingOrNull(IEnumerable<Shipment>? shipments)
     {
         return GhnDisplayTrackingOrNull(ShipmentForDisplay(shipments));
