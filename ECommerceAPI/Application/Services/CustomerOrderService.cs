@@ -201,6 +201,7 @@ public class CustomerOrderService : ICustomerOrderService
             ActualDeliveryDate = latestShipment?.ActualDeliveryDate,
             TrackingCode = latestShipment?.TrackingCode,
             ShippingProvider = latestShipment?.ShippingProvider,
+            CancelRequestedAt = order.CancelRequestedAt,
             Items = order.OrderItems.Select(oi => new CustomerOrderItemDto
             {
                 Id = oi.Id,
@@ -426,9 +427,123 @@ public class CustomerOrderService : ICustomerOrderService
         return true;
     }
 
-    public Task<ServiceResponse> CancelOrderAsync(Guid customerId, Guid orderId, string? reason = null)
+    public async Task<CancelOrderResponseDto> CancelOrderAsync(Guid customerId, Guid orderId, string? reason = null)
     {
-        return CancelOrderCoreAsync(customerId, orderId, reason, pendingOnly: false);
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Include(o => o.Payments)
+            .Include(o => o.Shipments)
+            .Include(o => o.Shop)
+            .Include(o => o.OrderStatusHistories)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
+
+        if (order == null)
+            return new CancelOrderResponseDto { Success = false, Message = "Không tìm thấy đơn hàng" };
+
+        var oldStatus = (OrderStatus)order.Status;
+        var normalizedReason = string.IsNullOrWhiteSpace(reason)
+            ? null
+            : reason.Trim()[..Math.Min(reason.Trim().Length, 500)];
+
+        var canCancel = oldStatus is OrderStatus.PendingPayment
+            or OrderStatus.PendingConfirmation
+            or OrderStatus.Confirmed
+            or OrderStatus.Processing;
+
+        if (!canCancel)
+        {
+            return new CancelOrderResponseDto
+            {
+                Success = false,
+                Message = "Chỉ có thể huỷ đơn hàng trước khi giao"
+            };
+        }
+
+        // Nếu đơn đang Processing: kiểm tra xem đã vào trạng thái này được bao lâu
+        if (oldStatus == OrderStatus.Processing)
+        {
+            // Ngăn gửi yêu cầu hủy trùng
+            if (order.CancelRequestedAt.HasValue)
+            {
+                return new CancelOrderResponseDto
+                {
+                    Success = false,
+                    Message = "Bạn đã gửi yêu cầu hủy rồi. Vui lòng chờ shop xác nhận.",
+                    CancelledImmediately = false,
+                    CancelRequestedAt = order.CancelRequestedAt
+                };
+            }
+
+            // Tìm thời điểm đơn vào Processing từ status history
+            const int AutoCancelWindowMinutes = 30;
+            var processingEntry = order.OrderStatusHistories
+                .Where(h => h.NewStatus == (short)OrderStatus.Processing)
+                .OrderBy(h => h.CreatedAt)
+                .FirstOrDefault();
+            var processingAt = processingEntry?.CreatedAt ?? order.UpdatedAt;
+            var minutesInProcessing = (DateTime.UtcNow - processingAt).TotalMinutes;
+
+            if (minutesInProcessing <= AutoCancelWindowMinutes)
+            {
+                // Trong 30 phút → hủy ngay như bình thường (kể cả hủy GHN nếu có)
+                var ghnCancel = await CancelGhnOrderIfRequiredAsync(order);
+                if (!ghnCancel.Success)
+                    return new CancelOrderResponseDto { Success = false, Message = ghnCancel.Message };
+
+                await PerformImmediateCancelAsync(order, customerId, normalizedReason, oldStatus);
+                return new CancelOrderResponseDto
+                {
+                    Success = true,
+                    Message = "Đơn hàng đã được huỷ thành công.",
+                    CancelledImmediately = true
+                };
+            }
+            else
+            {
+                // Quá 30 phút → gửi yêu cầu hủy đến shop, chờ duyệt
+                var now = DateTime.UtcNow;
+                order.CancelRequestedAt = now;
+                order.CancelReason = normalizedReason;
+                order.UpdatedAt = now;
+                await _context.SaveChangesAsync();
+
+                var code = string.IsNullOrWhiteSpace(order.OrderCode)
+                    ? NotificationFormatting.ShortEntityId(order.Id)
+                    : order.OrderCode;
+                var reasonNote = string.IsNullOrWhiteSpace(normalizedReason)
+                    ? string.Empty
+                    : $" Lý do: {normalizedReason}";
+
+                // Thông báo cho shop owner
+                if (order.Shop?.OwnerId is { } ownerId)
+                {
+                    await _notifications.PublishAsync(
+                        ownerId,
+                        nameof(NotificationType.Order),
+                        "Yêu cầu hủy đơn hàng",
+                        $"Khách hàng yêu cầu hủy đơn #{code}.{reasonNote} Vào trang quản lý đơn hàng để phê duyệt hoặc từ chối.",
+                        "Order",
+                        order.Id);
+                }
+
+                return new CancelOrderResponseDto
+                {
+                    Success = true,
+                    Message = "Yêu cầu hủy đã được gửi đến shop. Bạn sẽ nhận được thông báo khi shop xác nhận.",
+                    CancelledImmediately = false,
+                    CancelRequestedAt = now
+                };
+            }
+        }
+
+        // Với các trạng thái 0, 1, 2: hủy ngay
+        await PerformImmediateCancelAsync(order, customerId, normalizedReason, oldStatus);
+        return new CancelOrderResponseDto
+        {
+            Success = true,
+            Message = "Đơn hàng đã được huỷ thành công.",
+            CancelledImmediately = true
+        };
     }
 
     public Task<ServiceResponse> CancelPendingOrderAsync(Guid customerId, Guid orderId, string? reason = null)
@@ -436,49 +551,9 @@ public class CustomerOrderService : ICustomerOrderService
         return CancelOrderCoreAsync(customerId, orderId, reason, pendingOnly: true);
     }
 
-    private async Task<ServiceResponse> CancelOrderCoreAsync(Guid customerId, Guid orderId, string? reason, bool pendingOnly)
+    /// <summary>Thực hiện hủy đơn ngay lập tức (dùng cho trạng thái 0/1/2 hoặc Processing trong 30 phút).</summary>
+    private async Task PerformImmediateCancelAsync(Order order, Guid customerId, string? normalizedReason, OrderStatus oldStatus)
     {
-        var order = await _context.Orders
-            .Include(o => o.OrderItems)
-            .Include(o => o.Payments)
-            .Include(o => o.Shipments)
-            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
-
-        if (order == null)
-            return new ServiceResponse { Success = false, Message = "Không tìm thấy đơn hàng" };
-
-        var oldStatus = (OrderStatus)order.Status;
-        var normalizedReason = string.IsNullOrWhiteSpace(reason)
-            ? null
-            : reason.Trim()[..Math.Min(reason.Trim().Length, 500)];
-
-        var canCancel = pendingOnly
-            ? oldStatus == OrderStatus.PendingPayment
-            : oldStatus is OrderStatus.PendingPayment
-                or OrderStatus.PendingConfirmation
-                or OrderStatus.Confirmed
-                or OrderStatus.Processing;
-
-        if (!canCancel)
-        {
-            return new ServiceResponse
-            {
-                Success = false,
-                Message = pendingOnly
-                    ? "Chỉ có thể huỷ đơn hàng đang chờ thanh toán"
-                    : "Chỉ có thể huỷ đơn hàng trước khi giao"
-            };
-        }
-
-        if (!pendingOnly && oldStatus == OrderStatus.Processing)
-        {
-            var ghnCancel = await CancelGhnOrderIfRequiredAsync(order);
-            if (!ghnCancel.Success)
-            {
-                return ghnCancel;
-            }
-        }
-
         var now = DateTime.UtcNow;
         var hasPaidPayment = order.Payments.Any(p => p.Status == (short)PaymentStatus.Paid);
 
@@ -487,14 +562,9 @@ public class CustomerOrderService : ICustomerOrderService
             var inv = await _context.Inventories
                 .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
 
-            if (inv == null)
-                continue;
+            if (inv == null) continue;
 
-            if (hasPaidPayment)
-            {
-                inv.Quantity += item.Quantity;
-            }
-
+            if (hasPaidPayment) inv.Quantity += item.Quantity;
             inv.ReservedQuantity = Math.Max(0, inv.ReservedQuantity - item.Quantity);
             inv.UpdatedAt = now;
         }
@@ -507,6 +577,7 @@ public class CustomerOrderService : ICustomerOrderService
 
         order.Status = (short)OrderStatus.Cancelled;
         order.CancelReason = normalizedReason;
+        order.CancelRequestedAt = null; // xóa yêu cầu hủy nếu có
         order.UpdatedAt = now;
         _orderStatusHistory.AddEntry(
             order.Id,
@@ -561,7 +632,28 @@ public class CustomerOrderService : ICustomerOrderService
             queueEmail: true,
             emailHtmlBody: composed?.Html,
             emailSubjectOverride: composed?.Subject);
+    }
 
+    private async Task<ServiceResponse> CancelOrderCoreAsync(Guid customerId, Guid orderId, string? reason, bool pendingOnly)
+    {
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Include(o => o.Payments)
+            .Include(o => o.Shipments)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
+
+        if (order == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy đơn hàng" };
+
+        var oldStatus = (OrderStatus)order.Status;
+        var normalizedReason = string.IsNullOrWhiteSpace(reason)
+            ? null
+            : reason.Trim()[..Math.Min(reason.Trim().Length, 500)];
+
+        if (oldStatus != OrderStatus.PendingPayment)
+            return new ServiceResponse { Success = false, Message = "Chỉ có thể huỷ đơn hàng đang chờ thanh toán" };
+
+        await PerformImmediateCancelAsync(order, customerId, normalizedReason, oldStatus);
         return new ServiceResponse { Success = true, Message = "Đơn hàng đã được huỷ" };
     }
 

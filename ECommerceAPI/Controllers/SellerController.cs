@@ -328,6 +328,40 @@ public class SellerController : ControllerBase
     }
 
     /// <summary>
+    /// Phê duyệt yêu cầu hủy đơn của khách → hủy đơn ngay lập tức.
+    /// </summary>
+    [HttpPost("orders/{orderId}/approve-cancel")]
+    public async Task<IActionResult> ApproveCancelRequest(Guid orderId)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _sellerService.ApproveCancelRequestAsync(userId.Value, orderId);
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// Từ chối yêu cầu hủy đơn của khách → đơn tiếp tục xử lý bình thường.
+    /// </summary>
+    [HttpPost("orders/{orderId}/reject-cancel")]
+    public async Task<IActionResult> RejectCancelRequest(Guid orderId, [FromBody] RejectCancelRequestDto? dto)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _sellerService.RejectCancelRequestAsync(userId.Value, orderId, dto?.Note);
+        if (!result.Success)
+            return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
     /// Đánh giá sản phẩm từ khách (theo sản phẩm thuộc shop)
     /// </summary>
     [HttpGet("reviews")]

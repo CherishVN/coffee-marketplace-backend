@@ -71,6 +71,22 @@ public class CustomerOrderDetailDto : CustomerOrderSummaryDto
     public string? TrackingCode { get; set; }
     /// <summary>Đơn vị vận chuyển (GHN, ...).</summary>
     public string? ShippingProvider { get; set; }
+    /// <summary>
+    /// Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt.
+    /// Null = không có yêu cầu hủy đang chờ.
+    /// </summary>
+    public DateTime? CancelRequestedAt { get; set; }
+}
+
+/// <summary>Response cho API hủy đơn — phân biệt hủy ngay vs yêu cầu chờ duyệt.</summary>
+public class CancelOrderResponseDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    /// <summary>true = đơn đã hủy ngay; false = yêu cầu hủy đã gửi đến shop, chờ duyệt.</summary>
+    public bool CancelledImmediately { get; set; }
+    /// <summary>Thời điểm yêu cầu hủy được tạo (khi RequiresApproval = true).</summary>
+    public DateTime? CancelRequestedAt { get; set; }
 }
 
 public class OrderTrackingDto

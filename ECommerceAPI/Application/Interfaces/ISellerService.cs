@@ -34,6 +34,8 @@ public interface ISellerService
     Task<ServiceResponse<List<OrderDto>>> GetMyOrdersAsync(Guid userId, int page, int pageSize, short? status, string? search = null);
     Task<ServiceResponse<OrderDto>> GetOrderByIdAsync(Guid userId, Guid orderId);
     Task<ServiceResponse> UpdateOrderStatusAsync(Guid userId, Guid orderId, SellerUpdateOrderStatusDto dto);
+    Task<ServiceResponse> ApproveCancelRequestAsync(Guid shopOwnerId, Guid orderId);
+    Task<ServiceResponse> RejectCancelRequestAsync(Guid shopOwnerId, Guid orderId, string? shopNote = null);
 
     /// <summary>Đánh giá sản phẩm của khách hàng đối với sản phẩm thuộc shop.</summary>
     Task<ServiceResponse<SellerProductReviewsDataDto>> GetMyProductReviewsAsync(

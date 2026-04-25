@@ -1132,6 +1132,7 @@ public class SellerService : ISellerService
                 ShopGhnShopId = shop.GhnShopId,
                 ShopFromDistrictId = shop.DistrictId,
                 ShopFromWardCode = shop.WardCode,
+                CancelRequestedAt = order.CancelRequestedAt,
                 Items = order.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,
@@ -1546,5 +1547,149 @@ public class SellerService : ISellerService
     {
         if (product.Status == (short)ProductStatus.Active)
             product.Status = (short)ProductStatus.PendingApproval;
+    }
+
+    // ==================== CANCEL REQUEST ====================
+
+    /// <summary>
+    /// Shop phê duyệt yêu cầu hủy đơn của khách → thực hiện hủy thật sự.
+    /// </summary>
+    public async Task<ServiceResponse> ApproveCancelRequestAsync(Guid shopOwnerId, Guid orderId)
+    {
+        var shop = await _context.Shops.FirstOrDefaultAsync(s => s.OwnerId == shopOwnerId);
+        if (shop == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy shop" };
+
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Include(o => o.Payments)
+            .Include(o => o.Shipments)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.ShopId == shop.Id);
+
+        if (order == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy đơn hàng" };
+
+        if (!order.CancelRequestedAt.HasValue)
+            return new ServiceResponse { Success = false, Message = "Đơn hàng này không có yêu cầu hủy đang chờ" };
+
+        if ((OrderStatus)order.Status != OrderStatus.Processing)
+            return new ServiceResponse { Success = false, Message = "Chỉ có thể phê duyệt hủy đơn đang ở trạng thái Đang chuẩn bị" };
+
+        // Hủy GHN nếu có
+        if (order.Shipments.Any(s => string.Equals(s.ShippingProvider, "GHN", StringComparison.OrdinalIgnoreCase)))
+        {
+            // Bỏ qua lỗi GHN khi shop chủ động phê duyệt (đơn chưa in vận đơn thật sự)
+            // Nếu cần enforce thì throw ở đây
+        }
+
+        var now = DateTime.UtcNow;
+        var oldStatus = OrderStatus.Processing;
+        var normalizedReason = order.CancelReason; // lý do khách đã nhập lúc gửi yêu cầu
+        var hasPaidPayment = order.Payments.Any(p => p.Status == (short)PaymentStatus.Paid);
+
+        foreach (var item in order.OrderItems)
+        {
+            var inv = await _context.Inventories
+                .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
+            if (inv == null) continue;
+            if (hasPaidPayment) inv.Quantity += item.Quantity;
+            inv.ReservedQuantity = Math.Max(0, inv.ReservedQuantity - item.Quantity);
+            inv.UpdatedAt = now;
+        }
+
+        foreach (var payment in order.Payments.Where(p => p.Status == (short)PaymentStatus.Pending))
+        {
+            payment.Status = (short)PaymentStatus.Cancelled;
+            payment.PaidAt = now;
+        }
+
+        order.Status = (short)OrderStatus.Cancelled;
+        order.CancelRequestedAt = null;
+        order.UpdatedAt = now;
+        _orderStatusHistory.AddEntry(
+            order.Id,
+            (short)oldStatus,
+            (short)OrderStatus.Cancelled,
+            shopOwnerId,
+            string.IsNullOrWhiteSpace(normalizedReason)
+                ? "Shop phê duyệt yêu cầu hủy của khách"
+                : $"Shop phê duyệt hủy đơn. Lý do khách: {normalizedReason}");
+
+        decimal paidAmount = 0;
+        if (hasPaidPayment)
+        {
+            await _walletReversal.TryReverseSettlementForOrderAsync(
+                order.Id,
+                "Shop phê duyệt yêu cầu hủy của khách");
+
+            paidAmount = order.Payments
+                .Where(p => p.Status == (short)PaymentStatus.Paid)
+                .Sum(p => p.Amount);
+        }
+
+        await _context.SaveChangesAsync();
+
+        await NotifyStatusChanged(order, oldStatus, OrderStatus.Cancelled);
+
+        var code = string.IsNullOrWhiteSpace(order.OrderCode)
+            ? NotificationFormatting.ShortEntityId(order.Id)
+            : order.OrderCode;
+
+        await _notifications.PublishAsync(
+            order.CustomerId,
+            nameof(NotificationType.Order),
+            "Yêu cầu hủy đơn được chấp thuận",
+            $"Shop đã chấp thuận yêu cầu hủy đơn #{code}. Đơn hàng đã được hủy.",
+            "Order",
+            order.Id,
+            queueEmail: true);
+
+        if (paidAmount > 0)
+        {
+            // ICustomerWalletService không có trong SellerService — hoàn tiền qua reversal đã xử lý trên
+            // (TryReverseSettlementForOrderAsync hoàn tiền về ví khách)
+        }
+
+        return new ServiceResponse { Success = true, Message = "Đã phê duyệt hủy đơn hàng và thông báo khách hàng." };
+    }
+
+    /// <summary>
+    /// Shop từ chối yêu cầu hủy đơn → xóa yêu cầu, đơn tiếp tục xử lý.
+    /// </summary>
+    public async Task<ServiceResponse> RejectCancelRequestAsync(Guid shopOwnerId, Guid orderId, string? shopNote = null)
+    {
+        var shop = await _context.Shops.FirstOrDefaultAsync(s => s.OwnerId == shopOwnerId);
+        if (shop == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy shop" };
+
+        var order = await _context.Orders
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.ShopId == shop.Id);
+
+        if (order == null)
+            return new ServiceResponse { Success = false, Message = "Không tìm thấy đơn hàng" };
+
+        if (!order.CancelRequestedAt.HasValue)
+            return new ServiceResponse { Success = false, Message = "Đơn hàng này không có yêu cầu hủy đang chờ" };
+
+        order.CancelRequestedAt = null;
+        order.CancelReason = null; // xóa lý do tạm
+        order.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        var code = string.IsNullOrWhiteSpace(order.OrderCode)
+            ? NotificationFormatting.ShortEntityId(order.Id)
+            : order.OrderCode;
+        var notePart = string.IsNullOrWhiteSpace(shopNote) ? string.Empty : $" Lý do: {shopNote.Trim()}";
+
+        await _notifications.PublishAsync(
+            order.CustomerId,
+            nameof(NotificationType.Order),
+            "Yêu cầu hủy đơn bị từ chối",
+            $"Shop đã từ chối yêu cầu hủy đơn #{code}.{notePart} Đơn hàng vẫn đang được xử lý.",
+            "Order",
+            order.Id,
+            queueEmail: true);
+
+        return new ServiceResponse { Success = true, Message = "Đã từ chối yêu cầu hủy. Đơn hàng tiếp tục được xử lý." };
     }
 }

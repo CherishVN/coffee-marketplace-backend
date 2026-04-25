@@ -954,6 +954,7 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("id");
             entity.Property(e => e.OrderCode).HasColumnName("order_code");
             entity.Property(e => e.CancelReason).HasColumnName("cancel_reason");
+            entity.Property(e => e.CancelRequestedAt).HasColumnName("cancel_requested_at");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
