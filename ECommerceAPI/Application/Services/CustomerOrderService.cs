@@ -202,6 +202,10 @@ public class CustomerOrderService : ICustomerOrderService
             TrackingCode = latestShipment?.TrackingCode,
             ShippingProvider = latestShipment?.ShippingProvider,
             CancelRequestedAt = order.CancelRequestedAt,
+            CancelRequestDeadline = order.CancelRequestedAt.HasValue
+                ? order.CancelRequestedAt.Value.AddHours(
+                    _configuration.GetValue("Orders:CancelRequestTimeoutHours", 24))
+                : null,
             Items = order.OrderItems.Select(oi => new CustomerOrderItemDto
             {
                 Id = oi.Id,
@@ -501,10 +505,10 @@ public class CustomerOrderService : ICustomerOrderService
             else
             {
                 // Quá 30 phút → gửi yêu cầu hủy đến shop, chờ duyệt
-                var now = DateTime.UtcNow;
+                var now = DateTimeOffset.UtcNow;
                 order.CancelRequestedAt = now;
                 order.CancelReason = normalizedReason;
-                order.UpdatedAt = now;
+                order.UpdatedAt = now.UtcDateTime;
                 await _context.SaveChangesAsync();
 
                 var code = string.IsNullOrWhiteSpace(order.OrderCode)
@@ -531,7 +535,9 @@ public class CustomerOrderService : ICustomerOrderService
                     Success = true,
                     Message = "Yêu cầu hủy đã được gửi đến shop. Bạn sẽ nhận được thông báo khi shop xác nhận.",
                     CancelledImmediately = false,
-                    CancelRequestedAt = now
+                    CancelRequestedAt = now,
+                    CancelRequestDeadline = now.AddHours(
+                        _configuration.GetValue("Orders:CancelRequestTimeoutHours", 24))
                 };
             }
         }
@@ -775,6 +781,65 @@ public class CustomerOrderService : ICustomerOrderService
 
         [JsonPropertyName("message")]
         public string? Message { get; set; }
+    }
+
+    public async Task<int> AutoCancelExpiredCancelRequestsAsync(CancellationToken cancellationToken = default)
+    {
+        var timeoutHours = _configuration.GetValue("Orders:CancelRequestTimeoutHours", 24);
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-timeoutHours);
+
+        var expiredOrders = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Include(o => o.Payments)
+            .Include(o => o.Shipments)
+            .Include(o => o.Shop)
+            .Where(o =>
+                o.Status == (short)OrderStatus.Processing &&
+                o.CancelRequestedAt.HasValue &&
+                o.CancelRequestedAt.Value <= cutoff)
+            .ToListAsync(cancellationToken);
+
+        var count = 0;
+        foreach (var order in expiredOrders)
+        {
+            try
+            {
+                var normalizedReason = string.IsNullOrWhiteSpace(order.CancelReason)
+                    ? null : order.CancelReason;
+
+                // Thử hủy GHN nếu có
+                var ghnResult = await CancelGhnOrderIfRequiredAsync(order);
+                if (!ghnResult.Success)
+                {
+                    // Ghi log nhưng vẫn tiếp tục — không để kẹt yêu cầu mãi
+                }
+
+                await PerformImmediateCancelAsync(order, order.CustomerId, normalizedReason, OrderStatus.Processing);
+
+                // Thông báo shop biết đã tự động hủy do quá hạn
+                if (order.Shop?.OwnerId is { } ownerId)
+                {
+                    var code = string.IsNullOrWhiteSpace(order.OrderCode)
+                        ? NotificationFormatting.ShortEntityId(order.Id)
+                        : order.OrderCode;
+                    await _notifications.PublishAsync(
+                        ownerId,
+                        nameof(NotificationType.Order),
+                        "Yêu cầu hủy đơn tự động xử lý",
+                        $"Đơn #{code} đã tự động bị hủy do shop không phản hồi yêu cầu hủy trong {timeoutHours} giờ.",
+                        "Order",
+                        order.Id);
+                }
+
+                count++;
+            }
+            catch (Exception)
+            {
+                // Tiếp tục xử lý các đơn khác nếu một đơn bị lỗi
+            }
+        }
+
+        return count;
     }
 
     private async Task NotifyStatusChanged(Order order, OrderStatus oldStatus, OrderStatus newStatus)

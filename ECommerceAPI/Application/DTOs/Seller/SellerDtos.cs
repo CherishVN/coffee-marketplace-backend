@@ -169,7 +169,9 @@ public class OrderDto
     public int? ShopFromDistrictId { get; set; }
     public string? ShopFromWardCode { get; set; }
     /// <summary>Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt. Null = không có yêu cầu.</summary>
-    public DateTime? CancelRequestedAt { get; set; }
+    public DateTimeOffset? CancelRequestedAt { get; set; }
+    /// <summary>Hạn shop phải phê duyệt / từ chối.</summary>
+    public DateTimeOffset? CancelRequestDeadline { get; set; }
 }
 
 public class RejectCancelRequestDto

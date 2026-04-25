@@ -75,7 +75,9 @@ public class CustomerOrderDetailDto : CustomerOrderSummaryDto
     /// Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt.
     /// Null = không có yêu cầu hủy đang chờ.
     /// </summary>
-    public DateTime? CancelRequestedAt { get; set; }
+    public DateTimeOffset? CancelRequestedAt { get; set; }
+    /// <summary>Hạn shop phải phê duyệt / từ chối (= CancelRequestedAt + timeout).</summary>
+    public DateTimeOffset? CancelRequestDeadline { get; set; }
 }
 
 /// <summary>Response cho API hủy đơn — phân biệt hủy ngay vs yêu cầu chờ duyệt.</summary>
@@ -85,8 +87,10 @@ public class CancelOrderResponseDto
     public string Message { get; set; } = string.Empty;
     /// <summary>true = đơn đã hủy ngay; false = yêu cầu hủy đã gửi đến shop, chờ duyệt.</summary>
     public bool CancelledImmediately { get; set; }
-    /// <summary>Thời điểm yêu cầu hủy được tạo (khi RequiresApproval = true).</summary>
-    public DateTime? CancelRequestedAt { get; set; }
+    /// <summary>Thời điểm yêu cầu hủy được tạo (khi CancelledImmediately = false).</summary>
+    public DateTimeOffset? CancelRequestedAt { get; set; }
+    /// <summary>Hạn shop phải phản hồi.</summary>
+    public DateTimeOffset? CancelRequestDeadline { get; set; }
 }
 
 public class OrderTrackingDto

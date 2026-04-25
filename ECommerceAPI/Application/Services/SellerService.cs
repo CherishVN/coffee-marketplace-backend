@@ -24,6 +24,7 @@ public class SellerService : ISellerService
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
+    private readonly IConfiguration _configuration;
 
     public SellerService(
         ApplicationDbContext context,
@@ -32,7 +33,8 @@ public class SellerService : ISellerService
         IUserAuthEmailResolver authResolver,
         ISellerWalletReversalService walletReversal,
         IOrderNotificationEmailComposer orderEmailComposer,
-        IOrderStatusHistoryService orderStatusHistory)
+        IOrderStatusHistoryService orderStatusHistory,
+        IConfiguration configuration)
     {
         _context = context;
         _hubContext = hubContext;
@@ -41,6 +43,7 @@ public class SellerService : ISellerService
         _walletReversal = walletReversal;
         _orderEmailComposer = orderEmailComposer;
         _orderStatusHistory = orderStatusHistory;
+        _configuration = configuration;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -1133,6 +1136,10 @@ public class SellerService : ISellerService
                 ShopFromDistrictId = shop.DistrictId,
                 ShopFromWardCode = shop.WardCode,
                 CancelRequestedAt = order.CancelRequestedAt,
+                CancelRequestDeadline = order.CancelRequestedAt.HasValue
+                    ? order.CancelRequestedAt.Value.AddHours(
+                        _configuration.GetValue("Orders:CancelRequestTimeoutHours", 24))
+                    : null,
                 Items = order.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,
