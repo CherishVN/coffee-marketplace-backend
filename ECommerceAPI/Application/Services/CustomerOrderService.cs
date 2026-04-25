@@ -144,6 +144,7 @@ public class CustomerOrderService : ICustomerOrderService
                     .ThenInclude(p => p.ProductImages)
             .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Variant)
+            .Include(o => o.Shipments)
             .FirstOrDefaultAsync(o => o.Id == orderId && o.CustomerId == customerId);
 
         if (order == null)
@@ -168,6 +169,11 @@ public class CustomerOrderService : ICustomerOrderService
         var histories = order.OrderStatusHistories.OrderBy(x => x.CreatedAt).ToList();
         var shopOwnerId = order.Shop?.OwnerId;
 
+        // Lấy vận đơn mới nhất để hiển thị thông tin giao hàng cho customer
+        var latestShipment = order.Shipments?
+            .OrderByDescending(s => s.CreatedAt)
+            .FirstOrDefault();
+
         var detail = new CustomerOrderDetailDto
         {
             Id = order.Id,
@@ -191,6 +197,10 @@ public class CustomerOrderService : ICustomerOrderService
             ShipFullName = order.ShipFullName,
             ShipPhone = PhoneVnHelper.NormalizeToLocal(order.ShipPhone) ?? order.ShipPhone,
             ShipAddress = order.ShipAddress,
+            EstimatedDeliveryDate = latestShipment?.EstimatedDeliveryDate,
+            ActualDeliveryDate = latestShipment?.ActualDeliveryDate,
+            TrackingCode = latestShipment?.TrackingCode,
+            ShippingProvider = latestShipment?.ShippingProvider,
             Items = order.OrderItems.Select(oi => new CustomerOrderItemDto
             {
                 Id = oi.Id,

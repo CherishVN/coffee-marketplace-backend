@@ -73,37 +73,94 @@ public class DisputeAdminService : IDisputeAdminService
 
             var totalCount = await query.CountAsync();
 
-            var disputes = await query
+            // Lấy raw data (bao gồm JSON strings) để deserialize in-memory sau ToListAsync
+            var rawList = await query
                 .OrderByDescending(d => d.CreatedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
-                .Select(d => new DisputeAdminDto
+                .Select(d => new
                 {
-                    Id = d.Id,
-                    OrderId = d.OrderId,
+                    d.Id,
+                    d.OrderId,
                     OrderTotal = d.Order.Total,
-                    CustomerId = d.CustomerId,
+                    d.CustomerId,
                     CustomerName = d.Customer.FullName ?? "N/A",
-                    ShopId = d.ShopId,
+                    d.ShopId,
                     ShopName = d.Shop.Name,
-                    Type = d.Type,
-                    TypeName = ((DisputeType)d.Type).ToString(),
-                    Status = d.Status,
-                    StatusName = ((DisputeStatus)d.Status).ToString(),
-                    Title = d.Title,
-                    Reason = d.Reason,
-                    RequestedAmount = d.RequestedAmount,
-                    ApprovedAmount = d.ApprovedAmount,
-                    SellerResponse = d.SellerResponse,
-                    SellerRespondedAt = d.SellerRespondedAt,
-                    Resolution = d.Resolution,
-                    AdminNote = d.AdminNote,
-                    ResolvedBy = d.ResolvedBy,
-                    ResolvedAt = d.ResolvedAt,
-                    CreatedAt = d.CreatedAt,
-                    UpdatedAt = d.UpdatedAt
+                    d.Type,
+                    d.Status,
+                    d.Title,
+                    d.Reason,
+                    d.RequestedAmount,
+                    d.ApprovedAmount,
+                    d.SellerResponse,
+                    d.SellerRespondedAt,
+                    d.Resolution,
+                    d.AdminNote,
+                    d.ResolvedBy,
+                    d.ResolvedAt,
+                    d.CreatedAt,
+                    d.UpdatedAt,
+                    d.EvidenceUrls,
+                    d.SellerEvidenceUrls,
+                    d.CustomerNote,
                 })
                 .ToListAsync();
+
+            // Tải DisputeOrderItems của tất cả dispute trong trang bằng một query batch
+            var disputeIds = rawList.Select(d => d.Id).ToList();
+            var allLineItems = await _context.DisputeOrderItems
+                .AsNoTracking()
+                .Where(x => disputeIds.Contains(x.DisputeId))
+                .Include(x => x.OrderItem)
+                .ToListAsync();
+
+            var itemsByDispute = allLineItems
+                .GroupBy(x => x.DisputeId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var disputes = rawList.Select(d => new DisputeAdminDto
+            {
+                Id = d.Id,
+                OrderId = d.OrderId,
+                OrderTotal = d.OrderTotal,
+                CustomerId = d.CustomerId,
+                CustomerName = d.CustomerName,
+                ShopId = d.ShopId,
+                ShopName = d.ShopName,
+                Type = d.Type,
+                TypeName = ((DisputeType)d.Type).ToString(),
+                Status = d.Status,
+                StatusName = ((DisputeStatus)d.Status).ToString(),
+                Title = d.Title,
+                Reason = d.Reason,
+                RequestedAmount = d.RequestedAmount,
+                ApprovedAmount = d.ApprovedAmount,
+                SellerResponse = d.SellerResponse,
+                SellerRespondedAt = d.SellerRespondedAt,
+                Resolution = d.Resolution,
+                AdminNote = d.AdminNote,
+                ResolvedBy = d.ResolvedBy,
+                ResolvedAt = d.ResolvedAt,
+                CreatedAt = d.CreatedAt,
+                UpdatedAt = d.UpdatedAt,
+                EvidenceUrls = TryDeserializeUrls(d.EvidenceUrls),
+                SellerEvidenceUrls = TryDeserializeUrls(d.SellerEvidenceUrls),
+                CustomerNote = d.CustomerNote,
+                AffectedItems = itemsByDispute.TryGetValue(d.Id, out var rows)
+                    ? rows
+                        .Select(r => new DisputeAffectedItemDto
+                        {
+                            OrderItemId = r.OrderItemId,
+                            ProductName = r.OrderItem?.ProductName ?? "",
+                            Quantity = r.Quantity,
+                            UnitPrice = r.UnitPriceSnapshot,
+                            LineTotal = r.LineSnapshotTotal,
+                        })
+                        .OrderBy(x => x.ProductName)
+                        .ToList()
+                    : new List<DisputeAffectedItemDto>(),
+            }).ToList();
 
             return new DisputeListResponseDto
             {

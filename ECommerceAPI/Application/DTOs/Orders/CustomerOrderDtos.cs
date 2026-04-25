@@ -63,6 +63,14 @@ public class CustomerOrderDetailDto : CustomerOrderSummaryDto
     public DateTime UpdatedAt { get; set; }
     public List<OrderStatusHistoryItemDto> StatusHistory { get; set; } = new();
     public List<OrderStatusStepDto> StatusTimeline { get; set; } = new();
+    /// <summary>Ngày giao hàng dự kiến (lấy từ vận đơn mới nhất).</summary>
+    public DateTimeOffset? EstimatedDeliveryDate { get; set; }
+    /// <summary>Ngày giao hàng thực tế (nếu đã giao).</summary>
+    public DateTimeOffset? ActualDeliveryDate { get; set; }
+    /// <summary>Mã vận đơn (tracking code) để khách tra cứu.</summary>
+    public string? TrackingCode { get; set; }
+    /// <summary>Đơn vị vận chuyển (GHN, ...).</summary>
+    public string? ShippingProvider { get; set; }
 }
 
 public class OrderTrackingDto
