@@ -1302,6 +1302,8 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.UpdatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("updated_at");
+            entity.Property(e => e.LastApprovedSnapshotJson)
+                .HasColumnName("last_approved_snapshot_json");
 
             entity.HasOne(d => d.Category).WithMany(p => p.Products)
                 .HasForeignKey(d => d.CategoryId)
@@ -1747,7 +1749,6 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.BankName).HasColumnName("bank_name");
             entity.Property(e => e.BankAccountNumber).HasColumnName("bank_account_number");
             entity.Property(e => e.BankAccountName).HasColumnName("bank_account_name");
-            entity.Property(e => e.PrimaryCategoryId).HasColumnName("primary_category_id");
             entity.Property(e => e.IdentitySnapshotJson).HasColumnName("identity_snapshot_json");
             entity.Property(e => e.Slug).HasColumnName("slug");
             entity.Property(e => e.Status)
@@ -1766,11 +1767,6 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.Owner).WithMany(p => p.ShopOwners)
                 .HasForeignKey(d => d.OwnerId)
                 .HasConstraintName("shops_owner_id_fkey");
-
-            entity.HasOne(d => d.PrimaryCategory).WithMany()
-                .HasForeignKey(d => d.PrimaryCategoryId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("shops_primary_category_id_fkey");
 
             entity.HasOne(d => d.VerifiedByNavigation).WithMany(p => p.ShopVerifiedByNavigations)
                 .HasForeignKey(d => d.VerifiedBy)

@@ -71,6 +71,28 @@ public class AdminProductController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Phê duyệt sản phẩm chờ duyệt (sau khi seller tạo/cập nhật)</summary>
+    [HttpPost("{productId}/approve")]
+    public async Task<IActionResult> ApproveProduct(Guid productId)
+    {
+        var adminId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var result = await _productModerationService.ApproveProductAsync(productId, adminId);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
+
+    /// <summary>Từ chối duyệt — chuyển sản phẩm về nháp để shop chỉnh sửa.</summary>
+    [HttpPost("{productId}/reject")]
+    public async Task<IActionResult> RejectProduct(Guid productId, [FromBody] RejectProductDto dto)
+    {
+        var adminId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var result = await _productModerationService.RejectProductAsync(productId, dto, adminId);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
+
     /// <summary>
     /// </summary>
     [HttpPost("{productId}/remove")]

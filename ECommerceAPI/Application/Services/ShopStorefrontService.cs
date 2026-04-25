@@ -130,6 +130,10 @@ public class ShopStorefrontService : IShopStorefrontService
                         .ToList(),
                     CreatedAt = p.CreatedAt,
                     SoldCount = p.SoldCount,
+                    AverageRating = p.ProductReviews.Any()
+                        ? p.ProductReviews.Average(r => (double)r.Rating)
+                        : 0,
+                    ReviewCount = p.ProductReviews.Count,
                 })
                 .ToListAsync();
 

@@ -242,7 +242,6 @@ public class AiDbContext : DbContext
             e.Property(x => x.Name).HasColumnName("name");
             e.Property(x => x.Status).HasColumnName("status");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
-            e.Property(x => x.PrimaryCategoryId).HasColumnName("primary_category_id");
         });
 
         // ── Read-only: Order ──────────────────────────────────────────────

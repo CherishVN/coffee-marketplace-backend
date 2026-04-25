@@ -33,6 +33,8 @@ public class ProductStorefrontService : IProductStorefrontService
     {
         try
         {
+            string? searchLower = null;
+
             var query = _context.Products
                 .Include(p => p.Shop)
                 .Include(p => p.Category)
@@ -50,7 +52,7 @@ public class ProductStorefrontService : IProductStorefrontService
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var searchTerm = search.Trim();
-                var searchLower = searchTerm.ToLower();
+                searchLower = searchTerm.ToLower();
 
                 query = query.Where(p =>
                     p.Name.ToLower().Contains(searchLower)
@@ -97,27 +99,51 @@ public class ProductStorefrontService : IProductStorefrontService
             if (materialIds != null && materialIds.Count > 0)
                 query = query.Where(p => p.ProductMaterials.Any(pm => materialIds.Contains(pm.MaterialId)));
 
-            query = sortBy switch
+            // relevance: ưu tiên khớp tên → chất lượng đánh giá (có bù số lượt review) → bán chạy → giá tốt hơn
+            var sortKey = string.IsNullOrWhiteSpace(sortBy) ? "newest" : sortBy.Trim().ToLowerInvariant();
+            if (sortKey == "relevance" && string.IsNullOrEmpty(searchLower))
+                sortKey = "newest";
+
+            if (sortKey == "relevance")
             {
-                "price_asc" => query.OrderBy(p =>
+                query = query
+                    .OrderByDescending(p => p.Name.ToLower().Contains(searchLower!))
+                    .ThenByDescending(p => p.ProductReviews.Any()
+                        ? p.ProductReviews.Average(r => (double)r.Rating) * (1.0 + Math.Log(1.0 + p.ProductReviews.Count) / 8.0)
+                        : 0.0)
+                    .ThenByDescending(p => p.SoldCount)
+                    .ThenBy(p =>
                         !p.ProductVariants.Any(v => v.IsActive)
                             ? p.BasePrice
                             : Math.Min(
                                 p.BasePrice,
                                 p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
-                    .ThenBy(p => p.Id),
-                "price_desc" => query.OrderByDescending(p =>
-                        !p.ProductVariants.Any(v => v.IsActive)
-                            ? p.BasePrice
-                            : Math.Min(
-                                p.BasePrice,
-                                p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
-                    .ThenBy(p => p.Id),
-                "rating"      => query.OrderByDescending(p => p.ProductReviews.Any() ? p.ProductReviews.Average(r => (double)r.Rating) : 0).ThenBy(p => p.Id),
-                "newest"      => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
-                "best_seller" => query.OrderByDescending(p => p.SoldCount).ThenBy(p => p.Id),
-                _             => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
-            };
+                    .ThenBy(p => p.Id);
+            }
+            else
+            {
+                query = sortKey switch
+                {
+                    "price_asc" => query.OrderBy(p =>
+                            !p.ProductVariants.Any(v => v.IsActive)
+                                ? p.BasePrice
+                                : Math.Min(
+                                    p.BasePrice,
+                                    p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                        .ThenBy(p => p.Id),
+                    "price_desc" => query.OrderByDescending(p =>
+                            !p.ProductVariants.Any(v => v.IsActive)
+                                ? p.BasePrice
+                                : Math.Min(
+                                    p.BasePrice,
+                                    p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                        .ThenBy(p => p.Id),
+                    "rating"      => query.OrderByDescending(p => p.ProductReviews.Any() ? p.ProductReviews.Average(r => (double)r.Rating) : 0).ThenBy(p => p.Id),
+                    "newest"      => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
+                    "best_seller" => query.OrderByDescending(p => p.SoldCount).ThenBy(p => p.Id),
+                    _             => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
+                };
+            }
 
             var totalCount = await query.CountAsync();
 
@@ -148,6 +174,10 @@ public class ProductStorefrontService : IProductStorefrontService
                         .ToList(),
                     CreatedAt    = p.CreatedAt,
                     SoldCount    = p.SoldCount,
+                    AverageRating = p.ProductReviews.Any()
+                        ? p.ProductReviews.Average(r => (double)r.Rating)
+                        : 0,
+                    ReviewCount  = p.ProductReviews.Count,
                 })
                 .ToListAsync();
 
@@ -276,7 +306,9 @@ public class ProductStorefrontService : IProductStorefrontService
                     CategoryName = p.Category != null ? p.Category.Name : null,
                     CategorySlug = p.Category != null ? p.Category.Slug : null,
                     ImageUrls = p.ProductImages.OrderBy(img => img.SortOrder).Select(img => img.ImageUrl).ToList(),
-                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount
+                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount,
+                    AverageRating = 0,
+                    ReviewCount = 0
                 })
                 .ToListAsync();
 
@@ -301,7 +333,9 @@ public class ProductStorefrontService : IProductStorefrontService
                     CategoryName = p.Category != null ? p.Category.Name : null,
                     CategorySlug = p.Category != null ? p.Category.Slug : null,
                     ImageUrls = p.ProductImages.OrderBy(img => img.SortOrder).Select(img => img.ImageUrl).ToList(),
-                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount
+                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount,
+                    AverageRating = 0,
+                    ReviewCount = 0
                 })
                 .ToListAsync();
 

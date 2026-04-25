@@ -130,7 +130,7 @@ public class AiSellerController : ControllerBase
         var result = await _sellerService.AnalyzeProductAsync(dto, sellerId);
 
         if (!result.Success)
-            return BadRequest(new { message = result.ErrorMessage });
+            return AiErrorResult(result.ErrorMessage);
 
         return Ok(result);
     }
@@ -166,8 +166,24 @@ public class AiSellerController : ControllerBase
         var result = await _sellerService.AnalyzeImageAsync(dto, sellerId);
 
         if (!result.Success)
-            return BadRequest(new { message = result.ErrorMessage });
+            return AiErrorResult(result.ErrorMessage);
 
         return Ok(result);
+    }
+
+    private IActionResult AiErrorResult(string? errorMessage)
+    {
+        if (string.IsNullOrEmpty(errorMessage))
+            return BadRequest(new { message = "Lỗi AI." });
+        var t = errorMessage;
+        if (t.Contains("không phản hồi", StringComparison.OrdinalIgnoreCase) ||
+            t.Contains("quá tải", StringComparison.OrdinalIgnoreCase) ||
+            t.Contains("server overload", StringComparison.OrdinalIgnoreCase) ||
+            t.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+            t.Contains("vượt giới hạn", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ObjectResult(new { message = errorMessage }) { StatusCode = 503 };
+        }
+        return BadRequest(new { message = errorMessage });
     }
 }

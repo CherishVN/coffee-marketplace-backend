@@ -76,6 +76,7 @@ public class DashboardService : IDashboardService
                     Draft = g.Count(p => p.Status == (short)ProductStatus.Draft),
                     Hidden = g.Count(p => p.Status == (short)ProductStatus.Hidden),
                     OutOfStock = g.Count(p => p.Status == (short)ProductStatus.OutOfStock),
+                    PendingApproval = g.Count(p => p.Status == (short)ProductStatus.PendingApproval),
                     NewThisMonth = g.Count(p => p.CreatedAt >= startOfMonth),
                 })
                 .FirstOrDefaultAsync();
@@ -236,6 +237,7 @@ public class DashboardService : IDashboardService
                     Draft = productStats?.Draft ?? 0,
                     Hidden = productStats?.Hidden ?? 0,
                     OutOfStock = productStats?.OutOfStock ?? 0,
+                    PendingApproval = productStats?.PendingApproval ?? 0,
                     NewThisMonth = productStats?.NewThisMonth ?? 0
                 },
                 Orders = new OrderStats

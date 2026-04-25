@@ -2494,10 +2494,6 @@ namespace ECommerceAPI.migrations
                         .HasColumnType("text")
                         .HasColumnName("phone");
 
-                    b.Property<long?>("PrimaryCategoryId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("primary_category_id");
-
                     b.Property<int?>("ProvinceId")
                         .HasColumnType("integer")
                         .HasColumnName("province_id");
@@ -2564,8 +2560,6 @@ namespace ECommerceAPI.migrations
 
                     b.HasKey("Id")
                         .HasName("shops_pkey");
-
-                    b.HasIndex("PrimaryCategoryId");
 
                     b.HasIndex("VerifiedBy");
 
@@ -3702,12 +3696,6 @@ namespace ECommerceAPI.migrations
                         .IsRequired()
                         .HasConstraintName("shops_owner_id_fkey");
 
-                    b.HasOne("ECommerceAPI.Domain.Entities.Category", "PrimaryCategory")
-                        .WithMany()
-                        .HasForeignKey("PrimaryCategoryId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("shops_primary_category_id_fkey");
-
                     b.HasOne("ECommerceAPI.Domain.Entities.User", "VerifiedByNavigation")
                         .WithMany("ShopVerifiedByNavigations")
                         .HasForeignKey("VerifiedBy")
@@ -3715,8 +3703,6 @@ namespace ECommerceAPI.migrations
                         .HasConstraintName("shops_verified_by_fkey");
 
                     b.Navigation("Owner");
-
-                    b.Navigation("PrimaryCategory");
 
                     b.Navigation("VerifiedByNavigation");
                 });

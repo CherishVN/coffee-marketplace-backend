@@ -20,8 +20,7 @@ public class RegisterSellerDto
     public string? City { get; set; }
     public string? BusinessLicenseNumber { get; set; }
     public string? TaxCode { get; set; }
-    public string BusinessType { get; set; } = string.Empty;
-    public long PrimaryCategoryId { get; set; }
+    public string? BusinessType { get; set; }
     public string? BankName { get; set; }
     public string? BankAccountNumber { get; set; }
     public string? BankAccountName { get; set; }
@@ -152,12 +151,9 @@ public class RegisterSellerDtoValidator : AbstractValidator<RegisterSellerDto>
             .GreaterThan(0).WithMessage("province_id phải lớn hơn 0");
 
         RuleFor(x => x.BusinessType)
-            .NotEmpty().WithMessage("Loại hình kinh doanh không được để trống")
-            .Must(x => new[] { "individual", "company", "household" }.Contains(x))
-            .WithMessage("Loại hình kinh doanh không hợp lệ (individual, company, household)");
-
-        RuleFor(x => x.PrimaryCategoryId)
-            .GreaterThan(0).WithMessage("Vui lòng chọn một ngành hàng (danh mục gốc) để bán");
+            .Must(x => string.IsNullOrEmpty(x) || new[] { "individual", "company", "household" }.Contains(x))
+            .WithMessage("Loại hình kinh doanh không hợp lệ (individual, company, household)")
+            .When(x => !string.IsNullOrEmpty(x.BusinessType));
 
         RuleFor(x => x.Identity)
             .NotNull()

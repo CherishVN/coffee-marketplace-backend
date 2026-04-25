@@ -1,7 +1,7 @@
 namespace ECommerceAPI.Application.DTOs.Storefront;
 
 /// <summary>
-/// Dùng cho danh sách sản phẩm (không cần rating/review)
+/// Dùng cho danh sách sản phẩm. Rating/review tùy endpoint (có thể 0 nếu không tính).
 /// </summary>
 public class ProductStorefrontDto
 {
@@ -20,6 +20,9 @@ public class ProductStorefrontDto
     public List<string> ImageUrls { get; set; } = new();
     public DateTime CreatedAt { get; set; }
     public int SoldCount { get; set; }
+    /// <summary>Điểm trung bình (0 nếu chưa có đánh giá) — dùng hiển thị thẻ sản phẩm & sắp xếp relevance.</summary>
+    public double AverageRating { get; set; }
+    public int ReviewCount { get; set; }
 }
 
 /// <summary>
@@ -28,8 +31,6 @@ public class ProductStorefrontDto
 public class ProductStorefrontDetailDto : ProductStorefrontDto
 {
     public string? Description { get; set; }
-    public double AverageRating { get; set; }
-    public int ReviewCount { get; set; }
     public List<ProductVariantStorefrontDto> Variants { get; set; } = new();
     public int TotalStock { get; set; }
     public List<string> Tags { get; set; } = new();

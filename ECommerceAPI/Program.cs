@@ -120,7 +120,6 @@ namespace ECommerceAPI
             });
 
             builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
-            builder.Services.AddHttpClient<ISellerProductContentAlignmentClient, SellerProductContentAlignmentClient>();
 
             // FluentValidation
             builder.Services.AddFluentValidationAutoValidation();

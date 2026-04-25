@@ -50,8 +50,6 @@ public class ShopInfoDto
     public string? BankName { get; set; }
     public string? BankAccountNumber { get; set; }
     public string? BankAccountName { get; set; }
-    public long? PrimaryCategoryId { get; set; }
-    public string? PrimaryCategoryName { get; set; }
 }
 
 public class AddressDto

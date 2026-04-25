@@ -21,7 +21,7 @@ public class ProductController : ControllerBase
     /// <summary>
     /// Get paginated list of active products.
     /// Supports filtering by category, price range, keyword search, tags, materials and sorting.
-    /// sortBy: newest (default) | price_asc | price_desc | best_seller
+    /// sortBy: relevance (khi có search: gợi ý theo tên + đánh giá + bán chạy + giá) | newest | price_asc | price_desc | rating | best_seller
     /// tagIds: comma-separated tag IDs, e.g. ?tagIds=1&tagIds=2
     /// materialIds: comma-separated material UUIDs
     /// </summary>

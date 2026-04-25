@@ -46,7 +46,6 @@ public class UserProfileService : IUserProfileService
         var user = await _context.Users
             .Include(u => u.Role)
             .Include(u => u.ShopOwners)
-                .ThenInclude(s => s.PrimaryCategory)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
         if (user == null)
@@ -87,9 +86,7 @@ public class UserProfileService : IUserProfileService
                 TaxCode = shop.TaxCode,
                 BankName = shop.BankName,
                 BankAccountNumber = shop.BankAccountNumber,
-                BankAccountName = shop.BankAccountName,
-                PrimaryCategoryId = shop.PrimaryCategoryId,
-                PrimaryCategoryName = shop.PrimaryCategory?.Name
+                BankAccountName = shop.BankAccountName
             } : null
         };
     }
@@ -126,32 +123,7 @@ public class UserProfileService : IUserProfileService
 
     public async Task<ServiceResponse> RegisterAsSellerAsync(Guid userId, RegisterSellerDto dto)
     {
-        if (dto.PrimaryCategoryId <= 0)
-        {
-            return new ServiceResponse { Success = false, Message = "Vui lòng chọn ngành hàng bán (danh mục gốc)" };
-        }
-
-        var rootCat = await _context.Categories
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == dto.PrimaryCategoryId);
-        if (rootCat == null)
-        {
-            return new ServiceResponse { Success = false, Message = "Danh mục không tồn tại" };
-        }
-
-        if (rootCat.ParentId.HasValue)
-        {
-            return new ServiceResponse
-            {
-                Success = false,
-                Message = "Chỉ được chọn danh mục cấp cao nhất (ví dụ: Nông sản, Thủy sản) — không chọn danh mục con"
-            };
-        }
-
-        if (!rootCat.IsActive)
-        {
-            return new ServiceResponse { Success = false, Message = "Danh mục này đang tắt, vui lòng chọn danh mục khác" };
-        }
+        var businessTypeNorm = string.IsNullOrWhiteSpace(dto.BusinessType) ? "individual" : dto.BusinessType.Trim();
 
         var user = await _context.Users
             .Include(u => u.Role)
@@ -205,13 +177,12 @@ public class UserProfileService : IUserProfileService
             existingShopForUser.DistrictId = dto.DistrictId;
             existingShopForUser.ProvinceId = dto.ProvinceId;
             existingShopForUser.City = dto.City;
-            existingShopForUser.BusinessType = dto.BusinessType;
+            existingShopForUser.BusinessType = businessTypeNorm;
             existingShopForUser.BusinessLicenseNumber = dto.BusinessLicenseNumber;
             existingShopForUser.TaxCode = dto.TaxCode;
             existingShopForUser.BankName = dto.BankName;
             existingShopForUser.BankAccountNumber = dto.BankAccountNumber;
             existingShopForUser.BankAccountName = dto.BankAccountName;
-            existingShopForUser.PrimaryCategoryId = dto.PrimaryCategoryId;
             existingShopForUser.IdentitySnapshotJson = SerializeSellerIdentity(dto.Identity);
             existingShopForUser.VerificationStatus = 0; // Pending again
             existingShopForUser.RejectionReason = null;
@@ -254,13 +225,12 @@ public class UserProfileService : IUserProfileService
             DistrictId = dto.DistrictId,
             ProvinceId = dto.ProvinceId,
             City = dto.City,
-            BusinessType = dto.BusinessType,
+            BusinessType = businessTypeNorm,
             BusinessLicenseNumber = dto.BusinessLicenseNumber,
             TaxCode = dto.TaxCode,
             BankName = dto.BankName,
             BankAccountNumber = dto.BankAccountNumber,
             BankAccountName = dto.BankAccountName,
-            PrimaryCategoryId = dto.PrimaryCategoryId,
             IdentitySnapshotJson = SerializeSellerIdentity(dto.Identity),
             Status = 0,
             VerificationStatus = 0,

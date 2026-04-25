@@ -28,10 +28,18 @@ builder.Services.AddScoped<IAiChatService, AiChatService>();
 builder.Services.AddScoped<IAiSellerService, AiSellerService>();
 builder.Services.AddScoped<IAiAdminService, AiAdminService>();
 
-// ── HTTP Client cho Gemini API ────────────────────────────────────────────────
-builder.Services.AddHttpClient("GeminiClient", client =>
+// ── HTTP Client cho Gemini API (Timeout >= ImageTimeout * MaxHttpAttempts + dự phòng) ──
+builder.Services.AddHttpClient("GeminiClient", (sp, client) =>
 {
-    client.Timeout = TimeSpan.FromSeconds(35);
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var httpSec = cfg.GetValue("Gemini:HttpClientTimeoutSeconds", 0);
+    if (httpSec <= 0)
+    {
+        var img = cfg.GetValue("Gemini:ImageTimeoutSeconds", 150);
+        var maxA = cfg.GetValue("Gemini:MaxHttpAttempts", 3);
+        httpSec = img * maxA + 60;
+    }
+    client.Timeout = TimeSpan.FromSeconds(httpSec);
 });
 
 // ── HTTP Client để gọi Main API ───────────────────────────────────────────────

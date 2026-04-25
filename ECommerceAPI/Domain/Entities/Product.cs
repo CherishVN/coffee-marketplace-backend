@@ -32,6 +32,8 @@ public partial class Product
 
     public DateTime UpdatedAt { get; set; }
 
+    public string? LastApprovedSnapshotJson { get; set; }
+
     public NpgsqlTsVector? SearchVector { get; set; }
 
     public virtual ICollection<AiMaterialSuggestion> AiMaterialSuggestions { get; set; } = new List<AiMaterialSuggestion>();

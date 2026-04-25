@@ -2,7 +2,6 @@ using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Orders;
 using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
-using Microsoft.AspNetCore.Http;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Hubs;
@@ -24,8 +23,6 @@ public class SellerService : ISellerService
     private readonly IUserAuthEmailResolver _authResolver;
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly ISellerProductContentAlignmentClient _productContentAlignment;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
 
     public SellerService(
@@ -35,8 +32,6 @@ public class SellerService : ISellerService
         IUserAuthEmailResolver authResolver,
         ISellerWalletReversalService walletReversal,
         IOrderNotificationEmailComposer orderEmailComposer,
-        IHttpContextAccessor httpContextAccessor,
-        ISellerProductContentAlignmentClient productContentAlignment,
         IOrderStatusHistoryService orderStatusHistory)
     {
         _context = context;
@@ -45,15 +40,12 @@ public class SellerService : ISellerService
         _authResolver = authResolver;
         _walletReversal = walletReversal;
         _orderEmailComposer = orderEmailComposer;
-        _httpContextAccessor = httpContextAccessor;
         _orderStatusHistory = orderStatusHistory;
-        _productContentAlignment = productContentAlignment;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
     {
         var shop = await _context.Shops
-            .Include(s => s.PrimaryCategory)
             .FirstOrDefaultAsync(s => s.OwnerId == userId);
 
         if (shop == null)
@@ -85,8 +77,6 @@ public class SellerService : ISellerService
                 GhnShopId = shop.GhnShopId,
                 Status = shop.Status,
                 VerificationStatus = shop.VerificationStatus,
-                PrimaryCategoryId = shop.PrimaryCategoryId,
-                PrimaryCategoryName = shop.PrimaryCategory?.Name,
                 CreatedAt = shop.CreatedAt
             }
         };
@@ -487,42 +477,12 @@ public class SellerService : ISellerService
             };
         }
 
-        if (shop.PrimaryCategoryId.HasValue)
-        {
-            if (!await ProductCategoryBelongsToShopPrimaryRootAsync(shop, dto.CategoryId))
-            {
-                return new ServiceResponse<ProductDto>
-                {
-                    Success = false,
-                    Message = "Sản phẩm phải thuộc ngành hàng bạn đã chọn lúc đăng ký seller."
-                };
-            }
-        }
-
         if (!dto.CategoryId.HasValue)
         {
             return new ServiceResponse<ProductDto>
             {
                 Success = false,
-                Message = "Vui lòng phân loại AI để có Danh mục sản phẩm"
-            };
-        }
-
-        if (dto.MaterialIds == null || !dto.MaterialIds.Any())
-        {
-            return new ServiceResponse<ProductDto>
-            {
-                Success = false,
-                Message = "Vui lòng phân loại AI để xác định Chất liệu"
-            };
-        }
-
-        if (dto.TagIds == null || !dto.TagIds.Any())
-        {
-            return new ServiceResponse<ProductDto>
-            {
-                Success = false,
-                Message = "Vui lòng phân loại AI để xác định Thẻ (Tags)"
+                Message = "Vui lòng chọn danh mục sản phẩm"
             };
         }
 
@@ -540,7 +500,7 @@ public class SellerService : ISellerService
             Description = dto.Description,
             BasePrice = dto.BasePrice,
             Currency = dto.Currency,
-            Status = 0, // Draft
+            Status = (short)ProductStatus.PendingApproval,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -640,7 +600,10 @@ public class SellerService : ISellerService
 
         await _context.SaveChangesAsync();
 
-        return await GetProductByIdAsync(userId, product.Id);
+        var created = await GetProductByIdAsync(userId, product.Id);
+        if (created.Success)
+            created.Message = "Đã tạo sản phẩm. Sản phẩm sẽ hiển thị sau khi admin phê duyệt.";
+        return created;
     }
 
     public async Task<ServiceResponse> UpdateProductAsync(Guid userId, Guid productId, UpdateProductDto dto)
@@ -669,76 +632,6 @@ public class SellerService : ISellerService
             };
         }
 
-        if (product.CategoryId.HasValue && dto.CategoryId.HasValue
-            && dto.CategoryId.Value != product.CategoryId.Value)
-        {
-            return new ServiceResponse
-            {
-                Success = false,
-                Message = "Không thể đổi danh mục (mặt hàng) của sản phẩm sau khi đã tạo. Vui lòng tạo sản phẩm mới nếu cần bán mặt hàng khác."
-            };
-        }
-
-        var effectiveCategoryId = dto.CategoryId ?? product.CategoryId;
-        if (shop.PrimaryCategoryId.HasValue && effectiveCategoryId.HasValue)
-        {
-            if (!await ProductCategoryBelongsToShopPrimaryRootAsync(shop, effectiveCategoryId))
-            {
-                return new ServiceResponse
-                {
-                    Success = false,
-                    Message = "Danh mục sản phẩm phải nằm trong ngành hàng bạn đã chọn lúc đăng ký seller."
-                };
-            }
-        }
-
-        var currentImageUrls = await _context.ProductImages
-            .AsNoTracking()
-            .Where(i => i.ProductId == product.Id)
-            .OrderBy(i => i.SortOrder)
-            .Select(i => i.ImageUrl)
-            .ToListAsync();
-
-        var proposedName = !string.IsNullOrWhiteSpace(dto.Name) ? dto.Name.Trim() : product.Name;
-        var proposedDesc = dto.Description != null ? dto.Description : product.Description;
-        var proposedImageUrls = dto.ImageUrls != null ? dto.ImageUrls : currentImageUrls;
-
-        var nameChanged = !string.IsNullOrWhiteSpace(dto.Name)
-            && !string.Equals(dto.Name.Trim(), product.Name, StringComparison.Ordinal);
-        var descChanged = dto.Description != null
-            && !string.Equals(dto.Description, product.Description ?? string.Empty, StringComparison.Ordinal);
-        var imagesChanged = dto.ImageUrls != null
-            && !currentImageUrls.SequenceEqual(dto.ImageUrls, StringComparer.Ordinal);
-
-        if (product.CategoryId.HasValue && (nameChanged || descChanged || imagesChanged))
-        {
-            var auth = _httpContextAccessor.HttpContext?.Request.Headers.Authorization.ToString();
-            if (string.IsNullOrEmpty(auth))
-            {
-                return new ServiceResponse
-                {
-                    Success = false,
-                    Message = "Không thể xác thực nội dung sản phẩm. Vui lòng đăng nhập lại."
-                };
-            }
-
-            var (alignedOk, alignError) = await _productContentAlignment.ValidateContentMatchesCategoryAsync(
-                auth,
-                proposedName,
-                proposedDesc,
-                proposedImageUrls,
-                product.CategoryId.Value);
-
-            if (!alignedOk)
-            {
-                return new ServiceResponse
-                {
-                    Success = false,
-                    Message = alignError ?? "Nội dung tên, mô tả hoặc ảnh không phù hợp mặt hàng (danh mục) sản phẩm."
-                };
-            }
-        }
-
         if (dto.CategoryId.HasValue)
             product.CategoryId = dto.CategoryId;
 
@@ -757,9 +650,6 @@ public class SellerService : ISellerService
 
         if (dto.BasePrice.HasValue)
             product.BasePrice = dto.BasePrice.Value;
-
-        if (dto.Status.HasValue)
-            product.Status = dto.Status.Value;
 
         product.UpdatedAt = DateTime.UtcNow;
 
@@ -802,12 +692,25 @@ public class SellerService : ISellerService
             }
         }
 
+        var toDraft = dto.Status.HasValue && dto.Status == (short)ProductStatus.Draft;
+        var toHidden = dto.Status.HasValue && dto.Status == (short)ProductStatus.Hidden;
+        if (toDraft)
+            product.Status = (short)ProductStatus.Draft;
+        else if (toHidden)
+            product.Status = (short)ProductStatus.Hidden;
+        else
+            product.Status = (short)ProductStatus.PendingApproval;
+
         await _context.SaveChangesAsync();
 
         return new ServiceResponse
         {
             Success = true,
-            Message = "Cập nhật sản phẩm thành công"
+            Message = toDraft
+                ? "Đã lưu nháp."
+                : toHidden
+                    ? "Đã cập nhật (sản phẩm ở trạng thái ẩn)."
+                : "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai."
         };
     }
 
@@ -917,14 +820,18 @@ public class SellerService : ISellerService
             UpdatedAt = DateTime.UtcNow
         });
 
+        var wasListedActive = product.Status == (short)ProductStatus.Active;
         product.UpdatedAt = DateTime.UtcNow;
+        RequireReapprovalIfProductWasActive(product);
 
         await _context.SaveChangesAsync();
 
         return new ServiceResponse<ProductVariantDetailDto>
         {
             Success = true,
-            Message = "Đã thêm biến thể",
+            Message = "Đã thêm biến thể" + (wasListedActive
+                ? ". Sản phẩm chuyển sang chờ admin duyệt trước khi hiển thị thay đổi công khai."
+                : ""),
             Data = new ProductVariantDetailDto
             {
                 Id = variant.Id,
@@ -969,10 +876,18 @@ public class SellerService : ISellerService
         if (dto.IsActive.HasValue)
             variant.IsActive = dto.IsActive.Value;
 
+        var wasListedActive = product.Status == (short)ProductStatus.Active;
         product.UpdatedAt = DateTime.UtcNow;
+        RequireReapprovalIfProductWasActive(product);
         await _context.SaveChangesAsync();
 
-        return new ServiceResponse { Success = true, Message = "Đã cập nhật biến thể" };
+        return new ServiceResponse
+        {
+            Success = true,
+            Message = "Đã cập nhật biến thể" + (wasListedActive
+                ? " — sản phẩm chuyển sang chờ admin duyệt (nếu đang bán)."
+                : ""),
+        };
     }
 
     public async Task<ServiceResponse> UpdateInventoryAsync(Guid userId, Guid productId, UpdateInventoryDto dto)
@@ -1575,35 +1490,6 @@ public class SellerService : ISellerService
         throw new InvalidOperationException("Không thể sinh mã sản phẩm PRD duy nhất.");
     }
 
-    /// <summary>
-    /// Kiểm tra danh mục sản phẩm có thuộc nhánh <see cref="Shop.PrimaryCategoryId"/> (đi lên parent tối đa 64 bước).
-    /// </summary>
-    private async Task<bool> ProductCategoryBelongsToShopPrimaryRootAsync(Shop shop, long? productCategoryId)
-    {
-        if (!shop.PrimaryCategoryId.HasValue)
-            return true;
-        if (!productCategoryId.HasValue)
-            return false;
-
-        var rootId = shop.PrimaryCategoryId.Value;
-        var current = productCategoryId.Value;
-
-        for (var depth = 0; depth < 64; depth++)
-        {
-            if (current == rootId)
-                return true;
-
-            var cat = await _context.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == current);
-            if (cat == null)
-                return false;
-            if (!cat.ParentId.HasValue)
-                return cat.Id == rootId;
-            current = cat.ParentId.Value;
-        }
-
-        return false;
-    }
-
     private async Task<string> GenerateUniqueProductSlugAsync(string productName, Guid? excludeProductId = null)
     {
         var baseSlug = GenerateSlug(productName);
@@ -1653,5 +1539,12 @@ public class SellerService : ISellerService
         if (string.IsNullOrWhiteSpace(raw))
             return null;
         return PhoneVnHelper.NormalizeToLocal(raw) ?? raw.Trim();
+    }
+
+    /// <summary>SP đang hiển thị (Active): sửa biến thể/phiên bản cần duyệt lại.</summary>
+    private static void RequireReapprovalIfProductWasActive(Product product)
+    {
+        if (product.Status == (short)ProductStatus.Active)
+            product.Status = (short)ProductStatus.PendingApproval;
     }
 }

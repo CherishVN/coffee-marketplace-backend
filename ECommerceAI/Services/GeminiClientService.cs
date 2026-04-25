@@ -12,6 +12,9 @@ public class GeminiClientService
     private readonly string _apiKey;
     private readonly string _modelName;
     private readonly ILogger<GeminiClientService> _logger;
+    private readonly TimeSpan _textTimeout;
+    private readonly TimeSpan _imageTimeout;
+    private readonly int _maxHttpAttempts;
 
     private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
@@ -19,7 +22,12 @@ public class GeminiClientService
     {
         _logger = logger;
         _apiKey = config["Gemini:ApiKey"] ?? throw new InvalidOperationException("Gemini:ApiKey is missing");
-        _modelName = config["Gemini:Model"];
+        _modelName = string.IsNullOrWhiteSpace(config["Gemini:Model"])
+            ? "gemini-2.0-flash"
+            : config["Gemini:Model"]!.Trim();
+        _textTimeout = TimeSpan.FromSeconds(config.GetValue("Gemini:TimeoutSeconds", 90));
+        _imageTimeout = TimeSpan.FromSeconds(config.GetValue("Gemini:ImageTimeoutSeconds", 150));
+        _maxHttpAttempts = Math.Clamp(config.GetValue("Gemini:MaxHttpAttempts", 3), 1, 6);
         _http = httpClientFactory.CreateClient("GeminiClient");
     }
 
@@ -32,7 +40,7 @@ public class GeminiClientService
             contents = new[] { new { role = "user", parts = new[] { new { text = userMessage } } } }
         };
 
-        return await CallApiAsync(body);
+        return await CallApiAsync(body, _textTimeout);
     }
 
     /// <summary>
@@ -52,7 +60,7 @@ public class GeminiClientService
             }
         };
 
-        return await CallApiAsync(body);
+        return await CallApiAsync(body, _textTimeout);
     }
 
     /// <summary>Gọi Gemini với lịch sử hội thoại nhiều lượt.</summary>
@@ -70,20 +78,26 @@ public class GeminiClientService
             contents
         };
 
-        return await CallApiAsync(body);
+        return await CallApiAsync(body, perCallTimeout: _textTimeout);
     }
 
-    private async Task<string> CallApiAsync(object requestBody)
+    private async Task<string> CallApiAsync(object requestBody, TimeSpan perCallTimeout)
     {
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_modelName}:generateContent?key={_apiKey}";
         var json = JsonSerializer.Serialize(requestBody, _jsonOpts);
 
-        // Retry tối đa 3 lần cho lỗi 503 (server overload tạm thời)
-        int[] retryDelaysMs = [2000, 4000, 8000];
+        // Backoff trước mỗi lần gọi lại 503/timeout
+        int[] delayBeforeNextAttemptMs = [0, 2000, 4000];
 
-        for (int attempt = 0; attempt <= retryDelaysMs.Length; attempt++)
+        for (int attempt = 0; attempt < _maxHttpAttempts; attempt++)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            if (attempt > 0)
+            {
+                var d = delayBeforeNextAttemptMs[Math.Min(attempt, delayBeforeNextAttemptMs.Length - 1)];
+                if (d > 0) await Task.Delay(d);
+            }
+
+            using var cts = new CancellationTokenSource(perCallTimeout);
             try
             {
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -102,17 +116,11 @@ public class GeminiClientService
                         .GetString() ?? string.Empty;
                 }
 
-                // 503: retry nếu còn lượt
-                if (statusCode == 503 && attempt < retryDelaysMs.Length)
-                {
-                    var delay = retryDelaysMs[attempt];
-                    _logger.LogWarning("Gemini 503 (server overload), retry {Attempt}/3 sau {Delay}ms...", attempt + 1, delay);
-                    await Task.Delay(delay);
+                // 503: thử lại nếu còn lượt
+                if (statusCode == 503 && attempt < _maxHttpAttempts - 1)
                     continue;
-                }
 
-                // Các lỗi khác: trả về ngay
-                _logger.LogWarning("Gemini API trả về lỗi {Status}: {Body}", statusCode, responseBody);
+                _logger.LogDebug("Gemini lỗi HTTP {Status}: {Body}", statusCode, responseBody);
                 if (statusCode == 429)
                     return "⚠️ Đã vượt giới hạn API Gemini (rate limit). Vui lòng thử lại sau 1 phút.";
                 if (statusCode == 503)
@@ -122,13 +130,8 @@ public class GeminiClientService
             }
             catch (OperationCanceledException)
             {
-                if (attempt < retryDelaysMs.Length)
-                {
-                    _logger.LogWarning("Gemini timeout, retry {Attempt}/3...", attempt + 1);
-                    await Task.Delay(retryDelaysMs[attempt]);
+                if (attempt < _maxHttpAttempts - 1)
                     continue;
-                }
-                _logger.LogWarning("Gemini API timeout sau 30 giây (đã thử 3 lần)");
                 return "⚠️ AI không phản hồi sau nhiều lần thử. Vui lòng thử lại sau.";
             }
             catch (Exception ex)
@@ -138,7 +141,7 @@ public class GeminiClientService
             }
         }
 
-        return "⚠️ Gemini không khả dụng sau 3 lần thử.";
+        return $"⚠️ Gemini không khả dụng sau {_maxHttpAttempts} lần thử.";
     }
 
     /// <summary>
@@ -175,7 +178,7 @@ public class GeminiClientService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Không thể tải ảnh từ URL: {Url}", url);
+                _logger.LogDebug(ex, "Không tải được ảnh: {Url}", url);
             }
         }
 
@@ -208,7 +211,7 @@ public class GeminiClientService
             };
         }
 
-        return await CallApiAsync(body);
+        return await CallApiAsync(body, _imageTimeout);
     }
 
     /// <summary>Tải ảnh từ URL và trả về (base64, mimeType).</summary>

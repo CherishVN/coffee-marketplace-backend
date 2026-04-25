@@ -1822,6 +1822,10 @@ namespace ECommerceAPI.Migrations
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<string>("LastApprovedSnapshotJson")
+                        .HasColumnType("text")
+                        .HasColumnName("last_approved_snapshot_json");
+
                     b.HasKey("Id")
                         .HasName("products_pkey");
 
@@ -2504,10 +2508,6 @@ namespace ECommerceAPI.Migrations
                         .HasColumnType("text")
                         .HasColumnName("phone");
 
-                    b.Property<long?>("PrimaryCategoryId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("primary_category_id");
-
                     b.Property<int?>("ProvinceId")
                         .HasColumnType("integer")
                         .HasColumnName("province_id");
@@ -2574,8 +2574,6 @@ namespace ECommerceAPI.Migrations
 
                     b.HasKey("Id")
                         .HasName("shops_pkey");
-
-                    b.HasIndex("PrimaryCategoryId");
 
                     b.HasIndex("VerifiedBy");
 
@@ -3732,12 +3730,6 @@ namespace ECommerceAPI.Migrations
                         .IsRequired()
                         .HasConstraintName("shops_owner_id_fkey");
 
-                    b.HasOne("ECommerceAPI.Domain.Entities.Category", "PrimaryCategory")
-                        .WithMany()
-                        .HasForeignKey("PrimaryCategoryId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("shops_primary_category_id_fkey");
-
                     b.HasOne("ECommerceAPI.Domain.Entities.User", "VerifiedByNavigation")
                         .WithMany("ShopVerifiedByNavigations")
                         .HasForeignKey("VerifiedBy")
@@ -3745,8 +3737,6 @@ namespace ECommerceAPI.Migrations
                         .HasConstraintName("shops_verified_by_fkey");
 
                     b.Navigation("Owner");
-
-                    b.Navigation("PrimaryCategory");
 
                     b.Navigation("VerifiedByNavigation");
                 });

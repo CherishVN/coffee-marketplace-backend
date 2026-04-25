@@ -48,6 +48,7 @@ public class ProductStats
     public int Draft { get; set; }
     public int Hidden { get; set; }
     public int OutOfStock { get; set; }
+    public int PendingApproval { get; set; }
     public int NewThisMonth { get; set; }
 }
 

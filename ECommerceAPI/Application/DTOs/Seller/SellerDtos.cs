@@ -96,8 +96,6 @@ public class ShopDto
     public int? GhnShopId { get; set; }
     public short Status { get; set; }
     public short VerificationStatus { get; set; }
-    public long? PrimaryCategoryId { get; set; }
-    public string? PrimaryCategoryName { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -265,7 +263,7 @@ public class UpdateProductDtoValidator : AbstractValidator<UpdateProductDto>
             .When(x => x.BasePrice.HasValue);
 
         RuleFor(x => x.Status)
-            .InclusiveBetween((short)0, (short)3).WithMessage("Trạng thái không hợp lệ")
+            .InclusiveBetween((short)0, (short)5).WithMessage("Trạng thái không hợp lệ")
             .When(x => x.Status.HasValue);
     }
 }

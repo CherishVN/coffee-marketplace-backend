@@ -44,21 +44,6 @@ public class AiSellerService : IAiSellerService
     private static readonly object _analyzeProductSchema = BuildAnalyzeProductSchema();
 
     private const string CandidateCacheKey = "PromptCandidates";
-    private const string ShopPrimaryCategoryCachePrefix = "shop_primary_category:";
-
-    /// <summary>Cache 5 phút — mỗi lần bấm phân tích không cần query DB lại.</summary>
-    private async Task<long?> GetShopPrimaryCategoryIdForSellerAsync(Guid sellerId)
-    {
-        var key = ShopPrimaryCategoryCachePrefix + sellerId;
-        return await _cache.GetOrCreateAsync(key, async entry =>
-        {
-            entry.SetAbsoluteExpiration(TimeSpan.FromMinutes(5));
-            return await _context.Shops.AsNoTracking()
-                .Where(s => s.OwnerId == sellerId)
-                .Select(s => s.PrimaryCategoryId)
-                .FirstOrDefaultAsync();
-        });
-    }
 
     private readonly AiDbContext _context;
     private readonly GeminiClientService _gemini;
@@ -446,7 +431,6 @@ public class AiSellerService : IAiSellerService
     // ── Gợi ý Category ─────────────────────────────────────────────────────────────
     public async Task<SuggestCategoryResponseDto> SuggestCategoryAsync(SuggestCategoryRequestDto request, Guid sellerId)
     {
-        var shopPrimary = await GetShopPrimaryCategoryIdForSellerAsync(sellerId);
         var candidates = await GetPromptCandidatesAsync();
         var catById = candidates.CatById;
 
@@ -473,7 +457,7 @@ public class AiSellerService : IAiSellerService
             maxCategories: MaxPromptCategories,
             maxTags: 0,
             maxMaterials: 0,
-            restrictCategoriesToDescendantsOf: shopPrimary).Categories;
+            restrictCategoriesToDescendantsOf: null).Categories;
 
         var categoryList = string.Join("\n", promptCats.Select(c =>
             $"ID:{c.Id} | {BuildPath(c.Id)} (Level {c.Level})"));
@@ -980,7 +964,6 @@ public class AiSellerService : IAiSellerService
             request.ImageUrls = request.ImageUrls.Take(MaxAnalyzeImageUrls).ToList();
 
         // Không dùng Task.WhenAll: cùng một DbContext không cho phép 2 truy vấn song song.
-        var shopPrimary = await GetShopPrimaryCategoryIdForSellerAsync(sellerId);
         var candidates = await GetPromptCandidatesAsync();
         var catById2 = candidates.CatById;
 
@@ -1005,7 +988,7 @@ public class AiSellerService : IAiSellerService
             maxCategories: MaxPromptCategories,
             maxTags: MaxPromptTags,
             maxMaterials: MaxPromptMaterials,
-            restrictCategoriesToDescendantsOf: shopPrimary);
+            restrictCategoriesToDescendantsOf: null);
 
         var categoryList = string.Join("\n", promptSlice.Categories.Select(c => $"ID:{c.Id} | {BuildImagePath(c.Id)} (Level {c.Level})"));
         var tagList = string.Join(", ", promptSlice.Tags.Select(t => $"{t.Name}(ID:{t.Id})"));
@@ -1135,7 +1118,6 @@ public class AiSellerService : IAiSellerService
     // ── Phân tích sản phẩm (text-only, 1 Gemini call) ────────────────────────────
     public async Task<AnalyzeProductResponseDto> AnalyzeProductAsync(AnalyzeProductRequestDto request, Guid sellerId)
     {
-        var shopPrimary = await GetShopPrimaryCategoryIdForSellerAsync(sellerId);
         var candidates = await GetPromptCandidatesAsync();
         var catById = candidates.CatById;
 
@@ -1154,8 +1136,6 @@ public class AiSellerService : IAiSellerService
         var categoryHint = string.Empty;
         if (request.CategoryId.HasValue && catById.TryGetValue(request.CategoryId.Value, out var hintCat))
             categoryHint = $"\nNgười dùng đã chọn category: {BuildPath(hintCat.Id)} — dùng đây làm ngữ cảnh để chọn tags và materials phù hợp.\n";
-        if (shopPrimary is long pRoot && catById.ContainsKey(pRoot))
-            categoryHint += $"\nShop cam kết ngành hàng: {BuildPath(pRoot)}. Chỉ dùng category từ danh sách (cùng nhánh).\n";
 
         var promptSlice = NarrowCatalogForPrompt(
             candidates,
@@ -1166,7 +1146,7 @@ public class AiSellerService : IAiSellerService
             maxCategories: MaxPromptCategories,
             maxTags: MaxPromptTags,
             maxMaterials: MaxPromptMaterials,
-            restrictCategoriesToDescendantsOf: shopPrimary);
+            restrictCategoriesToDescendantsOf: null);
 
         var catLines = string.Join("\n", promptSlice.Categories.Select(c => $"ID:{c.Id} | {BuildPath(c.Id)} | Cấp {c.Level}"));
         var tagLines = string.Join("\n", promptSlice.Tags.Select(t => $"ID:{t.Id} | {t.Name}"));
