@@ -19,7 +19,7 @@ public class CustomerDisputeService : ICustomerDisputeService
 
     private const int NotReceivedMinDaysInShipping = 5;
     private const int NotReceivedMinDaysInProcessing = 7;
-    private const int NotReceivedDaysPastEta = 1;
+    private const int NotReceivedDaysPastEta = 3;
 
     // Terminal statuses where evidence can no longer be updated
     private static readonly DisputeStatus[] FinalStatuses =
@@ -544,7 +544,8 @@ public class CustomerDisputeService : ICustomerDisputeService
         if (ship?.EstimatedDeliveryDate is { } eta)
         {
             var deadline = eta.AddDays(NotReceivedDaysPastEta);
-            if (DateTimeOffset.UtcNow >= deadline)
+            // Cùng mốc thời gian với tham số (không dùng UtcNow lệch) để trùng với CreateDispute/validate
+            if (new DateTimeOffset(utcNow, TimeSpan.Zero) >= deadline)
                 return true;
         }
 

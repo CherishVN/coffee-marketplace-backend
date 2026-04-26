@@ -12,5 +12,7 @@ public interface ICustomerOrderService
     Task<int> AutoCompleteDeliveredOrdersPastDisputeWindowAsync(CancellationToken cancellationToken = default);
     Task<CancelOrderResponseDto> CancelOrderAsync(Guid customerId, Guid orderId, string? reason = null);
     Task<ServiceResponse> CancelPendingOrderAsync(Guid customerId, Guid orderId, string? reason = null);
+    /// <summary>Background: tự động hủy các yêu cầu hủy đơn đã quá hạn shop phản hồi.</summary>
+    Task<int> AutoCancelExpiredCancelRequestsAsync(CancellationToken cancellationToken = default);
 }
 

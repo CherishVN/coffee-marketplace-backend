@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <!-- Swagger -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
 
     <!-- Entity Framework Core with PostgreSQL -->

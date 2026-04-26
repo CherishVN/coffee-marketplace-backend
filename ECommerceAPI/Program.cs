@@ -110,6 +110,7 @@ namespace ECommerceAPI
             builder.Services.AddHostedService<PaymentTimeoutBackgroundService>();
             builder.Services.AddHostedService<SellerWalletReleaseBackgroundService>();
             builder.Services.AddHostedService<OrderAutoCompleteBackgroundService>();
+            builder.Services.AddHostedService<CancelRequestTimeoutBackgroundService>();
             builder.Services.AddMemoryCache();
 
             builder.Services.Configure<ForwardedHeadersOptions>(opts =>

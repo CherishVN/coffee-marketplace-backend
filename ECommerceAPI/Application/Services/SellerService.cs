@@ -24,6 +24,8 @@ public class SellerService : ISellerService
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
+    private readonly IConfiguration _configuration;
+    private readonly IPlatformFeeConfigService _platformFeeConfigService;
 
     public SellerService(
         ApplicationDbContext context,
@@ -32,7 +34,9 @@ public class SellerService : ISellerService
         IUserAuthEmailResolver authResolver,
         ISellerWalletReversalService walletReversal,
         IOrderNotificationEmailComposer orderEmailComposer,
-        IOrderStatusHistoryService orderStatusHistory)
+        IOrderStatusHistoryService orderStatusHistory,
+        IConfiguration configuration,
+        IPlatformFeeConfigService platformFeeConfigService)
     {
         _context = context;
         _hubContext = hubContext;
@@ -41,6 +45,8 @@ public class SellerService : ISellerService
         _walletReversal = walletReversal;
         _orderEmailComposer = orderEmailComposer;
         _orderStatusHistory = orderStatusHistory;
+        _configuration = configuration;
+        _platformFeeConfigService = platformFeeConfigService;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -692,25 +698,54 @@ public class SellerService : ISellerService
             }
         }
 
-        var toDraft = dto.Status.HasValue && dto.Status == (short)ProductStatus.Draft;
-        var toHidden = dto.Status.HasValue && dto.Status == (short)ProductStatus.Hidden;
-        if (toDraft)
-            product.Status = (short)ProductStatus.Draft;
-        else if (toHidden)
-            product.Status = (short)ProductStatus.Hidden;
-        else
-            product.Status = (short)ProductStatus.PendingApproval;
+        string? successMessage = null;
+        if (dto.Status.HasValue)
+        {
+            // Chọn «Đang bán» (FE gửi Active) = yêu cầu niêm yết: gửi chờ admin, trừ khi sản phẩm đã Active (chỉ cập nhật nội dung, không xếp hàng lại).
+            switch ((ProductStatus)dto.Status.Value)
+            {
+                case ProductStatus.Draft:
+                    product.Status = (short)ProductStatus.Draft;
+                    successMessage = "Đã lưu nháp.";
+                    break;
+                case ProductStatus.Hidden:
+                    product.Status = (short)ProductStatus.Hidden;
+                    successMessage = "Đã cập nhật (sản phẩm ở trạng thái ẩn).";
+                    break;
+                case ProductStatus.Active:
+                    if (product.Status == (short)ProductStatus.Active)
+                    {
+                        product.Status = (short)ProductStatus.Active;
+                        successMessage = "Đã cập nhật (đang bán).";
+                    }
+                    else
+                    {
+                        product.Status = (short)ProductStatus.PendingApproval;
+                        successMessage = "Đã gửi yêu cầu niêm yết. Sản phẩm sẽ hiển thị công khai sau khi admin phê duyệt.";
+                    }
+                    break;
+                case ProductStatus.OutOfStock:
+                    product.Status = (short)ProductStatus.OutOfStock;
+                    successMessage = "Đã cập nhật (hết hàng).";
+                    break;
+                case ProductStatus.PendingApproval:
+                    product.Status = (short)ProductStatus.PendingApproval;
+                    successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
+                    break;
+                default:
+                    // Removed (4) — seller không tự gán; giữ quy ước: coi như cập nhật cần xử lý
+                    product.Status = (short)ProductStatus.PendingApproval;
+                    successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
+                    break;
+            }
+        }
 
         await _context.SaveChangesAsync();
 
         return new ServiceResponse
         {
             Success = true,
-            Message = toDraft
-                ? "Đã lưu nháp."
-                : toHidden
-                    ? "Đã cập nhật (sản phẩm ở trạng thái ẩn)."
-                : "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai."
+            Message = successMessage ?? "Cập nhật thành công"
         };
     }
 
@@ -1100,6 +1135,15 @@ public class SellerService : ISellerService
         var statusHistoryDtos = OrderStatusTimelineBuilder.MapHistory(histories, order.CustomerId, shop.OwnerId, forSellerView: true);
         var statusTimelineDtos = OrderStatusTimelineBuilder.BuildSteps(statusEnum, order, histories);
 
+        var pct = Math.Clamp(await _platformFeeConfigService.GetCurrentCommissionPercentAsync(), 0m, 100m);
+        var subtotal = order.Subtotal;
+        var estNet = subtotal * (1 - pct / 100m);
+        estNet = Math.Round(estNet, 2, MidpointRounding.AwayFromZero);
+
+        var feeRec = await _context.PlatformFeeRecords
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.OrderId == orderId && f.ReversedAt == null);
+
         return new ServiceResponse<OrderDto>
         {
             Success = true,
@@ -1133,6 +1177,16 @@ public class SellerService : ISellerService
                 ShopFromDistrictId = shop.DistrictId,
                 ShopFromWardCode = shop.WardCode,
                 CancelRequestedAt = order.CancelRequestedAt,
+                CancelRequestDeadline = order.CancelRequestedAt.HasValue
+                    ? order.CancelRequestedAt.Value.AddHours(
+                        _configuration.GetValue("Orders:CancelRequestTimeoutHours", 24))
+                    : null,
+                Subtotal = subtotal,
+                PlatformFeePercent = pct,
+                EstimatedNetAfterPlatformFee = estNet,
+                PlatformFeeSettled = feeRec != null,
+                PlatformFeeAmount = feeRec?.FeeAmount,
+                NetToSellerAfterPlatformFee = feeRec?.NetToSeller,
                 Items = order.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,
@@ -1396,7 +1450,10 @@ public class SellerService : ISellerService
         }
     }
 
-    /// <summary>Luồng seller: 1→2 (xác nhận), 2→3, 3→4, 4→5, 5→6; hủy ở một số bước.</summary>
+    /// <summary>
+    /// Luồng seller: tối đa đưa đơn tới "Đang chuẩn bị" (Processing);
+    /// không giao/đã giao/hoàn thành — bước đó do hệ thống/VC/admin.
+    /// </summary>
     private static bool IsAllowedSellerOrderTransition(OrderStatus from, OrderStatus to)
     {
         if (from == to) return true;
@@ -1406,10 +1463,7 @@ public class SellerService : ISellerService
             (OrderStatus.PendingConfirmation, OrderStatus.Cancelled) => true,
             (OrderStatus.Confirmed, OrderStatus.Processing) => true,
             (OrderStatus.Confirmed, OrderStatus.Cancelled) => true,
-            (OrderStatus.Processing, OrderStatus.Shipping) => true,
             (OrderStatus.Processing, OrderStatus.Cancelled) => true,
-            (OrderStatus.Shipping, OrderStatus.Delivered) => true,
-            (OrderStatus.Delivered, OrderStatus.Completed) => true,
             _ => false
         };
     }

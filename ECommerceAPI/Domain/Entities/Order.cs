@@ -30,10 +30,10 @@ public partial class Order
     public string? CancelReason { get; set; }
 
     /// <summary>
-    /// Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt.
+    /// Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt (lưu UTC với timezone).
     /// Null = không có yêu cầu. CancelReason dùng chung làm lý do cho yêu cầu này.
     /// </summary>
-    public DateTime? CancelRequestedAt { get; set; }
+    public DateTimeOffset? CancelRequestedAt { get; set; }
 
     public DateTime CreatedAt { get; set; }
 

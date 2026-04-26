@@ -169,7 +169,27 @@ public class OrderDto
     public int? ShopFromDistrictId { get; set; }
     public string? ShopFromWardCode { get; set; }
     /// <summary>Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt. Null = không có yêu cầu.</summary>
-    public DateTime? CancelRequestedAt { get; set; }
+    public DateTimeOffset? CancelRequestedAt { get; set; }
+    /// <summary>Hạn shop phải phê duyệt / từ chối.</summary>
+    public DateTimeOffset? CancelRequestDeadline { get; set; }
+
+    /// <summary>Tiền hàng (subtotal) — cơ sở tính phí sàn. Chỉ gửi khi tải chi tiết.</summary>
+    public decimal? Subtotal { get; set; }
+
+    /// <summary>Tỷ lệ phí sàn đang áp dụng (0–100) tại thời điểm xem chi tiết.</summary>
+    public decimal? PlatformFeePercent { get; set; }
+
+    /// <summary>Ước tính tiền về seller sau phí sàn: Subtotal × (1 − PlatformFeePercent/100).</summary>
+    public decimal? EstimatedNetAfterPlatformFee { get; set; }
+
+    /// <summary>True khi đã có bản ghi phí sàn (chưa bị hoàn tác) cho đơn này.</summary>
+    public bool? PlatformFeeSettled { get; set; }
+
+    /// <summary>Số tiền phí sàn thực tế nếu đã quyết toán; null nếu chưa.</summary>
+    public decimal? PlatformFeeAmount { get; set; }
+
+    /// <summary>Số về seller sau khi trừ phí sàn nếu đã quyết toán; null nếu chưa.</summary>
+    public decimal? NetToSellerAfterPlatformFee { get; set; }
 }
 
 public class RejectCancelRequestDto
