@@ -113,10 +113,162 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<Banner> Banners { get; set; }
+
+    public virtual DbSet<Collection> Collections { get; set; }
+
+    public virtual DbSet<CollectionProduct> CollectionProducts { get; set; }
+
     public virtual DbSet<UserAuditLog> UserAuditLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Banner>(entity =>
+        {
+            entity.ToTable("banners");
+
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => new { e.IsActive, e.SortOrder }, "idx_banners_active_sorted")
+                  .HasFilter("is_active = TRUE");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Subtitle).HasColumnName("subtitle");
+            entity.Property(e => e.CtaText).HasColumnName("cta_text");
+            entity.Property(e => e.CtaUrl).HasColumnName("cta_url");
+            entity.Property(e => e.ImageDesktop).HasColumnName("image_desktop");
+            entity.Property(e => e.ImageMobile).HasColumnName("image_mobile");
+            entity.Property(e => e.ImageAlt).HasColumnName("image_alt");
+            
+            entity.Property(e => e.TextPosition)
+                .HasDefaultValue("left")
+                .HasColumnName("text_position");
+            
+            entity.Property(e => e.TextColor)
+                .HasDefaultValue("light")
+                .HasColumnName("text_color");
+            
+            entity.Property(e => e.OverlayOpacity)
+                .HasPrecision(3, 2)
+                .HasDefaultValue(0.30m)
+                .HasColumnName("overlay_opacity");
+
+            entity.Property(e => e.LinkType)
+                .HasDefaultValue("collection")
+                .HasColumnName("link_type");
+                
+            entity.Property(e => e.LinkValue).HasColumnName("link_value");
+            
+            entity.Property(e => e.StartsAt).HasColumnName("starts_at");
+            entity.Property(e => e.EndsAt).HasColumnName("ends_at");
+
+            entity.Property(e => e.SortOrder)
+                .HasDefaultValue(0)
+                .HasColumnName("sort_order");
+                
+            entity.Property(e => e.IsActive)
+                .HasDefaultValue(true)
+                .HasColumnName("is_active");
+                
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+                
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<Collection>(entity =>
+        {
+            entity.ToTable("collections");
+
+            entity.HasKey(e => e.Id);
+
+            entity.HasIndex(e => e.Slug).IsUnique();
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Slug).HasColumnName("slug");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.ShortDesc).HasColumnName("short_desc");
+            entity.Property(e => e.Image).HasColumnName("image");
+            entity.Property(e => e.ImageAlt).HasColumnName("image_alt");
+
+            entity.Property(e => e.Type)
+                .HasDefaultValue("manual")
+                .HasColumnName("type");
+
+            entity.Property(e => e.CategoryId).HasColumnName("category_id");
+            entity.Property(e => e.TagId).HasColumnName("tag_id");
+
+            entity.Property(e => e.ShowOnHome)
+                .HasDefaultValue(false)
+                .HasColumnName("show_on_home");
+                
+            entity.Property(e => e.HomeSortOrder)
+                .HasDefaultValue(0)
+                .HasColumnName("home_sort_order");
+
+            entity.Property(e => e.StartsAt).HasColumnName("starts_at");
+            entity.Property(e => e.EndsAt).HasColumnName("ends_at");
+
+            entity.Property(e => e.IsActive)
+                .HasDefaultValue(true)
+                .HasColumnName("is_active");
+                
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+                
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Category)
+                .WithMany()
+                .HasForeignKey(d => d.CategoryId)
+                .HasConstraintName("collections_category_id_fkey");
+
+            entity.HasOne(d => d.Tag)
+                .WithMany()
+                .HasForeignKey(d => d.TagId)
+                .HasConstraintName("collections_tag_id_fkey");
+        });
+
+        modelBuilder.Entity<CollectionProduct>(entity =>
+        {
+            entity.ToTable("collection_products");
+
+            entity.HasKey(e => new { e.CollectionId, e.ProductId });
+            
+            entity.HasIndex(e => new { e.CollectionId, e.SortOrder }, "idx_collection_products_sort");
+
+            entity.Property(e => e.CollectionId).HasColumnName("collection_id");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+
+            entity.Property(e => e.SortOrder)
+                .HasDefaultValue(0)
+                .HasColumnName("sort_order");
+                
+            entity.Property(e => e.AddedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("added_at");
+
+            entity.HasOne(d => d.Collection)
+                .WithMany(p => p.CollectionProducts)
+                .HasForeignKey(d => d.CollectionId)
+                .HasConstraintName("collection_products_collection_id_fkey")
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.Product)
+                .WithMany()
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("collection_products_product_id_fkey")
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder
             .HasPostgresEnum("auth", "aal_level", new[] { "aal1", "aal2", "aal3" })
             .HasPostgresEnum("auth", "code_challenge_method", new[] { "s256", "plain" })
@@ -954,7 +1106,9 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("id");
             entity.Property(e => e.OrderCode).HasColumnName("order_code");
             entity.Property(e => e.CancelReason).HasColumnName("cancel_reason");
-            entity.Property(e => e.CancelRequestedAt).HasColumnName("cancel_requested_at");
+            entity.Property(e => e.CancelRequestedAt)
+                .HasColumnType("timestamp with time zone")
+                .HasColumnName("cancel_requested_at");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
@@ -1017,6 +1171,7 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
             entity.Property(e => e.Note).HasColumnName("note");
             entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp with time zone")
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
 

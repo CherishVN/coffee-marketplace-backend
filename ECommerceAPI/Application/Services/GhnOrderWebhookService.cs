@@ -392,13 +392,13 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
 
         return s switch
         {
-            // Tạo vận đơn / lấy hàng phía gửi
             "ready_to_pick" or "picking" or "money_collect_picking" => OrderStatus.Processing,
 
             "picked" or "storing" or "transporting" or "sorting" => OrderStatus.Shipping,
-            "transport" => OrderStatus.Shipping, // tương thích bản cũ / typo
 
-            "delivering" or "money_collect_delivering" => OrderStatus.Shipping,
+            "transport"=> OrderStatus.Shipping,
+
+            "delivering" => OrderStatus.Shipping,
 
             "delivered" => OrderStatus.Delivered,
 
@@ -411,7 +411,6 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
             "waiting_to_return" or "return" or "return_transporting" or "return_sorting" or "returning" or "return_fail" =>
                 OrderStatus.Shipping,
 
-            // Đã hoàn về shop — coi là kết thúc giao cho khách (có thể kèm hoàn tiền thủ công)
             "returned" => OrderStatus.Cancelled,
 
             "exception" or "fulfilling" or "on_process" or "pending" => OrderStatus.Shipping,
