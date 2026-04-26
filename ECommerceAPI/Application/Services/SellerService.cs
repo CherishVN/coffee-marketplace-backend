@@ -25,6 +25,7 @@ public class SellerService : ISellerService
     private readonly IOrderNotificationEmailComposer _orderEmailComposer;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
     private readonly IConfiguration _configuration;
+    private readonly IPlatformFeeConfigService _platformFeeConfigService;
 
     public SellerService(
         ApplicationDbContext context,
@@ -34,7 +35,8 @@ public class SellerService : ISellerService
         ISellerWalletReversalService walletReversal,
         IOrderNotificationEmailComposer orderEmailComposer,
         IOrderStatusHistoryService orderStatusHistory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IPlatformFeeConfigService platformFeeConfigService)
     {
         _context = context;
         _hubContext = hubContext;
@@ -44,6 +46,7 @@ public class SellerService : ISellerService
         _orderEmailComposer = orderEmailComposer;
         _orderStatusHistory = orderStatusHistory;
         _configuration = configuration;
+        _platformFeeConfigService = platformFeeConfigService;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -1103,6 +1106,15 @@ public class SellerService : ISellerService
         var statusHistoryDtos = OrderStatusTimelineBuilder.MapHistory(histories, order.CustomerId, shop.OwnerId, forSellerView: true);
         var statusTimelineDtos = OrderStatusTimelineBuilder.BuildSteps(statusEnum, order, histories);
 
+        var pct = Math.Clamp(await _platformFeeConfigService.GetCurrentCommissionPercentAsync(), 0m, 100m);
+        var subtotal = order.Subtotal;
+        var estNet = subtotal * (1 - pct / 100m);
+        estNet = Math.Round(estNet, 2, MidpointRounding.AwayFromZero);
+
+        var feeRec = await _context.PlatformFeeRecords
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.OrderId == orderId && f.ReversedAt == null);
+
         return new ServiceResponse<OrderDto>
         {
             Success = true,
@@ -1140,6 +1152,12 @@ public class SellerService : ISellerService
                     ? order.CancelRequestedAt.Value.AddHours(
                         _configuration.GetValue("Orders:CancelRequestTimeoutHours", 24))
                     : null,
+                Subtotal = subtotal,
+                PlatformFeePercent = pct,
+                EstimatedNetAfterPlatformFee = estNet,
+                PlatformFeeSettled = feeRec != null,
+                PlatformFeeAmount = feeRec?.FeeAmount,
+                NetToSellerAfterPlatformFee = feeRec?.NetToSeller,
                 Items = order.OrderItems.Select(oi => new OrderItemDto
                 {
                     Id = oi.Id,

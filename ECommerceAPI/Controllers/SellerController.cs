@@ -12,11 +12,36 @@ public class SellerController : ControllerBase
 {
     private readonly ISellerService _sellerService;
     private readonly IUserClaimsService _userClaimsService;
+    private readonly IPlatformFeeConfigService _platformFeeConfigService;
 
-    public SellerController(ISellerService sellerService, IUserClaimsService userClaimsService)
+    public SellerController(
+        ISellerService sellerService,
+        IUserClaimsService userClaimsService,
+        IPlatformFeeConfigService platformFeeConfigService)
     {
         _sellerService = sellerService;
         _userClaimsService = userClaimsService;
+        _platformFeeConfigService = platformFeeConfigService;
+    }
+
+    /// <summary>
+    /// Tỷ lệ phí sàn (hoa hồng) hiện áp dụng — để seller ước tính lợi nhuận.
+    /// </summary>
+    [HttpGet("platform-fee")]
+    public async Task<IActionResult> GetCurrentPlatformFee()
+    {
+        if (_userClaimsService.GetUserId() == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var pct = Math.Clamp(await _platformFeeConfigService.GetCurrentCommissionPercentAsync(), 0m, 100m);
+        return Ok(new
+        {
+            success = true,
+            data = new
+            {
+                commissionPercent = pct,
+            }
+        });
     }
 
     // ==================== SHOP MANAGEMENT ====================
