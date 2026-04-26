@@ -7,6 +7,7 @@ using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -24,6 +25,7 @@ public class CustomerOrderService : ICustomerOrderService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
+    private readonly ILogger<CustomerOrderService> _logger;
 
     public CustomerOrderService(
         ApplicationDbContext context,
@@ -34,7 +36,8 @@ public class CustomerOrderService : ICustomerOrderService
         ICustomerWalletService customerWallet,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        IOrderStatusHistoryService orderStatusHistory)
+        IOrderStatusHistoryService orderStatusHistory,
+        ILogger<CustomerOrderService> logger)
     {
         _context = context;
         _hubContext = hubContext;
@@ -45,6 +48,7 @@ public class CustomerOrderService : ICustomerOrderService
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _orderStatusHistory = orderStatusHistory;
+        _logger = logger;
     }
 
     public async Task<CustomerOrderListResponseDto> GetMyOrdersAsync(Guid customerId, int page, int pageSize, short? status = null)
@@ -833,9 +837,13 @@ public class CustomerOrderService : ICustomerOrderService
 
                 count++;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Tiếp tục xử lý các đơn khác nếu một đơn bị lỗi
+                // Trước đây nuốt lỗi im lặng — khách/shop không tự hủy dù hết hạn, khó gỡ lỗi
+                _logger.LogError(
+                    ex,
+                    "AutoCancelExpiredCancelRequestsAsync: không tự hủy được đơn {OrderId} dù quá hạn yêu cầu hủy (Processing + CancelRequestedAt).",
+                    order.Id);
             }
         }
 
