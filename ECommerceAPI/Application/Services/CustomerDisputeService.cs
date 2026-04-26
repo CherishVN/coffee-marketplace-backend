@@ -544,7 +544,8 @@ public class CustomerDisputeService : ICustomerDisputeService
         if (ship?.EstimatedDeliveryDate is { } eta)
         {
             var deadline = eta.AddDays(NotReceivedDaysPastEta);
-            if (DateTimeOffset.UtcNow >= deadline)
+            // Cùng mốc thời gian với tham số (không dùng UtcNow lệch) để trùng với CreateDispute/validate
+            if (new DateTimeOffset(utcNow, TimeSpan.Zero) >= deadline)
                 return true;
         }
 
