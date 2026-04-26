@@ -1421,7 +1421,10 @@ public class SellerService : ISellerService
         }
     }
 
-    /// <summary>Luồng seller: 1→2 (xác nhận), 2→3, 3→4, 4→5, 5→6; hủy ở một số bước.</summary>
+    /// <summary>
+    /// Luồng seller: tối đa đưa đơn tới "Đang chuẩn bị" (Processing);
+    /// không giao/đã giao/hoàn thành — bước đó do hệ thống/VC/admin.
+    /// </summary>
     private static bool IsAllowedSellerOrderTransition(OrderStatus from, OrderStatus to)
     {
         if (from == to) return true;
@@ -1431,10 +1434,7 @@ public class SellerService : ISellerService
             (OrderStatus.PendingConfirmation, OrderStatus.Cancelled) => true,
             (OrderStatus.Confirmed, OrderStatus.Processing) => true,
             (OrderStatus.Confirmed, OrderStatus.Cancelled) => true,
-            (OrderStatus.Processing, OrderStatus.Shipping) => true,
             (OrderStatus.Processing, OrderStatus.Cancelled) => true,
-            (OrderStatus.Shipping, OrderStatus.Delivered) => true,
-            (OrderStatus.Delivered, OrderStatus.Completed) => true,
             _ => false
         };
     }
