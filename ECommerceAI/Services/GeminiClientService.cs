@@ -1,5 +1,8 @@
 using System.Text;
 using System.Text.Json;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Processing;
 
 namespace ECommerceAI.Services;
 
@@ -15,6 +18,8 @@ public class GeminiClientService
     private readonly TimeSpan _textTimeout;
     private readonly TimeSpan _imageTimeout;
     private readonly int _maxHttpAttempts;
+    private readonly int _imageMaxEdgePixels;
+    private readonly int _imageJpegQuality;
 
     private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
@@ -28,6 +33,9 @@ public class GeminiClientService
         _textTimeout = TimeSpan.FromSeconds(config.GetValue("Gemini:TimeoutSeconds", 90));
         _imageTimeout = TimeSpan.FromSeconds(config.GetValue("Gemini:ImageTimeoutSeconds", 150));
         _maxHttpAttempts = Math.Clamp(config.GetValue("Gemini:MaxHttpAttempts", 3), 1, 6);
+        // Ảnh gửi Gemini: thu gọn cạnh dài + JPEG để giảm payload, thời gian upload, tránh hết quota.
+        _imageMaxEdgePixels = Math.Clamp(config.GetValue("Gemini:ImageMaxEdgePixels", 1280), 256, 4096);
+        _imageJpegQuality = Math.Clamp(config.GetValue("Gemini:ImageJpegQuality", 82), 40, 100);
         _http = httpClientFactory.CreateClient("GeminiClient");
     }
 
@@ -214,7 +222,7 @@ public class GeminiClientService
         return await CallApiAsync(body, _imageTimeout);
     }
 
-    /// <summary>Tải ảnh từ URL và trả về (base64, mimeType).</summary>
+    /// <summary>Tải ảnh từ URL hoặc data URL, resize + JPEG rồi trả (base64, image/jpeg khi tối ưu thành công).</summary>
     private async Task<(string Base64, string MimeType)> DownloadImageAsBase64Async(string url)
     {
         if (url.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
@@ -223,7 +231,7 @@ public class GeminiClientService
             if (commaIndex <= 0) throw new InvalidOperationException("Data URL khong hop le");
 
             var meta = url[..commaIndex];
-            var data = url[(commaIndex + 1)..];
+            var b64 = url[(commaIndex + 1)..];
 
             var dataMime = "image/jpeg";
             var mimeStart = "data:";
@@ -236,14 +244,13 @@ public class GeminiClientService
             if (!meta.Contains(";base64", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Data URL phai o dang base64");
 
-            return (data, dataMime);
+            var bytes = Convert.FromBase64String(b64);
+            return await Task.Run(() => EncodeImageForAi(bytes, dataMime, url));
         }
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var bytes = await _http.GetByteArrayAsync(url, cts.Token);
-
-        // Xác định MIME type từ URL hoặc mặc định jpeg
-        var mime = url.ToLower() switch
+        var bytes2 = await _http.GetByteArrayAsync(url, cts.Token);
+        var mime2 = url.ToLower() switch
         {
             var u when u.Contains(".png") => "image/png",
             var u when u.Contains(".webp") => "image/webp",
@@ -251,7 +258,44 @@ public class GeminiClientService
             _ => "image/jpeg"
         };
 
-        return (Convert.ToBase64String(bytes), mime);
+        return await Task.Run(() => EncodeImageForAi(bytes2, mime2, url));
+    }
+
+    /// <summary>Giảm kích thước: fit trong cạnh tối đa, xuất JPEG (mặc định) để tối ưu request Gemini.</summary>
+    private (string Base64, string MimeType) EncodeImageForAi(byte[] rawBytes, string? hintMime, string? logUrl = null)
+    {
+        var before = rawBytes.Length;
+        try
+        {
+            using var image = Image.Load(rawBytes);
+            if (image.Width > _imageMaxEdgePixels || image.Height > _imageMaxEdgePixels)
+            {
+                image.Mutate(ctx => ctx.Resize(new ResizeOptions
+                {
+                    Size = new Size(_imageMaxEdgePixels, _imageMaxEdgePixels),
+                    Mode = ResizeMode.Max
+                }));
+            }
+
+            var encoder = new JpegEncoder { Quality = _imageJpegQuality };
+            using var outMs = new MemoryStream();
+            image.SaveAsJpeg(outMs, encoder);
+            var jpeg = outMs.ToArray();
+            _logger.LogDebug(
+                "Ảnh AI: {Before}B → {After}B JPEG, {W}×{H}, hint={Hint}, url={Url}",
+                before,
+                jpeg.Length,
+                image.Width,
+                image.Height,
+                hintMime,
+                string.IsNullOrEmpty(logUrl) || logUrl.Length < 100 ? logUrl : string.Concat(logUrl.AsSpan(0, 100), "…"));
+            return (Convert.ToBase64String(jpeg), "image/jpeg");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Không resize/JPEG ảnh, gửi dữ liệu gốc (hint: {Hint})", hintMime);
+            return (Convert.ToBase64String(rawBytes), string.IsNullOrEmpty(hintMime) ? "image/jpeg" : hintMime);
+        }
     }
 
     /// <summary>Liệt kê tất cả models khả dụng với API key hiện tại.</summary>
