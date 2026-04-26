@@ -701,7 +701,7 @@ public class SellerService : ISellerService
         string? successMessage = null;
         if (dto.Status.HasValue)
         {
-            // FE gửi Active / OutOfStock / Draft / Hidden — cần lưu đúng, không gom tất cả thành PendingApproval.
+            // Chọn «Đang bán» (FE gửi Active) = yêu cầu niêm yết: gửi chờ admin, trừ khi sản phẩm đã Active (chỉ cập nhật nội dung, không xếp hàng lại).
             switch ((ProductStatus)dto.Status.Value)
             {
                 case ProductStatus.Draft:
@@ -713,8 +713,16 @@ public class SellerService : ISellerService
                     successMessage = "Đã cập nhật (sản phẩm ở trạng thái ẩn).";
                     break;
                 case ProductStatus.Active:
-                    product.Status = (short)ProductStatus.Active;
-                    successMessage = "Đã cập nhật (đang bán).";
+                    if (product.Status == (short)ProductStatus.Active)
+                    {
+                        product.Status = (short)ProductStatus.Active;
+                        successMessage = "Đã cập nhật (đang bán).";
+                    }
+                    else
+                    {
+                        product.Status = (short)ProductStatus.PendingApproval;
+                        successMessage = "Đã gửi yêu cầu niêm yết. Sản phẩm sẽ hiển thị công khai sau khi admin phê duyệt.";
+                    }
                     break;
                 case ProductStatus.OutOfStock:
                     product.Status = (short)ProductStatus.OutOfStock;
