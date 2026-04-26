@@ -698,25 +698,46 @@ public class SellerService : ISellerService
             }
         }
 
-        var toDraft = dto.Status.HasValue && dto.Status == (short)ProductStatus.Draft;
-        var toHidden = dto.Status.HasValue && dto.Status == (short)ProductStatus.Hidden;
-        if (toDraft)
-            product.Status = (short)ProductStatus.Draft;
-        else if (toHidden)
-            product.Status = (short)ProductStatus.Hidden;
-        else
-            product.Status = (short)ProductStatus.PendingApproval;
+        string? successMessage = null;
+        if (dto.Status.HasValue)
+        {
+            // FE gửi Active / OutOfStock / Draft / Hidden — cần lưu đúng, không gom tất cả thành PendingApproval.
+            switch ((ProductStatus)dto.Status.Value)
+            {
+                case ProductStatus.Draft:
+                    product.Status = (short)ProductStatus.Draft;
+                    successMessage = "Đã lưu nháp.";
+                    break;
+                case ProductStatus.Hidden:
+                    product.Status = (short)ProductStatus.Hidden;
+                    successMessage = "Đã cập nhật (sản phẩm ở trạng thái ẩn).";
+                    break;
+                case ProductStatus.Active:
+                    product.Status = (short)ProductStatus.Active;
+                    successMessage = "Đã cập nhật (đang bán).";
+                    break;
+                case ProductStatus.OutOfStock:
+                    product.Status = (short)ProductStatus.OutOfStock;
+                    successMessage = "Đã cập nhật (hết hàng).";
+                    break;
+                case ProductStatus.PendingApproval:
+                    product.Status = (short)ProductStatus.PendingApproval;
+                    successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
+                    break;
+                default:
+                    // Removed (4) — seller không tự gán; giữ quy ước: coi như cập nhật cần xử lý
+                    product.Status = (short)ProductStatus.PendingApproval;
+                    successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
+                    break;
+            }
+        }
 
         await _context.SaveChangesAsync();
 
         return new ServiceResponse
         {
             Success = true,
-            Message = toDraft
-                ? "Đã lưu nháp."
-                : toHidden
-                    ? "Đã cập nhật (sản phẩm ở trạng thái ẩn)."
-                : "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai."
+            Message = successMessage ?? "Cập nhật thành công"
         };
     }
 
