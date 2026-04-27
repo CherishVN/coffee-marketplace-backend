@@ -74,6 +74,7 @@ public class SellerService : ISellerService
                 Slug = shop.Slug,
                 Description = shop.Description,
                 LogoUrl = shop.LogoUrl,
+                CoverUrl = shop.CoverUrl,
                 Phone = PhoneVnHelper.NormalizeToLocal(shop.Phone) ?? shop.Phone,
                 AddressLine = shop.AddressLine,
                 WardCode = shop.WardCode,
@@ -125,6 +126,9 @@ public class SellerService : ISellerService
                     .SetProperty(b => b.Name, b => !string.IsNullOrEmpty(dto.Name) ? dto.Name! : b.Name)
                     .SetProperty(b => b.Description, b => dto.Description != null ? dto.Description : b.Description)
                     .SetProperty(b => b.LogoUrl, b => dto.LogoUrl != null ? dto.LogoUrl : b.LogoUrl)
+                    .SetProperty(b => b.CoverUrl, b => dto.CoverUrl == null
+                        ? b.CoverUrl
+                        : (string.IsNullOrWhiteSpace(dto.CoverUrl) ? null : dto.CoverUrl.Trim()))
                     .SetProperty(b => b.Phone, b => normalizedPhone != null ? normalizedPhone : b.Phone)
                     .SetProperty(b => b.AddressLine, b => dto.AddressLine != null ? dto.AddressLine : b.AddressLine)
                     .SetProperty(b => b.WardCode, b => dto.WardCode != null ? dto.WardCode : b.WardCode)

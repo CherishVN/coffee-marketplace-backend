@@ -10,6 +10,7 @@ public class UpdateShopDto
     public string? Name { get; set; }
     public string? Description { get; set; }
     public string? LogoUrl { get; set; }
+    public string? CoverUrl { get; set; }
     public string? Phone { get; set; }
     public string? AddressLine { get; set; }
     public string? WardCode { get; set; }
@@ -87,6 +88,7 @@ public class ShopDto
     public string Slug { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? LogoUrl { get; set; }
+    public string? CoverUrl { get; set; }
     public string? Phone { get; set; }
     public string? AddressLine { get; set; }
     public string? WardCode { get; set; }
@@ -221,6 +223,10 @@ public class UpdateShopDtoValidator : AbstractValidator<UpdateShopDto>
         RuleFor(x => x.Description)
             .MaximumLength(2000).WithMessage("Mô tả không được vượt quá 2000 ký tự")
             .When(x => !string.IsNullOrEmpty(x.Description));
+
+        RuleFor(x => x.CoverUrl)
+            .MaximumLength(10_000_000).WithMessage("URL / dữ liệu ảnh bìa quá lớn")
+            .When(x => !string.IsNullOrEmpty(x.CoverUrl));
 
         RuleFor(x => x.Phone)
             .Matches(@"^(0|\+84)[0-9]{9,10}$").WithMessage("Số điện thoại không hợp lệ")
