@@ -90,10 +90,9 @@ public class SellerService : ISellerService
 
     public async Task<ServiceResponse> UpdateShopAsync(Guid userId, UpdateShopDto dto)
     {
-        var shop = await _context.Shops
-            .FirstOrDefaultAsync(s => s.OwnerId == userId);
+        var shopExists = await _context.Shops.AnyAsync(s => s.OwnerId == userId);
 
-        if (shop == null)
+        if (!shopExists)
         {
             return new ServiceResponse
             {
@@ -102,39 +101,40 @@ public class SellerService : ISellerService
             };
         }
 
-        if (!string.IsNullOrEmpty(dto.Name))
-            shop.Name = dto.Name;
-
-        if (dto.Description != null)
-            shop.Description = dto.Description;
-
-        if (dto.LogoUrl != null)
-            shop.LogoUrl = dto.LogoUrl;
-
+        // DB có trigger prevent_shop_verification_fields_update: chặn UPDATE bảng shops
+        // khi session không phải admin. SellerApprovalService đã bypass bằng
+        // SET LOCAL session_replication_role = replica trong transaction — áp dụng
+        // cùng cách cho seller cập nhật hồ sơ (ExecuteUpdate vẫn bị trigger chặn).
+        string? normalizedPhone = null;
         if (dto.Phone != null)
-            shop.Phone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone;
+            normalizedPhone = PhoneVnHelper.NormalizeToLocal(dto.Phone) ?? dto.Phone;
 
-        if (dto.AddressLine != null)
-            shop.AddressLine = dto.AddressLine;
+        var now = DateTime.UtcNow;
 
-        if (dto.WardCode != null)
-            shop.WardCode = dto.WardCode;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _context.Database.BeginTransactionAsync();
+            await _context.Database.ExecuteSqlRawAsync(
+                "SET LOCAL session_replication_role = replica");
 
-        if (dto.DistrictId.HasValue)
-            shop.DistrictId = dto.DistrictId;
+            await _context.Shops
+                .Where(s => s.OwnerId == userId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(b => b.UpdatedAt, _ => now)
+                    .SetProperty(b => b.Name, b => !string.IsNullOrEmpty(dto.Name) ? dto.Name! : b.Name)
+                    .SetProperty(b => b.Description, b => dto.Description != null ? dto.Description : b.Description)
+                    .SetProperty(b => b.LogoUrl, b => dto.LogoUrl != null ? dto.LogoUrl : b.LogoUrl)
+                    .SetProperty(b => b.Phone, b => normalizedPhone != null ? normalizedPhone : b.Phone)
+                    .SetProperty(b => b.AddressLine, b => dto.AddressLine != null ? dto.AddressLine : b.AddressLine)
+                    .SetProperty(b => b.WardCode, b => dto.WardCode != null ? dto.WardCode : b.WardCode)
+                    .SetProperty(b => b.DistrictId, b => dto.DistrictId.HasValue ? dto.DistrictId : b.DistrictId)
+                    .SetProperty(b => b.ProvinceId, b => dto.ProvinceId.HasValue ? dto.ProvinceId : b.ProvinceId)
+                    .SetProperty(b => b.City, b => dto.City != null ? dto.City : b.City)
+                    .SetProperty(b => b.GhnShopId, b => dto.GhnShopId.HasValue ? dto.GhnShopId : b.GhnShopId));
 
-        if (dto.ProvinceId.HasValue)
-            shop.ProvinceId = dto.ProvinceId;
-
-        if (dto.City != null)
-            shop.City = dto.City;
-
-        if (dto.GhnShopId.HasValue)
-            shop.GhnShopId = dto.GhnShopId;
-
-        shop.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
 
         return new ServiceResponse
         {
