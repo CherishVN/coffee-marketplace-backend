@@ -26,6 +26,7 @@ public class SellerService : ISellerService
     private readonly IOrderStatusHistoryService _orderStatusHistory;
     private readonly IConfiguration _configuration;
     private readonly IPlatformFeeConfigService _platformFeeConfigService;
+    private readonly ICartService _cartService;
 
     public SellerService(
         ApplicationDbContext context,
@@ -36,7 +37,8 @@ public class SellerService : ISellerService
         IOrderNotificationEmailComposer orderEmailComposer,
         IOrderStatusHistoryService orderStatusHistory,
         IConfiguration configuration,
-        IPlatformFeeConfigService platformFeeConfigService)
+        IPlatformFeeConfigService platformFeeConfigService,
+        ICartService cartService)
     {
         _context = context;
         _hubContext = hubContext;
@@ -47,6 +49,7 @@ public class SellerService : ISellerService
         _orderStatusHistory = orderStatusHistory;
         _configuration = configuration;
         _platformFeeConfigService = platformFeeConfigService;
+        _cartService = cartService;
     }
 
     public async Task<ServiceResponse<ShopDto>> GetMyShopAsync(Guid userId)
@@ -642,6 +645,8 @@ public class SellerService : ISellerService
             };
         }
 
+        var previousProductStatus = product.Status;
+
         if (dto.CategoryId.HasValue)
             product.CategoryId = dto.CategoryId;
 
@@ -705,43 +710,60 @@ public class SellerService : ISellerService
         string? successMessage = null;
         if (dto.Status.HasValue)
         {
-            // Chọn «Đang bán» (FE gửi Active) = yêu cầu niêm yết: gửi chờ admin, trừ khi sản phẩm đã Active (chỉ cập nhật nội dung, không xếp hàng lại).
-            switch ((ProductStatus)dto.Status.Value)
+            var isPendingApproval = product.Status == (short)ProductStatus.PendingApproval;
+
+            if (isPendingApproval && dto.Status.Value != (short)ProductStatus.PendingApproval)
             {
-                case ProductStatus.Draft:
-                    product.Status = (short)ProductStatus.Draft;
-                    successMessage = "Đã lưu nháp.";
-                    break;
-                case ProductStatus.Hidden:
-                    product.Status = (short)ProductStatus.Hidden;
-                    successMessage = "Đã cập nhật (sản phẩm ở trạng thái ẩn).";
-                    break;
-                case ProductStatus.Active:
-                    if (product.Status == (short)ProductStatus.Active)
-                    {
-                        product.Status = (short)ProductStatus.Active;
-                        successMessage = "Đã cập nhật (đang bán).";
-                    }
-                    else
-                    {
-                        product.Status = (short)ProductStatus.PendingApproval;
-                        successMessage = "Đã gửi yêu cầu niêm yết. Sản phẩm sẽ hiển thị công khai sau khi admin phê duyệt.";
-                    }
-                    break;
-                case ProductStatus.OutOfStock:
-                    product.Status = (short)ProductStatus.OutOfStock;
-                    successMessage = "Đã cập nhật (hết hàng).";
-                    break;
-                case ProductStatus.PendingApproval:
-                    product.Status = (short)ProductStatus.PendingApproval;
-                    successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
-                    break;
-                default:
-                    // Removed (4) — seller không tự gán; giữ quy ước: coi như cập nhật cần xử lý
-                    product.Status = (short)ProductStatus.PendingApproval;
-                    successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
-                    break;
             }
+            else if (isPendingApproval && dto.Status.Value == (short)ProductStatus.PendingApproval)
+            {
+            }
+            else
+            {
+                // Chọn «Đang bán» (FE gửi Active) = yêu cầu niêm yết: gửi chờ admin, trừ khi sản phẩm đã Active (chỉ cập nhật nội dung, không xếp hàng lại).
+                switch ((ProductStatus)dto.Status.Value)
+                {
+                    case ProductStatus.Draft:
+                        product.Status = (short)ProductStatus.Draft;
+                        successMessage = "Đã lưu nháp.";
+                        break;
+                    case ProductStatus.Hidden:
+                        product.Status = (short)ProductStatus.Hidden;
+                        successMessage = "Đã cập nhật (sản phẩm ở trạng thái ẩn).";
+                        break;
+                    case ProductStatus.Active:
+                        if (product.Status == (short)ProductStatus.Active)
+                        {
+                            product.Status = (short)ProductStatus.Active;
+                            successMessage = "Đã cập nhật (đang bán).";
+                        }
+                        else
+                        {
+                            product.Status = (short)ProductStatus.PendingApproval;
+                            successMessage = "Đã gửi yêu cầu niêm yết. Sản phẩm sẽ hiển thị công khai sau khi admin phê duyệt.";
+                        }
+                        break;
+                    case ProductStatus.OutOfStock:
+                        product.Status = (short)ProductStatus.OutOfStock;
+                        successMessage = "Đã cập nhật (hết hàng).";
+                        break;
+                    case ProductStatus.PendingApproval:
+                        product.Status = (short)ProductStatus.PendingApproval;
+                        successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
+                        break;
+                    default:
+                        // Removed (4) — seller không tự gán; giữ quy ước: coi như cập nhật cần xử lý
+                        product.Status = (short)ProductStatus.PendingApproval;
+                        successMessage = "Đã cập nhật. Chờ admin phê duyệt trước khi hiển thị công khai.";
+                        break;
+                }
+            }
+        }
+
+        if (product.Status == (short)ProductStatus.Hidden
+            && previousProductStatus != (short)ProductStatus.Hidden)
+        {
+            await _cartService.RemoveAllCartItemsForProductAsync(product.Id);
         }
 
         await _context.SaveChangesAsync();
@@ -779,9 +801,12 @@ public class SellerService : ISellerService
             };
         }
 
-    
+        var previousStatus = product.Status;
         product.Status = (short)ProductStatus.Hidden;
         product.UpdatedAt = DateTime.UtcNow;
+
+        if (previousStatus != (short)ProductStatus.Hidden)
+            await _cartService.RemoveAllCartItemsForProductAsync(product.Id);
 
         await _context.SaveChangesAsync();
 

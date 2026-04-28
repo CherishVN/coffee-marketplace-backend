@@ -130,26 +130,26 @@ public class GeminiClientService
 
                 _logger.LogDebug("Gemini lỗi HTTP {Status}: {Body}", statusCode, responseBody);
                 if (statusCode == 429)
-                    return "⚠️ Đã vượt giới hạn API Gemini (rate limit). Vui lòng thử lại sau 1 phút.";
+                    return "Đã vượt giới hạn API Gemini (rate limit). Vui lòng thử lại sau 1 phút.";
                 if (statusCode == 503)
-                    return "⚠️ Gemini server đang quá tải. Vui lòng thử lại sau 30 giây.";
+                    return "Gemini server đang quá tải. Vui lòng thử lại sau 30 giây.";
 
-                return $"⚠️ Lỗi Gemini {statusCode}: {ExtractErrorMessage(responseBody)}";
+                return $"Lỗi Gemini {statusCode}: {ExtractErrorMessage(responseBody)}";
             }
             catch (OperationCanceledException)
             {
                 if (attempt < _maxHttpAttempts - 1)
                     continue;
-                return "⚠️ AI không phản hồi sau nhiều lần thử. Vui lòng thử lại sau.";
+                return "AI không phản hồi sau nhiều lần thử. Vui lòng thử lại sau.";
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Gemini API lỗi không xác định");
-                return $"⚠️ Lỗi AI: {ex.Message}";
+                return $"Lỗi AI: {ex.Message}";
             }
         }
 
-        return $"⚠️ Gemini không khả dụng sau {_maxHttpAttempts} lần thử.";
+        return $"Gemini không khả dụng sau {_maxHttpAttempts} lần thử.";
     }
 
     /// <summary>
@@ -191,7 +191,7 @@ public class GeminiClientService
         }
 
         if (parts.Count == 0)
-            return "⚠️ Không thể tải bất kỳ ảnh nào từ các URL đã cung cấp.";
+            return "Không thể tải bất kỳ ảnh nào từ các URL đã cung cấp.";
 
         // Thêm text prompt sau ảnh
         parts.Add(new { text = userMessage });
