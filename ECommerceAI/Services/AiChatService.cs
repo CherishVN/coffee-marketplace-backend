@@ -376,6 +376,39 @@ public class AiChatService : IAiChatService
                 pt.Tag.Name.ToLower().Contains(tokenLower) ||
                 pt.Tag.Slug.ToLower().Contains(tokenLower)));
 
+    /// <summary>
+    /// Token quá rộng: OR trên các token này khiến trà/túi… (danh mục chứa "đặc sản") lọt vào câu hỏi bánh kẹo.
+    /// </summary>
+    private static readonly HashSet<string> OverlyBroadSearchTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "đặc", "sản", "dac", "san"
+    };
+
+    private static List<string> ToMeaningfulSearchTokens(IReadOnlyList<string> tokens) =>
+        tokens.Where(t => t.Length >= 2 && !OverlyBroadSearchTokens.Contains(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static IQueryable<Product> ApplySearchTokensToQuery(
+        IQueryable<Product> dbQuery,
+        IReadOnlyList<string> normalizedTokens,
+        string rawQuery)
+    {
+        var meaningful = ToMeaningfulSearchTokens(normalizedTokens);
+
+        // ≥2 token cụ thể: AND — SP phải khớp tất cả (tên/danh mục/tag), tránh lẫn ngành hàng.
+        if (meaningful.Count >= 2)
+        {
+            foreach (var token in meaningful.Take(8))
+                dbQuery = WhereProductMatchesToken(dbQuery, token);
+            return dbQuery;
+        }
+
+        if (meaningful.Count == 1)
+            return WhereProductMatchesToken(dbQuery, meaningful[0]);
+
+        // Hết token (vd. chỉ còn "đặc"/"sản" đã bị lọc): khớp cả cụm search_query
+        var phrase = rawQuery.Trim().ToLowerInvariant();
+        return string.IsNullOrEmpty(phrase) ? dbQuery : WhereProductMatchesToken(dbQuery, phrase);
+    }
     private async Task<string> BuildProductContextAsync(string userMessage, IEnumerable<AiChatMessage>? history = null)
     {
         var keyword = ExtractProductKeyword(userMessage);
@@ -405,7 +438,7 @@ public class AiChatService : IAiChatService
                 p.BasePrice <= maxPrice.Value ||
                 p.Variants.Any(v => v.IsActive && (v.Price ?? p.BasePrice) <= maxPrice.Value));
 
-        var products = await query.Take(10).ToListAsync();
+        var products = await query.OrderByDescending(p => p.CreatedAt).Take(18).ToListAsync();
         if (!products.Any()) return string.Empty;
 
         return string.Join("\n", products.Select(p =>
@@ -603,10 +636,7 @@ public class AiChatService : IAiChatService
             .Where(p => p.Status == 1);
 
         if (normalizedTokens.Count > 0)
-        {
-            foreach (var token in normalizedTokens)
-                dbQuery = WhereProductMatchesToken(dbQuery, token);
-        }
+            dbQuery = ApplySearchTokensToQuery(dbQuery, normalizedTokens, query);
         else
         {
             var lowerQuery = query.ToLower().Trim();
@@ -618,7 +648,11 @@ public class AiChatService : IAiChatService
                 p.BasePrice <= maxPrice.Value ||
                 p.Variants.Any(v => v.IsActive && (v.Price ?? p.BasePrice) <= maxPrice.Value));
 
-        var products = await dbQuery.Take(5).ToListAsync();
+        // Đủ SP để hiển thị trong widget (trước đây Take(5) + AND token khiến thường chỉ còn 3–5 món)
+        var products = await dbQuery
+            .OrderByDescending(p => p.CreatedAt)
+            .Take(15)
+            .ToListAsync();
 
         return products.Select(p => new ProductSuggestionDto
         {
@@ -646,7 +680,8 @@ public class AiChatService : IAiChatService
             "chị", "em", "muốn", "cần", "mua", "tìm",
             "dưới", "trên", "tầm", "khoảng", "quanh", "tối", "đa", "đến", "lên",
             "max", "min", "under", "below", "above", "around",
-            "nghìn", "ngàn", "triệu", "trăm", "đồng", "vnđ", "vnd"
+            "nghìn", "ngàn", "triệu", "trăm", "đồng", "vnđ", "vnd",
+            "đặc", "sản"
         };
 
         return query

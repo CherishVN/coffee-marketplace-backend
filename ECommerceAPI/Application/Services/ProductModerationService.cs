@@ -11,15 +11,18 @@ public class ProductModerationService : IProductModerationService
     private readonly ApplicationDbContext _context;
     private readonly INotificationService _notifications;
     private readonly ILogger<ProductModerationService> _logger;
+    private readonly ICartService _cartService;
 
     public ProductModerationService(
         ApplicationDbContext context,
         INotificationService notifications,
-        ILogger<ProductModerationService> logger)
+        ILogger<ProductModerationService> logger,
+        ICartService cartService)
     {
         _context = context;
         _notifications = notifications;
         _logger = logger;
+        _cartService = cartService;
     }
 
     public async Task<ProductModerationListResponseDto> GetAllProductsAsync(
@@ -190,9 +193,13 @@ public class ProductModerationService : IProductModerationService
 
             var wasPending = product.Status == (short)ProductStatus.PendingApproval;
             var wasActive = product.Status == (short)ProductStatus.Active;
+            var previousStatus = product.Status;
 
             product.Status = (short)ProductStatus.Hidden;
             product.UpdatedAt = DateTime.UtcNow;
+
+            if (previousStatus != (short)ProductStatus.Hidden)
+                await _cartService.RemoveAllCartItemsForProductAsync(productId);
 
             await _context.SaveChangesAsync();
 

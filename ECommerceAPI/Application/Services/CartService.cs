@@ -1,9 +1,11 @@
 using ECommerceAPI.Application.DTOs.Cart;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace ECommerceAPI.Application.Services;
 
@@ -12,15 +14,68 @@ public class CartService : ICartService
     private readonly ApplicationDbContext _context;
     private readonly IConfiguration _configuration;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
+    private readonly INotificationService _notifications;
+    private readonly ILogger<CartService> _logger;
 
     public CartService(
         ApplicationDbContext context,
         IConfiguration configuration,
-        IOrderStatusHistoryService orderStatusHistory)
+        IOrderStatusHistoryService orderStatusHistory,
+        INotificationService notifications,
+        ILogger<CartService> logger)
     {
         _context = context;
         _configuration = configuration;
         _orderStatusHistory = orderStatusHistory;
+        _notifications = notifications;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> RemoveAllCartItemsForProductAsync(Guid productId, CancellationToken cancellationToken = default)
+    {
+        var rows = await _context.CartItems
+            .AsNoTracking()
+            .Where(ci => ci.ProductId == productId)
+            .Select(ci => new { ci.Cart.CustomerId, ProductName = ci.Product.Name })
+            .ToListAsync(cancellationToken);
+
+        if (rows.Count == 0)
+            return 0;
+
+        var productName = string.IsNullOrWhiteSpace(rows[0].ProductName)
+            ? "Sản phẩm"
+            : rows[0].ProductName.Trim();
+        var customerIds = rows.Select(r => r.CustomerId).Distinct().ToList();
+
+        var deleted = await _context.CartItems
+            .Where(ci => ci.ProductId == productId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        foreach (var customerId in customerIds)
+        {
+            try
+            {
+                await _notifications.PublishAsync(
+                    customerId,
+                    nameof(NotificationType.System),
+                    "Sản phẩm đã được gỡ khỏi giỏ hàng",
+                    $"Sản phẩm \"{productName}\" không còn hiển thị trên cửa hàng và đã được tự động gỡ khỏi giỏ hàng của bạn.",
+                    "Product",
+                    productId,
+                    cancellationToken: cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Không gửi được thông báo gỡ giỏ cho khách {CustomerId}, sản phẩm {ProductId}",
+                    customerId,
+                    productId);
+            }
+        }
+
+        return deleted;
     }
 
     // ── Xem giỏ hàng ────────────────────────────────────────────────────────
