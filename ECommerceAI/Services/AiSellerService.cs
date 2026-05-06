@@ -1005,14 +1005,6 @@ public class AiSellerService : IAiSellerService
 
         var jsonExample = """
             {
-              "quality": {
-                "score": 8,
-                "rating": "good",
-                "hasGoodLighting": true,
-                "hasCleanBackground": true,
-                "isProductCentered": true,
-                "hasHighResolution": true
-              },
               "suggestedCategories": [
                 {"categoryId": 12, "categoryName": "Áo sơ mi", "categoryPath": "Thời trang > Nam > Áo sơ mi", "confidenceScore": 0.95}
               ],
@@ -1021,12 +1013,7 @@ public class AiSellerService : IAiSellerService
               ],
               "suggestedMaterials": [
                 {"materialId": "uuid-here", "materialName": "Cotton", "confidenceScore": 0.88}
-              ],
-              "improvements": [
-                "Nên chụp trên nền trắng để sản phẩm nổi bật hơn",
-                "Thêm ảnh chi tiết vải/texture"
-              ],
-              "summary": "Sản phẩm áo sơ mi nam chất lượng ảnh tốt, màu trắng, chất liệu cotton."
+              ]
             }
             """;
 
@@ -1052,13 +1039,9 @@ public class AiSellerService : IAiSellerService
             {jsonExample}
             
             Lưu ý:
-            - quality.score: 1-10 (1=rất kém, 10=hoàn hảo)
-            - quality.rating: "excellent"(9-10), "good"(7-8), "fair"(5-6), "poor"(1-4)
             - suggestedCategories: top 3 categories phù hợp nhất, dùng đúng ID từ danh sách
             - suggestedTags: tối đa 8 tags phù hợp, dùng đúng ID từ danh sách
             - suggestedMaterials: tối đa 3 materials, dùng đúng ID từ danh sách
-            - improvements: 2-4 gợi ý cải thiện ảnh bằng tiếng Việt
-            - summary: tóm tắt ngắn về sản phẩm trong ảnh bằng tiếng Việt
             """;
 
         try
@@ -1432,17 +1415,9 @@ public class AiSellerService : IAiSellerService
 
     private static AnalyzeImageResponseDto NormalizeAnalyzeImageResult(AnalyzeImageResponseDto result)
     {
-        result.Quality ??= new ImageQualityDto();
         result.SuggestedCategories ??= new List<CategorySuggestionItem>();
         result.SuggestedTags ??= new List<TagSuggestionItem>();
         result.SuggestedMaterials ??= new List<MaterialSuggestionItem>();
-        result.Improvements ??= new List<string>();
-        result.Summary ??= string.Empty;
-
-        result.Quality.Score = Math.Clamp(result.Quality.Score, 1, 10);
-        result.Quality.Rating = string.IsNullOrWhiteSpace(result.Quality.Rating)
-            ? "fair"
-            : result.Quality.Rating.Trim().ToLowerInvariant();
 
         result.SuggestedCategories = result.SuggestedCategories
             .Where(x => x.CategoryId > 0)
@@ -1462,18 +1437,6 @@ public class AiSellerService : IAiSellerService
             .Take(3)
             .ToList();
 
-        result.Improvements = result.Improvements
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Select(x => x.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(4)
-            .ToList();
-
-        if (result.Improvements.Count == 0)
-        {
-            result.Improvements.Add("Nên bổ sung ảnh rõ nét hơn để tăng độ tin cậy khi phân tích.");
-        }
-
         return result;
     }
 
@@ -1484,20 +1447,6 @@ public class AiSellerService : IAiSellerService
             type = "OBJECT",
             properties = new
             {
-                quality = new
-                {
-                    type = "OBJECT",
-                    properties = new
-                    {
-                        score = new { type = "INTEGER" },
-                        rating = new { type = "STRING", @enum = new[] { "excellent", "good", "fair", "poor" } },
-                        has_good_lighting = new { type = "BOOLEAN" },
-                        has_clean_background = new { type = "BOOLEAN" },
-                        is_product_centered = new { type = "BOOLEAN" },
-                        has_high_resolution = new { type = "BOOLEAN" }
-                    },
-                    required = new[] { "score", "rating", "has_good_lighting", "has_clean_background", "is_product_centered", "has_high_resolution" }
-                },
                 suggested_categories = new
                 {
                     type = "ARRAY",
@@ -1543,15 +1492,9 @@ public class AiSellerService : IAiSellerService
                         },
                         required = new[] { "material_id", "material_name", "confidence_score" }
                     }
-                },
-                improvements = new
-                {
-                    type = "ARRAY",
-                    items = new { type = "STRING" }
-                },
-                summary = new { type = "STRING" }
+                }
             },
-            required = new[] { "quality", "suggested_categories", "suggested_tags", "suggested_materials", "improvements", "summary" }
+            required = new[] { "suggested_categories", "suggested_tags", "suggested_materials" }
         };
     }
 

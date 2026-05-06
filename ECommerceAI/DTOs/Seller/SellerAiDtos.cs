@@ -132,28 +132,11 @@ public class AnalyzeImageRequestDto
 
 public class AnalyzeImageResponseDto
 {
-    public ImageQualityDto Quality { get; set; } = new();
     public List<CategorySuggestionItem> SuggestedCategories { get; set; } = new();
     public List<TagSuggestionItem> SuggestedTags { get; set; } = new();
     public List<MaterialSuggestionItem> SuggestedMaterials { get; set; } = new();
-    public List<string> Improvements { get; set; } = new();
-    public string Summary { get; set; } = string.Empty;
     public bool Success { get; set; }
     public string? ErrorMessage { get; set; }
-}
-
-public class ImageQualityDto
-{
-    /// <summary>Điểm chất lượng ảnh từ 1-10</summary>
-    public int Score { get; set; }
-
-    /// <summary>Đánh giá: excellent | good | fair | poor</summary>
-    public string Rating { get; set; } = string.Empty;
-
-    public bool HasGoodLighting { get; set; }
-    public bool HasCleanBackground { get; set; }
-    public bool IsProductCentered { get; set; }
-    public bool HasHighResolution { get; set; }
 }
 
 // ── Save Feedback ─────────────────────────────────────────────────────────────
