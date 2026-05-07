@@ -162,6 +162,32 @@ public class PaymentsController : ControllerBase
     }
 
     /// <summary>
+    /// Tạo URL thanh toán MoMo cho NHIỀU đơn hàng (multi-shop checkout)
+    /// </summary>
+    [HttpPost("momo/create-batch")]
+    [Authorize]
+    [EnableRateLimiting("PaymentCreatePerUser")]
+    public async Task<IActionResult> CreateMoMoBatchPayment([FromBody] CreateBatchPaymentDto dto)
+    {
+        var customerId = _userClaims.GetUserId();
+        if (customerId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _paymentService.CreateMoMoBatchPaymentAsync(
+            dto.OrderIds,
+            customerId.Value,
+            dto.ClientReturnSuccessUrl,
+            dto.ClientReturnFailureUrl,
+            dto.MoMoReturnUrlOverride,
+            dto.MoMoNotifyUrlOverride);
+
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// MoMo IPN callback - MoMo gọi về sau khi thanh toán
     /// </summary>
     [HttpPost("momo/ipn")]
