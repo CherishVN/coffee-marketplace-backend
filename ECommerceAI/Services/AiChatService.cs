@@ -221,6 +221,8 @@ public class AiChatService : IAiChatService
                 : "Mình đã nhận yêu cầu của bạn. Bạn mô tả thêm một chút để mình hỗ trợ chuẩn hơn nhé.";
         }
 
+        ApplyMultiVariantSelectionGate(message, products, parsed);
+
         // 7. Persist user + assistant rows; assistant row stores suggested products JSON for history UI
         var now = DateTime.UtcNow;
         var assistantRow = new AiChatMessage
@@ -858,6 +860,143 @@ public class AiChatService : IAiChatService
 
         var end2 = IndexOfMatchingJsonObjectEnd(s, idx);
         return end2.HasValue ? s.Substring(idx, end2.Value - idx + 1) : null;
+    }
+
+    /// <summary>
+    /// SP một dòng kết quả có ≥2 biến thể: không cho add_to_cart / product_to_add thiếu variant;
+    /// khớp variant từ câu user; chuẩn hoá reply nếu model vẫn nói "đã thêm giỏ" khi chưa đủ phân loại.
+    /// </summary>
+    private static void ApplyMultiVariantSelectionGate(string userMessage, List<ProductSuggestionDto> products, LlmParsedResponse parsed)
+    {
+        if (products.Count != 1) return;
+
+        var p = products[0];
+        var variants = p.Variants ?? new List<VariantSuggestionDto>();
+        if (variants.Count <= 1)
+        {
+            if (variants.Count == 1
+                && string.Equals(parsed.Intent, "add_to_cart", StringComparison.OrdinalIgnoreCase)
+                && parsed.ProductToAdd?.ProductId == p.Id
+                && !parsed.ProductToAdd.VariantId.HasValue)
+            {
+                parsed.ProductToAdd.VariantId = variants[0].Id;
+            }
+
+            return;
+        }
+
+        if (TryMatchVariantFromUserMessage(userMessage, p, out var matchedVariantId))
+        {
+            parsed.ProductToAdd ??= new ProductToAddDto { ProductId = p.Id, Quantity = 1 };
+            if (!parsed.ProductToAdd.ProductId.HasValue || parsed.ProductToAdd.ProductId == p.Id)
+            {
+                parsed.ProductToAdd.ProductId = p.Id;
+                parsed.ProductToAdd.VariantId = matchedVariantId;
+            }
+
+            return;
+        }
+
+        var pta = parsed.ProductToAdd;
+        var targetsThisProduct = pta?.ProductId == null || pta.ProductId == p.Id;
+        if (string.Equals(parsed.Intent, "add_to_cart", StringComparison.OrdinalIgnoreCase) && targetsThisProduct)
+        {
+            parsed.Intent = "product_search";
+            parsed.ProductToAdd = null;
+        }
+        else if (pta?.ProductId == p.Id && !pta.VariantId.HasValue)
+        {
+            parsed.ProductToAdd = null;
+        }
+
+        if (ReplyClaimsAddedToCart(parsed.Reply))
+            parsed.Reply = BuildAskVariantChoiceReply(p);
+        else if (!ReplyAlreadyPromptsVariantChoice(parsed.Reply) && !ReplyListsAllVariantNames(parsed.Reply, p))
+        {
+            var hint = BuildAskVariantChoiceReply(p);
+            var baseReply = (parsed.Reply ?? string.Empty).TrimEnd();
+            parsed.Reply = string.IsNullOrEmpty(baseReply) ? hint : $"{baseReply}\n\n{hint}";
+        }
+    }
+
+    private static bool TryMatchVariantFromUserMessage(string userMessage, ProductSuggestionDto product, out Guid variantId)
+    {
+        variantId = default;
+        var variants = product.Variants ?? new List<VariantSuggestionDto>();
+        if (variants.Count == 0) return false;
+
+        if (variants.Count == 1)
+        {
+            variantId = variants[0].Id;
+            return true;
+        }
+
+        var lower = userMessage.Trim().ToLowerInvariant();
+        foreach (var v in variants)
+        {
+            var vn = (v.VariantName ?? string.Empty).Trim().ToLowerInvariant();
+            if (vn.Length < 2) continue;
+
+            if (lower.Contains(vn))
+            {
+                variantId = v.Id;
+                return true;
+            }
+
+            var parts = vn.Split(new[] { ' ', '-', '–', '/', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                if (part.Length >= 3 && lower.Contains(part))
+                {
+                    variantId = v.Id;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ReplyClaimsAddedToCart(string? reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply)) return false;
+        var r = reply.Trim().ToLowerInvariant();
+        if (!r.Contains("giỏ")) return false;
+
+        return r.Contains("đã thêm")
+               || r.Contains("thêm vào")
+               || r.Contains("đã cho")
+               || r.Contains("vào giỏ")
+               || r.Contains("vào giỏ hàng");
+    }
+
+    private static bool ReplyAlreadyPromptsVariantChoice(string? reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply)) return false;
+        var r = reply.Trim().ToLowerInvariant();
+        if ((r.Contains("phân loại") || r.Contains("biến thể") || r.Contains("loại nào"))
+            && (r.Contains("chọn") || r.Contains("?") || r.Contains("bạn muốn")))
+            return true;
+
+        return r.Contains("bấm chọn") && r.Contains("thẻ");
+    }
+
+    private static bool ReplyListsAllVariantNames(string? reply, ProductSuggestionDto p)
+    {
+        if (string.IsNullOrWhiteSpace(reply)) return false;
+        var r = reply.Trim().ToLowerInvariant();
+        var names = (p.Variants ?? new List<VariantSuggestionDto>())
+            .Select(v => (v.VariantName ?? "").Trim().ToLowerInvariant())
+            .Where(n => n.Length >= 2)
+            .ToList();
+        if (names.Count < 2) return false;
+        return names.All(n => r.Contains(n));
+    }
+
+    private static string BuildAskVariantChoiceReply(ProductSuggestionDto p)
+    {
+        var names = string.Join(" · ", (p.Variants ?? new List<VariantSuggestionDto>()).Select(v => v.VariantName));
+        return $"«{p.Name}» đang có các phân loại: {names}. Bạn chọn giúp mình một phân loại (gõ đúng tên loại trong chat, hoặc bấm chọn trên thẻ sản phẩm bên dưới), mình sẽ thêm đúng món vào giỏ nhé.";
     }
 
     private static LlmParsedResponse? TryParseLlmJsonDocument(string json)
