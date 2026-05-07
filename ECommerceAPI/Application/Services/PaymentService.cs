@@ -758,6 +758,202 @@ public class PaymentService : IPaymentService
         return new CreatePaymentResponseDto { Success = false, Message = errorMsg };
     }
 
+        public async Task<CreatePaymentResponseDto> CreateMoMoBatchPaymentAsync(
+        List<Guid> orderIds,
+        Guid customerId,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? moMoReturnUrlOverride = null,
+        string? moMoNotifyUrlOverride = null)
+    {
+        if (orderIds == null || orderIds.Count == 0)
+            return new CreatePaymentResponseDto { Success = false, Message = "Không có đơn hàng nào" };
+
+        if (orderIds.Count == 1)
+            return await CreateMoMoPaymentAsync(orderIds[0], customerId, clientReturnSuccessUrl, clientReturnFailureUrl, moMoReturnUrlOverride, moMoNotifyUrlOverride);
+
+        var orders = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Where(o => orderIds.Contains(o.Id) && o.CustomerId == customerId)
+            .ToListAsync();
+
+        if (orders.Count != orderIds.Count)
+            return new CreatePaymentResponseDto { Success = false, Message = "Một hoặc nhiều đơn hàng không tồn tại" };
+
+        var nonPending = orders.FirstOrDefault(o => (OrderStatus)o.Status != OrderStatus.PendingPayment);
+        if (nonPending != null)
+            return new CreatePaymentResponseDto
+            {
+                Success = false,
+                Message = $"Đơn #{nonPending.OrderCode} không ở trạng thái chờ thanh toán"
+            };
+
+        var lockedProviders = await Task.WhenAll(orderIds.Select(async id => await GetLockedProviderForOrderAsync(id)));
+        foreach (var lockedProvider in lockedProviders)
+        {
+            if (!string.IsNullOrWhiteSpace(lockedProvider) && !string.Equals(lockedProvider, "MOMO", StringComparison.OrdinalIgnoreCase))
+            {
+                return new CreatePaymentResponseDto
+                {
+                    Success = false,
+                    Message = $"Một đơn hàng đã chọn cổng {lockedProvider}. Vui lòng thanh toán lại đúng phương thức đã chọn."
+                };
+            }
+        }
+
+        var paidOrderIds = await _context.Payments
+            .Where(p => orderIds.Contains(p.OrderId) && p.Status == (short)PaymentStatus.Paid)
+            .Select(p => p.OrderId)
+            .ToListAsync();
+
+        if (paidOrderIds.Any())
+            return new CreatePaymentResponseDto { Success = false, Message = "Một hoặc nhiều đơn hàng đã được thanh toán" };
+
+        var totalAmount = orders.Sum(o => o.Total);
+
+        var paymentIds = new List<Guid>();
+        foreach (var order in orders)
+        {
+            var payment = new Payment
+            {
+                Id = Guid.NewGuid(),
+                OrderId = order.Id,
+                Provider = "MOMO",
+                Amount = order.Total,
+                Currency = "VND",
+                Status = (short)PaymentStatus.Pending,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Payments.Add(payment);
+            paymentIds.Add(payment.Id);
+        }
+        await _context.SaveChangesAsync();
+
+        var primaryPaymentId = paymentIds.First();
+        var requestId = primaryPaymentId.ToString();
+        var momoOrderId = primaryPaymentId.ToString();
+        var orderCodes = string.Join(", ", orders.Select(o => o.OrderCode));
+        var orderInfo = $"Thanh toan {orders.Count} don hang: {orderCodes}";
+        var amount = ((long)totalAmount).ToString();
+        var extraData = string.Empty;
+
+        var returnUrl = _moMoSettings.ReturnUrl;
+        if (!string.IsNullOrWhiteSpace(moMoReturnUrlOverride)
+            && IsAllowedMoMoReturnUrlOverride(moMoReturnUrlOverride.Trim(), out var safeReturn)
+            && !string.IsNullOrEmpty(safeReturn))
+        {
+            returnUrl = safeReturn;
+        }
+
+        var notifyUrl = _moMoSettings.NotifyUrl;
+        if (!string.IsNullOrWhiteSpace(moMoNotifyUrlOverride)
+            && IsAllowedMoMoNotifyUrlOverride(moMoNotifyUrlOverride.Trim(), out var safeNotify)
+            && !string.IsNullOrEmpty(safeNotify))
+        {
+            notifyUrl = safeNotify;
+        }
+
+        var momoCacheOpts = new MemoryCacheEntryOptions().SetSlidingExpiration(TimeSpan.FromMinutes(15));
+        _memoryCache.Set($"MomoBatch_{momoOrderId}", paymentIds, momoCacheOpts);
+
+        if (IsAllowedClientReturnUrl(clientReturnSuccessUrl))
+            _memoryCache.Set($"MomoClientSuccess_{momoOrderId}", clientReturnSuccessUrl!.Trim(), momoCacheOpts);
+        if (IsAllowedClientReturnUrl(clientReturnFailureUrl))
+            _memoryCache.Set($"MomoClientFailure_{momoOrderId}", clientReturnFailureUrl!.Trim(), momoCacheOpts);
+
+        var rawSignature = $"accessKey={_moMoSettings.AccessKey}" +
+                           $"&amount={amount}" +
+                           $"&extraData={extraData}" +
+                           $"&ipnUrl={notifyUrl}" +
+                           $"&orderId={momoOrderId}" +
+                           $"&orderInfo={orderInfo}" +
+                           $"&partnerCode={_moMoSettings.PartnerCode}" +
+                           $"&redirectUrl={returnUrl}" +
+                           $"&requestId={requestId}" +
+                           $"&requestType={_moMoSettings.RequestType}";
+
+        var signature = HmacSHA256(_moMoSettings.SecretKey, rawSignature);
+
+        var requestBody = new
+        {
+            partnerCode = _moMoSettings.PartnerCode,
+            partnerName = "EComViet",
+            storeId = "EComVietStore",
+            requestId,
+            amount,
+            orderId = momoOrderId,
+            orderInfo,
+            redirectUrl = returnUrl,
+            ipnUrl = notifyUrl,
+            lang = "vi",
+            extraData,
+            requestType = _moMoSettings.RequestType,
+            signature
+        };
+
+        string responseBody;
+        try
+        {
+            var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+            using var response = await _httpClient.PostAsync(_moMoSettings.ApiUrl, content);
+            responseBody = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                await MarkPaymentCreationFailedAsync(paymentIds, $"MoMo trả về HTTP {(int)response.StatusCode}");
+                return new CreatePaymentResponseDto { Success = false, Message = $"MoMo trả về HTTP {(int)response.StatusCode}" };
+            }
+        }
+        catch (Exception)
+        {
+            await MarkPaymentCreationFailedAsync(paymentIds, "Không thể kết nối MoMo");
+            return new CreatePaymentResponseDto { Success = false, Message = "Không thể kết nối MoMo, vui lòng thử lại." };
+        }
+
+        JsonElement root;
+        try
+        {
+            using var doc = JsonDocument.Parse(responseBody);
+            root = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            await MarkPaymentCreationFailedAsync(paymentIds, "Phản hồi MoMo không hợp lệ");
+            return new CreatePaymentResponseDto { Success = false, Message = "Phản hồi từ MoMo không hợp lệ." };
+        }
+
+        if (root.TryGetProperty("resultCode", out var resultCodeProp) && resultCodeProp.GetInt32() == 0)
+        {
+            var payUrl = root.GetProperty("payUrl").GetString();
+            return new CreatePaymentResponseDto
+            {
+                Success = true,
+                PaymentUrl = payUrl,
+                PaymentId = primaryPaymentId,
+                Message = $"Tạo URL thanh toán MoMo cho {orders.Count} đơn hàng thành công"
+            };
+        }
+
+        var errorMsg = root.TryGetProperty("message", out var msg) ? msg.GetString() : "Lỗi tạo thanh toán MoMo";
+        await MarkPaymentCreationFailedAsync(paymentIds, errorMsg ?? "Lỗi tạo thanh toán MoMo");
+        return new CreatePaymentResponseDto { Success = false, Message = errorMsg };
+    }
+
+    private async Task MarkPaymentCreationFailedAsync(List<Guid> paymentIds, string reason)
+    {
+        var payments = await _context.Payments.Where(p => paymentIds.Contains(p.Id)).ToListAsync();
+        foreach (var payment in payments)
+        {
+            if (payment.Status == (short)PaymentStatus.Pending)
+            {
+                payment.Status = (short)PaymentStatus.Failed;
+                payment.PaidAt = DateTime.UtcNow;
+            }
+        }
+        await _context.SaveChangesAsync();
+    }
+
+
     private async Task MarkPaymentCreationFailedAsync(Guid paymentId, string reason)
     {
         var payment = await _context.Payments.FirstOrDefaultAsync(p => p.Id == paymentId);
@@ -832,27 +1028,52 @@ public class PaymentService : IPaymentService
             queryParams["transId"].ToString());
     }
 
-    private async Task<MoMoReturnDto> HandleMoMoPaymentStateAsync(Guid paymentId, int resultCode, string? message, string? providerRef)
+        private async Task<MoMoReturnDto> HandleMoMoPaymentStateAsync(Guid paymentId, int resultCode, string? message, string? providerRef)
     {
-        var payment = await _context.Payments
+        List<Guid> paymentIds;
+        if (_memoryCache.TryGetValue($"MomoBatch_{paymentId}", out List<Guid>? batchIds) && batchIds is { Count: > 0 })
+        {
+            paymentIds = batchIds;
+            _logger.LogInformation("[MoMo Return] Batch payment detected: {Count} payments", paymentIds.Count);
+        }
+        else
+        {
+            paymentIds = new List<Guid> { paymentId };
+        }
+
+        var payments = await _context.Payments
             .Include(p => p.Order)
                 .ThenInclude(o => o.OrderItems)
             .Include(p => p.Order)
+                .ThenInclude(o => o.Customer)
+            .Include(p => p.Order)
                 .ThenInclude(o => o.Shop)
-            .FirstOrDefaultAsync(p => p.Id == paymentId);
+            .Where(p => paymentIds.Contains(p.Id))
+            .ToListAsync();
 
-        if (payment == null)
-            return new MoMoReturnDto { Success = false, Message = "Không tìm thấy thanh toán", ResultCode = -1 };
-
-        if (payment.Status == (short)PaymentStatus.Paid)
+        if (payments.Count == 0)
         {
-            if (!payment.TransactionId.HasValue || !payment.Order.TransactionId.HasValue)
+            _logger.LogError("[MoMo Return] No payments found for IDs: {Ids}", string.Join(",", paymentIds));
+            return new MoMoReturnDto { Success = false, Message = "Không tìm thấy thanh toán", ResultCode = -1 };
+        }
+
+        var primaryPayment = payments.First();
+
+        if (payments.All(p => p.Status == (short)PaymentStatus.Paid))
+        {
+            if (!primaryPayment.TransactionId.HasValue || !primaryPayment.Order.TransactionId.HasValue)
             {
-                await EnsureTransactionLinkedAsync(
-                    payment,
-                    payment.Order,
-                    payment.ProviderRef,
-                    payment.PaidAt ?? DateTime.UtcNow);
+                foreach (var payment in payments)
+                {
+                    if (!payment.TransactionId.HasValue || !payment.Order.TransactionId.HasValue)
+                    {
+                        await EnsureTransactionLinkedAsync(
+                            payment,
+                            payment.Order,
+                            payment.ProviderRef,
+                            payment.PaidAt ?? DateTime.UtcNow);
+                    }
+                }
                 await _context.SaveChangesAsync();
             }
 
@@ -861,221 +1082,201 @@ public class PaymentService : IPaymentService
                 Success = true,
                 Message = "Đã xử lý trước đó",
                 ResultCode = 0,
-                OrderId = payment.OrderId,
-                OrderCode = payment.Order.OrderCode,
-                PaymentId = payment.Id,
-                Amount = payment.Amount
+                OrderId = primaryPayment.OrderId,
+                OrderCode = primaryPayment.Order.OrderCode,
+                PaymentId = primaryPayment.Id,
+                Amount = payments.Sum(p => p.Amount)
             };
         }
 
-        if (payment.Status != (short)PaymentStatus.Pending)
-        {
-            return new MoMoReturnDto
-            {
-                Success = false,
-                Message = "Giao dịch đã được xử lý ở trạng thái khác",
-                ResultCode = resultCode,
-                OrderId = payment.OrderId,
-                OrderCode = payment.Order.OrderCode,
-                PaymentId = payment.Id,
-                Amount = payment.Amount
-            };
-        }
-
-        var order = payment.Order;
-        var momoPreviousOrderStatus = order.Status;
+        decimal amount = payments.Sum(p => p.Amount);
 
         if (resultCode == 0)
         {
-            var rowsAffected = await _context.Payments
-                .Where(p => p.Id == payment.Id && p.Status == (short)PaymentStatus.Pending)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(p => p.Status, (short)PaymentStatus.Paid)
-                    .SetProperty(p => p.PaidAt, DateTime.UtcNow)
-                    .SetProperty(p => p.ProviderRef, providerRef));
-
-            if (rowsAffected == 0)
+            foreach (var payment in payments)
             {
-                return new MoMoReturnDto
+                if (payment.Status == (short)PaymentStatus.Paid) continue;
+
+                var rowsAffected = await _context.Payments
+                    .Where(p => p.Id == payment.Id && p.Status == (short)PaymentStatus.Pending)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(p => p.Status, (short)PaymentStatus.Paid)
+                        .SetProperty(p => p.PaidAt, DateTime.UtcNow)
+                        .SetProperty(p => p.ProviderRef, providerRef));
+
+                if (rowsAffected == 0)
                 {
-                    Success = false,
-                    Message = "Giao dịch đã được xử lý bởi luồng khác",
-                    ResultCode = resultCode,
-                    OrderId = payment.OrderId,
-                    OrderCode = payment.Order.OrderCode,
-                    PaymentId = payment.Id,
-                    Amount = payment.Amount
-                };
-            }
+                    _logger.LogWarning("[MoMo] Payment {PaymentId} đã được xử lý bởi luồng khác.", payment.Id);
+                    continue;
+                }
 
-            payment.Status = (short)PaymentStatus.Paid;
-            payment.PaidAt = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(providerRef))
-            {
+                payment.Status = (short)PaymentStatus.Paid;
+                payment.PaidAt = DateTime.UtcNow;
                 payment.ProviderRef = providerRef;
-            }
 
-            if ((OrderStatus)order.Status == OrderStatus.Cancelled)
-            {
-                _logger.LogWarning("[MoMo] Đơn {OrderId} đã bị hủy nhưng thanh toán thành công. Tiến hành hoàn tiền.", order.Id);
+                var order = payment.Order;
+                var momoPreviousOrderStatus = order.Status;
 
-                var orderCode = string.IsNullOrWhiteSpace(order.OrderCode) 
-                    ? NotificationFormatting.ShortEntityId(order.Id) 
-                    : order.OrderCode;
-
-                await _customerWallet.CreditRefundAsync(
-                    order.CustomerId,
-                    payment.Amount,
-                    "Order",
-                    order.Id,
-                    $"Hoàn tiền đơn #{orderCode} do thanh toán thành công nhưng đơn đã bị huỷ trước đó.");
-
-                await EnsureTransactionLinkedAsync(payment, order, providerRef, payment.PaidAt ?? DateTime.UtcNow);
-
-                await _notifications.PublishAsync(
-                    order.CustomerId,
-                    nameof(NotificationType.Payment),
-                    "Hoàn tiền thanh toán đơn bị hủy",
-                    $"Hệ thống đã nhận được {payment.Amount:N0} VND từ MoMo cho đơn #{orderCode}, nhưng đơn này đã bị hủy. Số tiền đã được hoàn vào ví của bạn.",
-                    "Order",
-                    order.Id,
-                    queueEmail: true);
-
-                return new MoMoReturnDto
+                if ((OrderStatus)order.Status == OrderStatus.Cancelled)
                 {
-                    Success = true,
-                    Message = "Thanh toán thành công nhưng đơn đã bị huỷ. Đã hoàn tiền.",
-                    ResultCode = 0,
-                    OrderId = order.Id,
-                    OrderCode = order.OrderCode,
-                    PaymentId = payment.Id,
-                    Amount = payment.Amount
-                };
-            }
+                    _logger.LogWarning("[MoMo] Đơn {OrderId} đã bị hủy nhưng thanh toán thành công. Tiến hành hoàn tiền.", order.Id);
 
-            var affectedOrders = await _context.Orders
-                .Where(o => o.Id == order.Id && o.Status == momoPreviousOrderStatus)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(o => o.Status, (short)OrderStatus.PendingConfirmation)
-                    .SetProperty(o => o.UpdatedAt, DateTime.UtcNow));
+                    var orderCode = string.IsNullOrWhiteSpace(order.OrderCode) 
+                        ? NotificationFormatting.ShortEntityId(order.Id) 
+                        : order.OrderCode;
 
-            if (affectedOrders > 0)
-            {
+                    await _customerWallet.CreditRefundAsync(
+                        order.CustomerId,
+                        payment.Amount,
+                        "Order",
+                        order.Id,
+                        $"Hoàn tiền đơn #{orderCode} do thanh toán thành công nhưng đơn đã bị huỷ trước đó.");
+
+                    await EnsureTransactionLinkedAsync(payment, order, providerRef, payment.PaidAt ?? DateTime.UtcNow);
+
+                    await _notifications.PublishAsync(
+                        order.CustomerId,
+                        nameof(NotificationType.Payment),
+                        "Hoàn tiền thanh toán đơn bị hủy",
+                        $"Hệ thống đã nhận được {payment.Amount:N0} VND từ MoMo cho đơn #{orderCode}, nhưng đơn này đã bị hủy. Số tiền đã được hoàn vào ví của bạn.",
+                        "Order",
+                        order.Id,
+                        queueEmail: true);
+
+                    continue;
+                }
+
+                var affectedOrders = await _context.Orders
+                    .Where(o => o.Id == order.Id && o.Status == momoPreviousOrderStatus)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(o => o.Status, (short)OrderStatus.PendingConfirmation)
+                        .SetProperty(o => o.UpdatedAt, DateTime.UtcNow));
+
+                if (affectedOrders == 0) continue;
                 order.Status = (short)OrderStatus.PendingConfirmation;
+                
                 _orderStatusHistory.AddEntry(
                     order.Id,
                     momoPreviousOrderStatus,
                     (short)OrderStatus.PendingConfirmation,
                     null,
                     "Thanh toán thành công (MoMo)");
-            }
 
-            foreach (var item in order.OrderItems)
-            {
-                await _context.Inventories
-                    .Where(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId)
-                    .ExecuteUpdateAsync(s => s
-                        .SetProperty(i => i.Quantity, i => i.Quantity - item.Quantity)
-                        .SetProperty(i => i.ReservedQuantity, i => i.ReservedQuantity - item.Quantity < 0 ? 0 : i.ReservedQuantity - item.Quantity)
-                        .SetProperty(i => i.UpdatedAt, DateTime.UtcNow));
-            }
+                foreach (var item in order.OrderItems)
+                {
+                    await _context.Inventories
+                        .Where(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(i => i.Quantity, i => i.Quantity - item.Quantity)
+                            .SetProperty(i => i.ReservedQuantity, i => i.ReservedQuantity - item.Quantity < 0 ? 0 : i.ReservedQuantity - item.Quantity)
+                            .SetProperty(i => i.UpdatedAt, DateTime.UtcNow));
+                }
 
-            await EnsureTransactionLinkedAsync(
-                payment,
-                order,
-                providerRef,
-                payment.PaidAt ?? DateTime.UtcNow);
+                await EnsureTransactionLinkedAsync(
+                    payment,
+                    order,
+                    providerRef,
+                    payment.PaidAt ?? DateTime.UtcNow);
 
-            var momoSettlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
+                var momoSettlement = await _sellerWalletSettlement.CreditSellerForPaidOrderAsync(order, payment);
 
-            await _context.SaveChangesAsync();
-
-            var momoOk = order.OrderCode;
-            await _notifications.PublishAsync(
-                order.CustomerId,
-                nameof(NotificationType.Payment),
-                "Thanh toán thành công",
-                $"Đơn #{momoOk} đã thanh toán MoMo thành công. Số tiền: {payment.Amount:N0} VND.",
-                "Order",
-                order.Id,
-                queueEmail: true);
-
-            await _notifications.PublishAsync(
-                order.Shop.OwnerId,
-                nameof(NotificationType.Order),
-                "Đơn hàng mới",
-                $"Đơn #{momoOk} vừa thanh toán thành công — vui lòng xử lý trong mục Đơn hàng.",
-                "Order",
-                order.Id,
-                queueEmail: false);
-
-            if (momoSettlement is { NetAmount: > 0 })
-            {
+                var momoOk = order.OrderCode;
                 await _notifications.PublishAsync(
-                    momoSettlement.SellerId,
+                    order.CustomerId,
                     nameof(NotificationType.Payment),
-                    "Nhận tiền từ đơn hàng",
-                    $"Đơn #{momoOk}: +{momoSettlement.NetAmount:N0} VND vào ví khả dụng (tiền hàng {momoSettlement.GrossSubtotal:N0} VND, phí sàn {momoSettlement.CommissionPercent}%: {momoSettlement.PlatformFeeAmount:N0} VND).",
+                    "Thanh toán thành công",
+                    $"Đơn #{momoOk} đã thanh toán MoMo thành công. Số tiền: {payment.Amount:N0} VND.",
                     "Order",
                     order.Id,
                     queueEmail: true);
+
+                await _notifications.PublishAsync(
+                    order.Shop.OwnerId,
+                    nameof(NotificationType.Order),
+                    "Đơn hàng mới",
+                    $"Đơn #{momoOk} vừa thanh toán thành công — vui lòng xử lý trong mục Đơn hàng.",
+                    "Order",
+                    order.Id,
+                    queueEmail: false);
+
+                if (momoSettlement is { NetAmount: > 0 })
+                {
+                    await _notifications.PublishAsync(
+                        momoSettlement.SellerId,
+                        nameof(NotificationType.Payment),
+                        "Nhận tiền từ đơn hàng",
+                        $"Đơn #{momoOk}: +{momoSettlement.NetAmount:N0} VND vào ví khả dụng (tiền hàng {momoSettlement.GrossSubtotal:N0} VND, phí sàn {momoSettlement.CommissionPercent}%: {momoSettlement.PlatformFeeAmount:N0} VND).",
+                        "Order",
+                        order.Id,
+                        queueEmail: true);
+                }
             }
 
-            _logger.LogInformation("[MoMo] Payment SUCCESS for OrderId: {OrderId}", order.Id);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("[MoMo Return] Payment SUCCESS for {Count} order(s)", payments.Count);
 
             return new MoMoReturnDto
             {
                 Success = true,
                 Message = "Thanh toán thành công",
                 ResultCode = 0,
-                OrderId = order.Id,
-                OrderCode = order.OrderCode,
-                PaymentId = payment.Id,
-                Amount = payment.Amount
+                OrderId = primaryPayment.OrderId,
+                OrderCode = primaryPayment.Order.OrderCode,
+                PaymentId = primaryPayment.Id,
+                Amount = amount
             };
         }
-
-        payment.Status = (short)PaymentStatus.Failed;
-        payment.PaidAt = DateTime.UtcNow;
-        if (!string.IsNullOrWhiteSpace(providerRef))
+        else
         {
-            payment.ProviderRef = providerRef;
+            foreach (var payment in payments)
+            {
+                if (payment.Status != (short)PaymentStatus.Pending) continue;
+
+                payment.Status = (short)PaymentStatus.Failed;
+                payment.PaidAt = DateTime.UtcNow;
+                if (!string.IsNullOrWhiteSpace(providerRef))
+                {
+                    payment.ProviderRef = providerRef;
+                }
+
+                var failOrder = payment.Order;
+                var previousFailStatus = failOrder.Status;
+                failOrder.Status = (short)OrderStatus.PendingPayment;
+                failOrder.UpdatedAt = DateTime.UtcNow;
+                _orderStatusHistory.AddEntry(
+                    failOrder.Id,
+                    previousFailStatus,
+                    (short)OrderStatus.PendingPayment,
+                    null,
+                    $"Thanh toán MoMo chưa hoàn tất (mã: {resultCode})");
+            }
+
+            await _context.SaveChangesAsync();
+
+            var firstOrder = primaryPayment.Order;
+            await _notifications.PublishAsync(
+                firstOrder.CustomerId,
+                nameof(NotificationType.Payment),
+                "Thanh toán MoMo chưa hoàn tất",
+                $"Thanh toán chưa thành công (mã: {resultCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeoutMinutes} phút.",
+                "Order",
+                firstOrder.Id,
+                queueEmail: true);
+
+            _logger.LogWarning("[MoMo Return] Payment NOT completed for {Count} order(s), Code: {Code}", payments.Count, resultCode);
+
+            return new MoMoReturnDto
+            {
+                Success = false,
+                Message = string.IsNullOrWhiteSpace(message) ? "Thanh toán chưa hoàn tất" : message,
+                ResultCode = resultCode,
+                OrderId = firstOrder.Id,
+                OrderCode = firstOrder.OrderCode,
+                PaymentId = primaryPayment.Id,
+                Amount = amount
+            };
         }
-
-        // Giữ đơn ở trạng thái chờ thanh toán để khách có thể thử lại.
-        order.Status = (short)OrderStatus.PendingPayment;
-        order.UpdatedAt = DateTime.UtcNow;
-        _orderStatusHistory.AddEntry(
-            order.Id,
-            momoPreviousOrderStatus,
-            (short)OrderStatus.PendingPayment,
-            null,
-            $"Thanh toán MoMo chưa hoàn tất (mã: {resultCode})");
-
-        await _context.SaveChangesAsync();
-
-        var momoFail = order.OrderCode;
-        await _notifications.PublishAsync(
-            order.CustomerId,
-            nameof(NotificationType.Payment),
-            "Thanh toán MoMo chưa hoàn tất",
-            $"Đơn #{momoFail} chưa thanh toán thành công (mã: {resultCode}). Bạn có thể thử lại trong vòng {PendingPaymentTimeoutMinutes} phút.",
-            "Order",
-            order.Id,
-            queueEmail: true);
-
-        _logger.LogWarning("[MoMo] Payment NOT completed for OrderId: {OrderId}, Code: {Code}", order.Id, resultCode);
-
-        return new MoMoReturnDto
-        {
-            Success = false,
-            Message = string.IsNullOrWhiteSpace(message) ? "Thanh toán chưa hoàn tất" : message,
-            ResultCode = resultCode,
-            OrderId = order.Id,
-            OrderCode = order.OrderCode,
-            PaymentId = payment.Id,
-            Amount = payment.Amount
-        };
     }
 
     public async Task<int> ExpireStalePendingPaymentsAsync(CancellationToken cancellationToken = default)

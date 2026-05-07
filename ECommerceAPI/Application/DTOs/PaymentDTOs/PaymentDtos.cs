@@ -38,6 +38,8 @@ public class CreateBatchPaymentDto
     public string? ClientReturnSuccessUrl { get; set; }
     public string? ClientReturnFailureUrl { get; set; }
     public string? VnPayReturnUrlOverride { get; set; }
+    public string? MoMoReturnUrlOverride { get; set; }
+    public string? MoMoNotifyUrlOverride { get; set; }
 }
 
 public class CreatePaymentResponseDto

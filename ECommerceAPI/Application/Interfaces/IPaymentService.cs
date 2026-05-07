@@ -30,6 +30,14 @@ public interface IPaymentService
         string? clientReturnFailureUrl = null,
         string? moMoReturnUrlOverride = null,
         string? moMoNotifyUrlOverride = null);
+
+    Task<CreatePaymentResponseDto> CreateMoMoBatchPaymentAsync(
+        List<Guid> orderIds,
+        Guid customerId,
+        string? clientReturnSuccessUrl = null,
+        string? clientReturnFailureUrl = null,
+        string? moMoReturnUrlOverride = null,
+        string? moMoNotifyUrlOverride = null);
     Task<MoMoReturnDto> ProcessMoMoIpnAsync(MoMoIpnRequest request);
     Task<MoMoReturnDto> ProcessMoMoReturnAsync(IQueryCollection queryParams);
     Task<int> ExpireStalePendingPaymentsAsync(CancellationToken cancellationToken = default);
