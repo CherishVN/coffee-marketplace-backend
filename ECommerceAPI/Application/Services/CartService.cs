@@ -387,6 +387,15 @@ public class CartService : ICartService
             }
 
             var shippingFee = shippingOption.ShippingFee;
+            if (shippingFee < 0)
+            {
+                return new CheckoutResponseDto
+                {
+                    Success = false,
+                    Message = "Phí vận chuyển không hợp lệ (không được âm)."
+                };
+            }
+
             var subtotal = shopGroup.Sum(ci => ci.UnitPrice * ci.Quantity);
             var total = subtotal + shippingFee;
 
