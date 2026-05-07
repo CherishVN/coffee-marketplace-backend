@@ -30,6 +30,7 @@ public class PaymentService : IPaymentService
     private readonly IMemoryCache _memoryCache;
     private readonly HttpClient _httpClient;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
+    private readonly ICustomerWalletService _customerWallet;
 
     public PaymentService(
         ApplicationDbContext context,
@@ -40,7 +41,8 @@ public class PaymentService : IPaymentService
         ISellerWalletSettlementService sellerWalletSettlement,
         IMemoryCache memoryCache,
         IHttpClientFactory httpClientFactory,
-        IOrderStatusHistoryService orderStatusHistory)
+        IOrderStatusHistoryService orderStatusHistory,
+        ICustomerWalletService customerWallet)
     {
         _context = context;
         _vnPaySettings = vnPaySettings.Value;
@@ -51,6 +53,7 @@ public class PaymentService : IPaymentService
         _memoryCache = memoryCache;
         _httpClient = httpClientFactory.CreateClient("MoMoGateway");
         _orderStatusHistory = orderStatusHistory;
+        _customerWallet = customerWallet;
     }
 
     private string VnPayHashSecret => (_vnPaySettings.HashSecret ?? string.Empty).Trim();
@@ -379,16 +382,68 @@ public class PaymentService : IPaymentService
             {
                 if (payment.Status == (short)PaymentStatus.Paid) continue; // idempotent
 
-                var order = payment.Order;
-                var previousOrderStatus = order.Status;
+                // 1. Áp dụng Row Lock bằng ExecuteUpdate để tránh Race Condition (nhân đôi giao dịch)
+                var rowsAffected = await _context.Payments
+                    .Where(p => p.Id == payment.Id && p.Status == (short)PaymentStatus.Pending)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(p => p.Status, (short)PaymentStatus.Paid)
+                        .SetProperty(p => p.PaidAt, DateTime.UtcNow)
+                        .SetProperty(p => p.ProviderRef, transactionNo));
 
+                if (rowsAffected == 0)
+                {
+                    _logger.LogWarning("[VNPay] Payment {PaymentId} đã được xử lý bởi luồng khác.", payment.Id);
+                    continue;
+                }
+
+                // Nạp lại dữ liệu payment để lấy PaidAt cập nhật
                 payment.Status = (short)PaymentStatus.Paid;
                 payment.PaidAt = DateTime.UtcNow;
                 payment.ProviderRef = transactionNo;
 
+                var order = payment.Order;
+                var previousOrderStatus = order.Status;
+
+                // 2. Chặn lỗi Ghost Order (Đơn hàng Xác Sống)
+                if ((OrderStatus)order.Status == OrderStatus.Cancelled)
+                {
+                    _logger.LogWarning("[VNPay] Đơn {OrderId} đã bị hủy nhưng lại thanh toán thành công. Tiến hành hoàn tiền.", order.Id);
+                    
+                    var orderCode = string.IsNullOrWhiteSpace(order.OrderCode) 
+                        ? NotificationFormatting.ShortEntityId(order.Id) 
+                        : order.OrderCode;
+                    
+                    await _customerWallet.CreditRefundAsync(
+                        order.CustomerId,
+                        payment.Amount,
+                        "Order",
+                        order.Id,
+                        $"Hoàn tiền đơn #{orderCode} do thanh toán thành công nhưng đơn đã bị huỷ trước đó.");
+
+                    await EnsureTransactionLinkedAsync(payment, order, transactionNo, payment.PaidAt ?? DateTime.UtcNow);
+                    
+                    await _notifications.PublishAsync(
+                        order.CustomerId,
+                        nameof(NotificationType.Payment),
+                        "Hoàn tiền thanh toán đơn bị hủy",
+                        $"Hệ thống đã nhận được {payment.Amount:N0} VND từ VNPay cho đơn #{orderCode}, nhưng đơn này đã bị hủy. Số tiền đã được hoàn vào ví của bạn.",
+                        "Order",
+                        order.Id,
+                        queueEmail: true);
+                        
+                    continue;
+                }
+
                 // Đã thanh toán → chờ shop xác nhận (PendingConfirmation), khi đó seller mới chuyển sang Confirmed.
+                var affectedOrders = await _context.Orders
+                    .Where(o => o.Id == order.Id && o.Status == previousOrderStatus)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(o => o.Status, (short)OrderStatus.PendingConfirmation)
+                        .SetProperty(o => o.UpdatedAt, DateTime.UtcNow));
+                
+                if (affectedOrders == 0) continue;
                 order.Status = (short)OrderStatus.PendingConfirmation;
-                order.UpdatedAt = DateTime.UtcNow;
+                
                 _orderStatusHistory.AddEntry(
                     order.Id,
                     previousOrderStatus,
@@ -399,16 +454,12 @@ public class PaymentService : IPaymentService
                 // Giảm tồn kho
                 foreach (var item in order.OrderItems)
                 {
-                    var inv = await _context.Inventories
-                        .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
-
-                    if (inv != null)
-                    {
-                        inv.Quantity -= item.Quantity;
-                        inv.ReservedQuantity -= item.Quantity;
-                        if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
-                        inv.UpdatedAt = DateTime.UtcNow;
-                    }
+                    await _context.Inventories
+                        .Where(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(i => i.Quantity, i => i.Quantity - item.Quantity)
+                            .SetProperty(i => i.ReservedQuantity, i => i.ReservedQuantity - item.Quantity < 0 ? 0 : i.ReservedQuantity - item.Quantity)
+                            .SetProperty(i => i.UpdatedAt, DateTime.UtcNow));
                 }
 
                 await EnsureTransactionLinkedAsync(
@@ -836,6 +887,27 @@ public class PaymentService : IPaymentService
 
         if (resultCode == 0)
         {
+            var rowsAffected = await _context.Payments
+                .Where(p => p.Id == payment.Id && p.Status == (short)PaymentStatus.Pending)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.Status, (short)PaymentStatus.Paid)
+                    .SetProperty(p => p.PaidAt, DateTime.UtcNow)
+                    .SetProperty(p => p.ProviderRef, providerRef));
+
+            if (rowsAffected == 0)
+            {
+                return new MoMoReturnDto
+                {
+                    Success = false,
+                    Message = "Giao dịch đã được xử lý bởi luồng khác",
+                    ResultCode = resultCode,
+                    OrderId = payment.OrderId,
+                    OrderCode = payment.Order.OrderCode,
+                    PaymentId = payment.Id,
+                    Amount = payment.Amount
+                };
+            }
+
             payment.Status = (short)PaymentStatus.Paid;
             payment.PaidAt = DateTime.UtcNow;
             if (!string.IsNullOrWhiteSpace(providerRef))
@@ -843,26 +915,69 @@ public class PaymentService : IPaymentService
                 payment.ProviderRef = providerRef;
             }
 
-            order.Status = (short)OrderStatus.PendingConfirmation;
-            order.UpdatedAt = DateTime.UtcNow;
-            _orderStatusHistory.AddEntry(
-                order.Id,
-                momoPreviousOrderStatus,
-                (short)OrderStatus.PendingConfirmation,
-                null,
-                "Thanh toán thành công (MoMo)");
+            if ((OrderStatus)order.Status == OrderStatus.Cancelled)
+            {
+                _logger.LogWarning("[MoMo] Đơn {OrderId} đã bị hủy nhưng thanh toán thành công. Tiến hành hoàn tiền.", order.Id);
+
+                var orderCode = string.IsNullOrWhiteSpace(order.OrderCode) 
+                    ? NotificationFormatting.ShortEntityId(order.Id) 
+                    : order.OrderCode;
+
+                await _customerWallet.CreditRefundAsync(
+                    order.CustomerId,
+                    payment.Amount,
+                    "Order",
+                    order.Id,
+                    $"Hoàn tiền đơn #{orderCode} do thanh toán thành công nhưng đơn đã bị huỷ trước đó.");
+
+                await EnsureTransactionLinkedAsync(payment, order, providerRef, payment.PaidAt ?? DateTime.UtcNow);
+
+                await _notifications.PublishAsync(
+                    order.CustomerId,
+                    nameof(NotificationType.Payment),
+                    "Hoàn tiền thanh toán đơn bị hủy",
+                    $"Hệ thống đã nhận được {payment.Amount:N0} VND từ MoMo cho đơn #{orderCode}, nhưng đơn này đã bị hủy. Số tiền đã được hoàn vào ví của bạn.",
+                    "Order",
+                    order.Id,
+                    queueEmail: true);
+
+                return new MoMoReturnDto
+                {
+                    Success = true,
+                    Message = "Thanh toán thành công nhưng đơn đã bị huỷ. Đã hoàn tiền.",
+                    ResultCode = 0,
+                    OrderId = order.Id,
+                    OrderCode = order.OrderCode,
+                    PaymentId = payment.Id,
+                    Amount = payment.Amount
+                };
+            }
+
+            var affectedOrders = await _context.Orders
+                .Where(o => o.Id == order.Id && o.Status == momoPreviousOrderStatus)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(o => o.Status, (short)OrderStatus.PendingConfirmation)
+                    .SetProperty(o => o.UpdatedAt, DateTime.UtcNow));
+
+            if (affectedOrders > 0)
+            {
+                order.Status = (short)OrderStatus.PendingConfirmation;
+                _orderStatusHistory.AddEntry(
+                    order.Id,
+                    momoPreviousOrderStatus,
+                    (short)OrderStatus.PendingConfirmation,
+                    null,
+                    "Thanh toán thành công (MoMo)");
+            }
 
             foreach (var item in order.OrderItems)
             {
-                var inv = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
-                if (inv != null)
-                {
-                    inv.Quantity -= item.Quantity;
-                    inv.ReservedQuantity -= item.Quantity;
-                    if (inv.ReservedQuantity < 0) inv.ReservedQuantity = 0;
-                    inv.UpdatedAt = DateTime.UtcNow;
-                }
+                await _context.Inventories
+                    .Where(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(i => i.Quantity, i => i.Quantity - item.Quantity)
+                        .SetProperty(i => i.ReservedQuantity, i => i.ReservedQuantity - item.Quantity < 0 ? 0 : i.ReservedQuantity - item.Quantity)
+                        .SetProperty(i => i.UpdatedAt, DateTime.UtcNow));
             }
 
             await EnsureTransactionLinkedAsync(
