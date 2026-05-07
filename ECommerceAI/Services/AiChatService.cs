@@ -191,12 +191,24 @@ public class AiChatService : IAiChatService
             }
         }
 
+        // Khách trả lời tiếp sau khi đã có thẻ SP (chọn phân loại / làm rõ) — câu ngắn thường không khớp AND search; khớp lại từ JSON gợi ý vừa lưu.
+        if (!products.Any())
+        {
+            var fromSession = TryMatchRecentSuggestedProducts(message, session.Messages);
+            if (fromSession.Count > 0)
+            {
+                products = fromSession;
+                if (string.IsNullOrWhiteSpace(parsed.SearchQuery))
+                    parsed.SearchQuery = ExtractProductKeyword(message);
+            }
+        }
+
         if (products.Any() && IsImageRequest(message))
         {
             parsed.Reply = "Mình đã lấy các mẫu có ảnh bên dưới, bạn tick sản phẩm muốn mua rồi bấm OK giúp mình nhé.";
         }
 
-        if (!products.Any() && IsLikelyProductRequest(message))
+        if (!products.Any() && IsLikelyProductRequest(message) && !IsCheckoutOrOrderOnlyMessage(message))
         {
             parsed.Reply =
                 "Mình chưa tìm thấy sản phẩm phù hợp trong kho local brand hiện tại. Bạn thử mô tả rõ hơn (tên sản phẩm, ngành hàng, mức giá, chất liệu/thuộc tính, khu vực hoặc thương hiệu) để mình lọc chính xác hơn nhé.";
@@ -365,7 +377,7 @@ public class AiChatService : IAiChatService
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
-    /// <summary>Name, category, or tag only — no description (aligns with storefront; avoids SEO keyword spam).</summary>
+    /// <summary>Name, category, tag, hoặc tên biến thể (size/hương vị…) — không dùng mô tả dài.</summary>
     private static IQueryable<Product> WhereProductMatchesToken(IQueryable<Product> q, string tokenLower) =>
         q.Where(p =>
             p.Name.ToLower().Contains(tokenLower)
@@ -374,7 +386,8 @@ public class AiChatService : IAiChatService
                  p.Category.Slug.ToLower().Contains(tokenLower)))
             || p.ProductTags.Any(pt =>
                 pt.Tag.Name.ToLower().Contains(tokenLower) ||
-                pt.Tag.Slug.ToLower().Contains(tokenLower)));
+                pt.Tag.Slug.ToLower().Contains(tokenLower))
+            || p.Variants.Any(v => v.IsActive && v.VariantName.ToLower().Contains(tokenLower)));
 
     /// <summary>
     /// Token quá rộng: OR trên các token này khiến trà/túi… (danh mục chứa "đặc sản") lọt vào câu hỏi bánh kẹo.
@@ -394,7 +407,7 @@ public class AiChatService : IAiChatService
     {
         var meaningful = ToMeaningfulSearchTokens(normalizedTokens);
 
-        // ≥2 token cụ thể: AND — SP phải khớp tất cả (tên/danh mục/tag), tránh lẫn ngành hàng.
+        // ≥2 token cụ thể: AND — SP phải khớp tất cả (tên/danh mục/tag/biến thể), tránh lẫn ngành hàng.
         if (meaningful.Count >= 2)
         {
             foreach (var token in meaningful.Take(8))
@@ -409,6 +422,24 @@ public class AiChatService : IAiChatService
         var phrase = rawQuery.Trim().ToLowerInvariant();
         return string.IsNullOrEmpty(phrase) ? dbQuery : WhereProductMatchesToken(dbQuery, phrase);
     }
+
+    /// <summary>Sản phẩm đang bán + ảnh/danh mục/biến thể, lọc theo cùng quy tắc token như <see cref="SearchProductsAsync"/>.</summary>
+    private IQueryable<Product> GetFilteredProductsQuery(string searchText)
+    {
+        var dbQuery = _context.Products
+            .Include(p => p.Variants.Where(v => v.IsActive))
+            .Include(p => p.Images)
+            .Include(p => p.Category)
+            .Where(p => p.Status == 1);
+
+        var normalizedTokens = NormalizeSearchTokens(searchText);
+        if (normalizedTokens.Count > 0)
+            return ApplySearchTokensToQuery(dbQuery, normalizedTokens, searchText);
+
+        var phrase = searchText.Trim().ToLowerInvariant();
+        return string.IsNullOrEmpty(phrase) ? dbQuery : WhereProductMatchesToken(dbQuery, phrase);
+    }
+
     private async Task<string> BuildProductContextAsync(string userMessage, IEnumerable<AiChatMessage>? history = null)
     {
         var keyword = ExtractProductKeyword(userMessage);
@@ -424,14 +455,7 @@ public class AiChatService : IAiChatService
 
         var maxPrice = ExtractMaxPrice(userMessage);
 
-        var kw = keyword.ToLower();
-        var query = WhereProductMatchesToken(
-                _context.Products
-                    .Include(p => p.Variants)
-                    .Include(p => p.Images)
-                    .Include(p => p.Category),
-                kw)
-            .Where(p => p.Status == 1);
+        var query = GetFilteredProductsQuery(keyword);
 
         if (maxPrice.HasValue)
             query = query.Where(p =>
@@ -464,7 +488,8 @@ public class AiChatService : IAiChatService
         var shoppingSignals = new[]
         {
             "mua", "tìm", "gợi ý", "đề xuất", "cho tôi", "xem", "mẫu", "ảnh",
-            "giá", "bao nhiêu", "thương hiệu", "shop", "sản phẩm", "local brand"
+            "giá", "bao nhiêu", "thương hiệu", "shop", "sản phẩm", "local brand",
+            "loại", "chọn", "phân", "đơn", "tạo", "checkout", "chốt", "nhờ", "giao", "size",
         };
         if (shoppingSignals.Any(s => lower.Contains(s))) return true;
 
@@ -534,6 +559,73 @@ public class AiChatService : IAiChatService
             .ToList();
     }
 
+    /// <summary>
+    /// Tin nhắn chỉ nhắm checkout / tạo đơn — không được ghi đè bằng reply "không tìm thấy sản phẩm".
+    /// </summary>
+    private static bool IsCheckoutOrOrderOnlyMessage(string message)
+    {
+        var lower = message.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(lower)) return false;
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            lower,
+            @"\b(tạo\s*đơn|đặt\s*đơn|checkout|thanh\s*toán|chốt\s*đơn|mua\s*luôn|đặt\s*hàng)\b");
+    }
+
+    /// <summary>
+    /// Khớp tin nhắn tiếp theo với gợi ý SP vừa lưu (chọn phân loại / trả lời ngắn sau thẻ sản phẩm).
+    /// </summary>
+    private static List<ProductSuggestionDto> TryMatchRecentSuggestedProducts(string message, IEnumerable<AiChatMessage> messages)
+    {
+        var result = new List<ProductSuggestionDto>();
+        if (string.IsNullOrWhiteSpace(message)) return result;
+
+        var lower = message.Trim().ToLowerInvariant();
+
+        foreach (var msg in messages
+                     .Where(m => string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                                 && !string.IsNullOrWhiteSpace(m.SuggestedProductsJson))
+                     .OrderByDescending(m => m.CreatedAt ?? DateTime.MinValue)
+                     .ThenByDescending(m => m.Id))
+        {
+            List<ProductSuggestionDto>? list;
+            try
+            {
+                list = JsonSerializer.Deserialize<List<ProductSuggestionDto>>(msg.SuggestedProductsJson!, ProductJsonOptions);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (list is not { Count: > 0 }) continue;
+
+            var seen = new HashSet<Guid>();
+            foreach (var p in list)
+            {
+                if (p.Id == Guid.Empty || seen.Contains(p.Id)) continue;
+
+                var pName = (p.Name ?? string.Empty).Trim().ToLowerInvariant();
+                var nameHit = pName.Length >= 3 && lower.Contains(pName);
+                var variantHit = p.Variants?.Any(v =>
+                {
+                    var vn = (v.VariantName ?? string.Empty).Trim().ToLowerInvariant();
+                    return vn.Length >= 2 && lower.Contains(vn);
+                }) ?? false;
+
+                if (nameHit || variantHit)
+                {
+                    seen.Add(p.Id);
+                    result.Add(p);
+                }
+            }
+
+            if (result.Count > 0)
+                break;
+        }
+
+        return result;
+    }
+
     /// <summary>Giá hiển thị trong chat: thấp nhất giữa base và variant đang bán.</summary>
     private static decimal GetMinCustomerFacingPrice(Product p)
     {
@@ -581,7 +673,9 @@ public class AiChatService : IAiChatService
             "giúp", "với", "đi", "sản", "phẩm", "sp",
             // Tính từ mô tả không phải tên sản phẩm
             "đẹp", "xấu", "tốt", "rẻ", "mắc", "hot", "mới", "cũ", "ngon", "chất",
-            "đỉnh", "xịn", "sang", "trẻ", "hợp", "thời", "thượng", "lưu"
+            "đỉnh", "xịn", "sang", "trẻ", "hợp", "thời", "thượng", "lưu",
+            // Hội thoại / xưng hô — không phải từ khóa sản phẩm (tránh AND search lỗi)
+            "loại", "kiểu", "hàng", "bạn", "dạ", "vâng", "nhờ", "giùm", "lấy", "luôn", "ơi",
         };
 
         var words = message.ToLower()
@@ -627,21 +721,7 @@ public class AiChatService : IAiChatService
 
     private async Task<List<ProductSuggestionDto>> SearchProductsAsync(string query, decimal? maxPrice = null)
     {
-        var normalizedTokens = NormalizeSearchTokens(query);
-
-        var dbQuery = _context.Products
-            .Include(p => p.Variants.Where(v => v.IsActive))
-            .Include(p => p.Images)
-            .Include(p => p.Category)
-            .Where(p => p.Status == 1);
-
-        if (normalizedTokens.Count > 0)
-            dbQuery = ApplySearchTokensToQuery(dbQuery, normalizedTokens, query);
-        else
-        {
-            var lowerQuery = query.ToLower().Trim();
-            dbQuery = WhereProductMatchesToken(dbQuery, lowerQuery);
-        }
+        var dbQuery = GetFilteredProductsQuery(query);
 
         if (maxPrice.HasValue)
             dbQuery = dbQuery.Where(p =>
@@ -681,7 +761,8 @@ public class AiChatService : IAiChatService
             "dưới", "trên", "tầm", "khoảng", "quanh", "tối", "đa", "đến", "lên",
             "max", "min", "under", "below", "above", "around",
             "nghìn", "ngàn", "triệu", "trăm", "đồng", "vnđ", "vnd",
-            "đặc", "sản"
+            "đặc", "sản",
+            "loại", "kiểu", "hàng", "bạn", "dạ", "vâng", "nhờ", "giùm", "lấy", "luôn", "ơi",
         };
 
         return query
@@ -695,21 +776,97 @@ public class AiChatService : IAiChatService
             .ToList();
     }
 
-    private static LlmParsedResponse ParseLlmResponse(string raw)
+    private static string TrimMarkdownCodeFence(string raw)
+    {
+        var json = raw.Trim();
+        if (json.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
+            json = json[7..].Trim();
+        if (json.StartsWith("```"))
+            json = json[3..].Trim();
+        if (json.EndsWith("```"))
+            json = json[..^3].Trim();
+        return json;
+    }
+
+    /// <summary>
+    /// Tìm vị trí <c>}</c> đóng cặp với <c>{</c> tại <paramref name="start"/> (bỏ qua chuỗi trong dấu ngoặc kép).
+    /// </summary>
+    private static int? IndexOfMatchingJsonObjectEnd(string s, int start)
+    {
+        if (start < 0 || start >= s.Length || s[start] != '{')
+            return null;
+
+        var depth = 0;
+        var inString = false;
+        var escape = false;
+        for (var i = start; i < s.Length; i++)
+        {
+            var c = s[i];
+            if (escape)
+            {
+                escape = false;
+                continue;
+            }
+
+            if (c == '\\' && inString)
+            {
+                escape = true;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString)
+                continue;
+
+            if (c == '{') depth++;
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                    return i;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Gemini đôi khi trả prose rồi mới tới JSON — cô lập object JSON đầu tiên để parse.
+    /// </summary>
+    private static string? TryIsolateFirstJsonObject(string trimmedAfterFence)
+    {
+        if (string.IsNullOrWhiteSpace(trimmedAfterFence))
+            return null;
+
+        var s = trimmedAfterFence;
+        if (s.StartsWith('{'))
+        {
+            var end = IndexOfMatchingJsonObjectEnd(s, 0);
+            if (!end.HasValue)
+                return s;
+            return end.Value < s.Length - 1 ? s[..(end.Value + 1)] : s;
+        }
+
+        var idx = s.IndexOf('{');
+        if (idx < 0)
+            return null;
+
+        var end2 = IndexOfMatchingJsonObjectEnd(s, idx);
+        return end2.HasValue ? s.Substring(idx, end2.Value - idx + 1) : null;
+    }
+
+    private static LlmParsedResponse? TryParseLlmJsonDocument(string json)
     {
         try
         {
-            // Làm sạch response (xóa markdown code block nếu có)
-            var json = raw.Trim();
-            if (json.StartsWith("```json")) json = json[7..];
-            if (json.StartsWith("```")) json = json[3..];
-            if (json.EndsWith("```")) json = json[..^3];
-            json = json.Trim();
-
-            var doc = JsonDocument.Parse(json);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            // Parse product_to_add nếu có
             ProductToAddDto? productToAdd = null;
             if (root.TryGetProperty("product_to_add", out var pta) && pta.ValueKind == JsonValueKind.Object)
             {
@@ -719,24 +876,61 @@ public class AiChatService : IAiChatService
                         ? (Guid.TryParse(pid.GetString(), out var g1) ? g1 : null) : null,
                     VariantId = pta.TryGetProperty("variant_id", out var vid) && vid.ValueKind == JsonValueKind.String
                         ? (Guid.TryParse(vid.GetString(), out var g2) ? g2 : null) : null,
-                    Quantity = pta.TryGetProperty("quantity", out var qty) ? qty.GetInt32() : 1
+                    Quantity = pta.TryGetProperty("quantity", out var qty) && qty.ValueKind == JsonValueKind.Number
+                        ? qty.GetInt32()
+                        : 1
                 };
             }
 
             return new LlmParsedResponse
             {
-                Reply = root.TryGetProperty("reply", out var reply) ? reply.GetString() ?? "" : raw,
-                Intent = root.TryGetProperty("intent", out var intent) ? intent.GetString() ?? "general" : "general",
-                SearchQuery = root.TryGetProperty("search_query", out var sq) ? sq.GetString() : null,
-                NeedsConfirmation = root.TryGetProperty("needs_confirmation", out var nc) && nc.GetBoolean(),
+                Reply = root.TryGetProperty("reply", out var reply) && reply.ValueKind == JsonValueKind.String
+                    ? reply.GetString() ?? ""
+                    : json,
+                Intent = root.TryGetProperty("intent", out var intent) && intent.ValueKind == JsonValueKind.String
+                    ? intent.GetString() ?? "general"
+                    : "general",
+                SearchQuery = root.TryGetProperty("search_query", out var sq) && sq.ValueKind == JsonValueKind.String
+                    ? sq.GetString()
+                    : null,
+                NeedsConfirmation = root.TryGetProperty("needs_confirmation", out var nc) && nc.ValueKind == JsonValueKind.True,
                 ProductToAdd = productToAdd
             };
         }
         catch
         {
-            // Nếu LLM không trả về JSON hợp lệ, dùng raw text
-            return new LlmParsedResponse { Reply = raw, Intent = "general" };
+            return null;
         }
+    }
+
+    private static string TakeProseBeforeFirstJsonLine(string trimmed)
+    {
+        var idx = trimmed.IndexOf("\n{", StringComparison.Ordinal);
+        if (idx <= 0)
+            return trimmed;
+        return trimmed[..idx].TrimEnd();
+    }
+
+    private static LlmParsedResponse ParseLlmResponse(string raw)
+    {
+        var cleared = TrimMarkdownCodeFence(raw);
+        var isolated = TryIsolateFirstJsonObject(cleared);
+        if (isolated != null)
+        {
+            var parsed = TryParseLlmJsonDocument(isolated);
+            if (parsed != null)
+                return parsed;
+        }
+
+        var fallbackDoc = TryParseLlmJsonDocument(cleared);
+        if (fallbackDoc != null)
+            return fallbackDoc;
+
+        return new LlmParsedResponse
+        {
+            Reply = TakeProseBeforeFirstJsonLine(cleared),
+            Intent = "general"
+        };
     }
 
     private static List<ProductSuggestionDto>? DeserializeSuggestedProducts(string? json)
