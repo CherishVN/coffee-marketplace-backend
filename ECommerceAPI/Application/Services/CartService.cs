@@ -272,7 +272,12 @@ public class CartService : ICartService
     // ── Checkout (tạo đơn hàng từ giỏ) ──────────────────────────────────────
     public async Task<CheckoutResponseDto> CheckoutAsync(Guid customerId, CheckoutDto dto)
     {
-        // 1. Lấy cart với đầy đủ thông tin
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+
+            // 1. Lấy cart với đầy đủ thông tin
         var cart = await _context.Carts
             .Include(c => c.CartItems)
                 .ThenInclude(ci => ci.Product)
@@ -347,6 +352,7 @@ public class CartService : ICartService
         if (priceChanged)
         {
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
             return new CheckoutResponseDto
             {
                 Success = false,
@@ -448,13 +454,21 @@ public class CartService : ICartService
                     CreatedAt = DateTime.UtcNow
                 });
 
-                // Cộng reserved_quantity để giữ hàng
-                var inv = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.ProductId == ci.ProductId && i.VariantId == ci.VariantId);
-                if (inv != null)
+                // Cộng reserved_quantity để giữ hàng (Atomic/Row-level lock)
+                var rowsAffected = await _context.Inventories
+                    .Where(i => i.ProductId == ci.ProductId && i.VariantId == ci.VariantId && (i.Quantity - i.ReservedQuantity) >= ci.Quantity)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(i => i.ReservedQuantity, i => i.ReservedQuantity + ci.Quantity)
+                        .SetProperty(i => i.UpdatedAt, DateTime.UtcNow));
+
+                if (rowsAffected == 0)
                 {
-                    inv.ReservedQuantity += ci.Quantity;
-                    inv.UpdatedAt = DateTime.UtcNow;
+                    await transaction.RollbackAsync();
+                    return new CheckoutResponseDto
+                    {
+                        Success = false,
+                        Message = $"Sản phẩm '{ci.ProductName}' không đủ tồn kho lúc thanh toán. Vui lòng thử lại."
+                    };
                 }
             }
 
@@ -482,14 +496,16 @@ public class CartService : ICartService
         cart.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return new CheckoutResponseDto
         {
             Success = true,
-            Message = $"Đặt hàng thành công! Tạo {orderIds.Count} đơn hàng.",
+            Message = "Đặt hàng thành công",
             OrderIds = orderIds,
             TotalAmount = totalAmount
         };
+        });
     }
 
     // ── Private helper ───────────────────────────────────────────────────────
