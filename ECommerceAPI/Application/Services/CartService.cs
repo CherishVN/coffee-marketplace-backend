@@ -293,9 +293,44 @@ public class CartService : ICartService
         if (address == null)
             return new CheckoutResponseDto { Success = false, Message = "Địa chỉ giao hàng không hợp lệ" };
 
-        // 3. Kiểm tra tồn kho toàn bộ
+        // 3. Kiểm tra tính hợp lệ của sản phẩm, giá cả và tồn kho
+        bool priceChanged = false;
+
         foreach (var item in cart.CartItems)
         {
+            // Kiểm tra trạng thái sản phẩm
+            if (item.Product == null || item.Product.Status != 1)
+            {
+                return new CheckoutResponseDto
+                {
+                    Success = false,
+                    Message = $"Sản phẩm '{item.ProductName}' đã ngừng bán hoặc không tồn tại."
+                };
+            }
+
+            // Kiểm tra trạng thái phân loại (Variant)
+            if (item.VariantId.HasValue && (item.Variant == null || !item.Variant.IsActive))
+            {
+                return new CheckoutResponseDto
+                {
+                    Success = false,
+                    Message = $"Phân loại của sản phẩm '{item.ProductName}' đã ngừng bán."
+                };
+            }
+
+            // Đồng bộ giá tiền hiện tại (Real-time Price)
+            var currentPrice = item.VariantId.HasValue && item.Variant != null 
+                ? item.Variant.Price 
+                : item.Product.BasePrice;
+
+            if (item.UnitPrice != currentPrice)
+            {
+                item.UnitPrice = currentPrice;
+                item.UpdatedAt = DateTime.UtcNow;
+                priceChanged = true;
+            }
+
+            // Kiểm tra tồn kho
             var inv = await _context.Inventories
                 .FirstOrDefaultAsync(i => i.ProductId == item.ProductId && i.VariantId == item.VariantId);
 
@@ -304,8 +339,19 @@ public class CartService : ICartService
                 return new CheckoutResponseDto
                 {
                     Success = false,
-                    Message = $"Sản phẩm '{item.ProductName}' không đủ hàng (còn {available})"
+                    Message = $"Sản phẩm '{item.ProductName}' không đủ hàng (còn {available})."
                 };
+        }
+
+        // Chặn thanh toán nếu giá đã thay đổi, yêu cầu người dùng kiểm tra lại giỏ hàng
+        if (priceChanged)
+        {
+            await _context.SaveChangesAsync();
+            return new CheckoutResponseDto
+            {
+                Success = false,
+                Message = "Giá của một số sản phẩm đã thay đổi kể từ lúc bạn thêm vào giỏ. Hệ thống đã cập nhật lại giá mới, vui lòng kiểm tra lại giỏ hàng trước khi thanh toán."
+            };
         }
 
         var itemsByShop = cart.CartItems
