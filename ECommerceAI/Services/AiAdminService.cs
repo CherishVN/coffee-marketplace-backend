@@ -225,7 +225,7 @@ public class AiAdminService : IAiAdminService
         //              3=Processing, 4=Shipping, 5=Delivered, 6=Completed, 7=Cancelled, 8=Refunded
         // Doanh thu thực = chỉ Completed(6) — khách đã xác nhận nhận hàng
         // Delivered(5) = seller xác nhận giao, chưa tính doanh thu
-        // Cancelled = 7
+        // Cancelled = 7 
         return reportType.ToLower() switch
         {
             "sales" => new
