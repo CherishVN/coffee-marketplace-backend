@@ -320,7 +320,7 @@ public class CartService : ICartService
 
             // Đồng bộ giá tiền hiện tại (Real-time Price)
             var currentPrice = item.VariantId.HasValue && item.Variant != null 
-                ? item.Variant.Price 
+                ? item.Variant.Price ?? item.Product.BasePrice 
                 : item.Product.BasePrice;
 
             if (item.UnitPrice != currentPrice)
