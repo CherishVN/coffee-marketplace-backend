@@ -223,7 +223,6 @@ public class PaymentService : IPaymentService
         // Tính tổng tiền
         var totalAmount = orders.Sum(o => o.Total);
 
-        // Tạo Payment record cho TỪNG order
         var paymentIds = new List<Guid>();
         foreach (var order in orders)
         {
@@ -248,6 +247,11 @@ public class PaymentService : IPaymentService
 
         // Cache: txnRef → List<Guid> paymentIds (batch)
         _memoryCache.Set($"TxnRef_Batch_{txnRef}", paymentIds, txnSliding);
+
+        // Persist ProviderRef = "pending:{txnRef}" để DB fallback khi cache miss (khác server/instance)
+        await _context.Payments
+            .Where(p => paymentIds.Contains(p.Id))
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.ProviderRef, $"pending:{txnRef}"));
 
         if (IsAllowedClientReturnUrl(clientReturnSuccessUrl))
             _memoryCache.Set($"VnpayClientSuccess_{txnRef}", clientReturnSuccessUrl!.Trim(), txnSliding);
@@ -323,21 +327,38 @@ public class PaymentService : IPaymentService
             return new VNPayReturnDto { Success = false, Message = "Chữ ký không hợp lệ", ResponseCode = "97" };
         }
 
-        // Lấy PaymentId(s) từ cache — batch trước, fallback single
+        // Lấy PaymentId(s): cache batch → cache single → DB fallback (ProviderRef)
         List<Guid> paymentIds;
         if (_memoryCache.TryGetValue($"TxnRef_Batch_{txnRef}", out List<Guid>? batchIds) && batchIds is { Count: > 0 })
         {
             paymentIds = batchIds;
-            _logger.LogInformation("[VNPay Return] Batch payment detected: {Count} payments", paymentIds.Count);
+            _logger.LogInformation("[VNPay Return] Batch payment detected via cache: {Count} payments", paymentIds.Count);
         }
         else if (_memoryCache.TryGetValue($"TxnRef_{txnRef}", out Guid singleId))
         {
             paymentIds = new List<Guid> { singleId };
+            _logger.LogInformation("[VNPay Return] Single payment detected via cache: {PaymentId}", singleId);
         }
         else
         {
-            _logger.LogError("[VNPay Return] No matching payment for TxnRef: {TxnRef}", txnRef);
-            return new VNPayReturnDto { Success = false, Message = "Không tìm thấy giao dịch", ResponseCode = "01" };
+            // DB fallback: instance xử lý return khác instance tạo payment (Cloud Run) → cache miss.
+            // Dùng ProviderRef = "pending:{txnRef}" được ghi vào DB lúc tạo payment.
+            var pendingRef = $"pending:{txnRef}";
+            var dbPaymentIds = await _context.Payments
+                .Where(p => p.ProviderRef == pendingRef && p.Status == (short)PaymentStatus.Pending)
+                .Select(p => p.Id)
+                .ToListAsync();
+
+            if (dbPaymentIds.Count > 0)
+            {
+                paymentIds = dbPaymentIds;
+                _logger.LogInformation("[VNPay Return] Payment(s) recovered from DB via ProviderRef: {Count}, TxnRef={TxnRef}", paymentIds.Count, txnRef);
+            }
+            else
+            {
+                _logger.LogError("[VNPay Return] No matching payment for TxnRef: {TxnRef}", txnRef);
+                return new VNPayReturnDto { Success = false, Message = "Không tìm thấy giao dịch", ResponseCode = "01" };
+            }
         }
 
         // Lấy tất cả Payments + Orders
@@ -788,9 +809,9 @@ public class PaymentService : IPaymentService
                 Message = $"Đơn #{nonPending.OrderCode} không ở trạng thái chờ thanh toán"
             };
 
-        var lockedProviders = await Task.WhenAll(orderIds.Select(async id => await GetLockedProviderForOrderAsync(id)));
-        foreach (var lockedProvider in lockedProviders)
+        foreach (var id in orderIds)
         {
+            var lockedProvider = await GetLockedProviderForOrderAsync(id);
             if (!string.IsNullOrWhiteSpace(lockedProvider) && !string.Equals(lockedProvider, "MOMO", StringComparison.OrdinalIgnoreCase))
             {
                 return new CreatePaymentResponseDto
@@ -811,25 +832,29 @@ public class PaymentService : IPaymentService
 
         var totalAmount = orders.Sum(o => o.Total);
 
+        // primaryPaymentId là ID được gửi cho MoMo làm orderId
+        // Dùng ProviderRef = "momo_batch:{primaryPaymentId}" để persist batch mapping trong DB
+        // (không cần migration mới, ProviderRef sẽ bị ghi đè bởi transId khi thanh toán thành công)
+        var primaryPaymentId = Guid.NewGuid();
         var paymentIds = new List<Guid>();
         foreach (var order in orders)
         {
+            var paymentId = order == orders[0] ? primaryPaymentId : Guid.NewGuid();
             var payment = new Payment
             {
-                Id = Guid.NewGuid(),
+                Id = paymentId,
                 OrderId = order.Id,
                 Provider = "MOMO",
                 Amount = order.Total,
                 Currency = "VND",
                 Status = (short)PaymentStatus.Pending,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                ProviderRef = $"momo_batch:{primaryPaymentId}"
             };
             _context.Payments.Add(payment);
-            paymentIds.Add(payment.Id);
+            paymentIds.Add(paymentId);
         }
         await _context.SaveChangesAsync();
-
-        var primaryPaymentId = paymentIds.First();
         var requestId = primaryPaymentId.ToString();
         var momoOrderId = primaryPaymentId.ToString();
         var orderCodes = string.Join(", ", orders.Select(o => o.OrderCode));
@@ -1034,11 +1059,28 @@ public class PaymentService : IPaymentService
         if (_memoryCache.TryGetValue($"MomoBatch_{paymentId}", out List<Guid>? batchIds) && batchIds is { Count: > 0 })
         {
             paymentIds = batchIds;
-            _logger.LogInformation("[MoMo Return] Batch payment detected: {Count} payments", paymentIds.Count);
+            _logger.LogInformation("[MoMo Return] Batch payment detected via cache: {Count} payments", paymentIds.Count);
         }
         else
         {
-            paymentIds = new List<Guid> { paymentId };
+            // DB fallback: Cloud Run có thể xử lý callback trên instance khác với instance đã tạo payment,
+            // nên MemoryCache miss. Dùng ProviderRef = "momo_batch:{primaryPaymentId}" để recover batch.
+            var batchRef = $"momo_batch:{paymentId}";
+            var batchPaymentIds = await _context.Payments
+                .Where(p => p.ProviderRef == batchRef && p.Status == (short)PaymentStatus.Pending)
+                .Select(p => p.Id)
+                .ToListAsync();
+
+            if (batchPaymentIds.Count > 0)
+            {
+                paymentIds = batchPaymentIds;
+                _logger.LogInformation("[MoMo Return] Batch recovered from DB via ProviderRef: {Count} payments", paymentIds.Count);
+            }
+            else
+            {
+                // Single payment hoặc đã xử lý → dùng paymentId trực tiếp
+                paymentIds = new List<Guid> { paymentId };
+            }
         }
 
         var payments = await _context.Payments

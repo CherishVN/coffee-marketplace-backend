@@ -139,7 +139,10 @@ public class ReviewService : IReviewService
         var withComment = await baseQuery.CountAsync(r =>
             r.Content != null && r.Content.Trim().Length > 0);
 
-        var withImage = await baseQuery.CountAsync(r => r.ImageUrls.Count > 0);
+        var imageLists = await baseQuery
+            .Select(r => r.ImageUrls)
+            .ToListAsync();
+        var withImage = imageLists.Count(urls => urls.Count > 0);
 
         return new ProductReviewStatsResponseDto
         {
@@ -178,7 +181,13 @@ public class ReviewService : IReviewService
             query = query.Where(r => r.Content != null && r.Content.Trim().Length > 0);
 
         if (hasImage == true)
-            query = query.Where(r => r.ImageUrls.Count > 0);
+        {
+            // image_urls là text JSON — dùng EF.Property<string> để truy cập raw value,
+            // so sánh với "[]" (mảng rỗng) để lọc review có ảnh.
+            query = query.Where(r =>
+                EF.Property<string>(r, "ImageUrls") != null &&
+                EF.Property<string>(r, "ImageUrls") != "[]");
+        }
 
         query = sortBy switch
         {

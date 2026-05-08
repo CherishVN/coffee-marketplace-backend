@@ -285,7 +285,7 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
         }
         catch
         {
-            // Ignore
+            
         }
 
         return null;
