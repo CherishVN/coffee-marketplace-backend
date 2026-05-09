@@ -17,6 +17,7 @@ public class ProductReviewDto
     public Guid ProductId { get; set; }
     public Guid UserId { get; set; }
     public string? UserName { get; set; }
+    public string? UserAvatarUrl { get; set; }
     public short Rating { get; set; }
     public string? Comment { get; set; }
     public DateTime CreatedAt { get; set; }

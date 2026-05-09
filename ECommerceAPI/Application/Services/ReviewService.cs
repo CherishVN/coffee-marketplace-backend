@@ -11,10 +11,12 @@ namespace ECommerceAPI.Application.Services;
 public class ReviewService : IReviewService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IUserAuthEmailResolver _authResolver;
 
-    public ReviewService(ApplicationDbContext context)
+    public ReviewService(ApplicationDbContext context, IUserAuthEmailResolver authResolver)
     {
         _context = context;
+        _authResolver = authResolver;
     }
 
     public async Task<ServiceResponse<ProductReviewDto>> CreateProductReviewAsync(Guid userId, CreateProductReviewDto dto)
@@ -215,6 +217,17 @@ public class ReviewService : IReviewService
                 HelpfulCount = 0
             })
             .ToListAsync();
+
+        // Fetch avatar URLs từ Supabase Auth theo batch (mỗi userId 1 lần)
+        var distinctUserIds = reviews.Select(r => r.UserId).Distinct().ToList();
+        var avatarMap = new Dictionary<Guid, string?>();
+        await Task.WhenAll(distinctUserIds.Select(async uid =>
+        {
+            var url = await _authResolver.GetAvatarUrlByUserIdAsync(uid);
+            lock (avatarMap) avatarMap[uid] = url;
+        }));
+        foreach (var r in reviews)
+            r.UserAvatarUrl = avatarMap.GetValueOrDefault(r.UserId);
 
         return new ProductReviewListResponseDto
         {
