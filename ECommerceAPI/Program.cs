@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Options;
 using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.DTOs.Seller;
 using ECommerceAPI.Application.Interfaces;
@@ -120,7 +121,42 @@ namespace ECommerceAPI
                 opts.KnownProxies.Clear();
             });
 
-            builder.Services.AddHttpClient<IAiSuggestionService, AiSuggestionService>();
+            // Named HttpClients cho AI service — mỗi client mang API key riêng
+            builder.Services.AddHttpClient("AdminCustomerAiClient", (sp, client) =>
+            {
+                var s = sp.GetRequiredService<IOptions<AiServiceSettings>>().Value;
+                client.BaseAddress = new Uri(s.BaseUrl);
+                client.Timeout = TimeSpan.FromSeconds(s.TimeoutSeconds);
+                if (!string.IsNullOrEmpty(s.ApiKey))
+                    client.DefaultRequestHeaders.Add("X-API-Key", s.ApiKey);
+            });
+
+            builder.Services.AddHttpClient("SellerAiClient", (sp, client) =>
+            {
+                var s = sp.GetRequiredService<IOptions<AiServiceSettings>>().Value;
+                client.BaseAddress = new Uri(s.BaseUrl);
+                client.Timeout = TimeSpan.FromSeconds(s.TimeoutSeconds);
+                if (!string.IsNullOrEmpty(s.SellerApiKey))
+                    client.DefaultRequestHeaders.Add("X-API-Key", s.SellerApiKey);
+            });
+
+            // IAiSuggestionService dùng key của Admin & Customer
+            builder.Services.AddScoped<IAiSuggestionService>(sp =>
+            {
+                var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("AdminCustomerAiClient");
+                var settings = sp.GetRequiredService<IOptions<AiServiceSettings>>();
+                var logger = sp.GetRequiredService<ILogger<AiSuggestionService>>();
+                return new AiSuggestionService(client, settings, logger);
+            });
+
+            // ISellerAiSuggestionService dùng key riêng của Seller
+            builder.Services.AddScoped<ISellerAiSuggestionService>(sp =>
+            {
+                var client = sp.GetRequiredService<IHttpClientFactory>().CreateClient("SellerAiClient");
+                var settings = sp.GetRequiredService<IOptions<AiServiceSettings>>();
+                var logger = sp.GetRequiredService<ILogger<AiSuggestionService>>();
+                return new AiSuggestionService(client, settings, logger);
+            });
 
             // FluentValidation
             builder.Services.AddFluentValidationAutoValidation();

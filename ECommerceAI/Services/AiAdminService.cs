@@ -2,6 +2,7 @@ using ECommerceAI.Data;
 using ECommerceAI.DTOs.Admin;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ECommerceAI.Services;
 
@@ -12,7 +13,7 @@ public class AiAdminService : IAiAdminService
     private readonly ILogger<AiAdminService> _logger;
     private readonly string _systemPrompt;
 
-    public AiAdminService(AiDbContext context, GeminiClientService gemini, ILogger<AiAdminService> logger)
+    public AiAdminService(AiDbContext context, [FromKeyedServices("default")] GeminiClientService gemini, ILogger<AiAdminService> logger)
     {
         _context = context;
         _gemini = gemini;

@@ -26,7 +26,8 @@ public class TagAdminService : ITagAdminService
 
             if (!string.IsNullOrWhiteSpace(search))
             {
-                query = query.Where(t => t.Name.Contains(search) || t.Slug.Contains(search));
+                var pattern = $"%{search}%";
+                query = query.Where(t => EF.Functions.ILike(t.Name, pattern) || EF.Functions.ILike(t.Slug, pattern));
             }
 
             var totalCount = await query.CountAsync();

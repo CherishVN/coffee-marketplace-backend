@@ -23,7 +23,22 @@ builder.Services.AddDbContext<AiDbContext>(options =>
 builder.Services.AddMemoryCache();
 
 // ── AI Services ───────────────────────────────────────────────────────────────
-builder.Services.AddSingleton<GeminiClientService>();
+// "default" → Admin & Customer dùng model gemini-3.1-flash-lite-preview (section "Gemini")
+builder.Services.AddKeyedSingleton<GeminiClientService>("default", (sp, _) =>
+    new GeminiClientService(
+        sp.GetRequiredService<IConfiguration>(),
+        sp.GetRequiredService<ILogger<GeminiClientService>>(),
+        sp.GetRequiredService<IHttpClientFactory>(),
+        configSection: "Gemini"));
+
+// "seller" → Seller dùng model gemini-2.5-flash-lite (section "GeminiSeller")
+builder.Services.AddKeyedSingleton<GeminiClientService>("seller", (sp, _) =>
+    new GeminiClientService(
+        sp.GetRequiredService<IConfiguration>(),
+        sp.GetRequiredService<ILogger<GeminiClientService>>(),
+        sp.GetRequiredService<IHttpClientFactory>(),
+        configSection: "GeminiSeller"));
+
 builder.Services.AddScoped<IAiChatService, AiChatService>();
 builder.Services.AddScoped<IAiSellerService, AiSellerService>();
 builder.Services.AddScoped<IAiAdminService, AiAdminService>();

@@ -7,6 +7,7 @@ using ECommerceAI.DTOs.Seller;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ECommerceAI.Services;
 
@@ -50,7 +51,7 @@ public class AiSellerService : IAiSellerService
     private readonly IMemoryCache _cache;
     private readonly ILogger<AiSellerService> _logger;
 
-    public AiSellerService(AiDbContext context, GeminiClientService gemini, IMemoryCache cache, ILogger<AiSellerService> logger)
+    public AiSellerService(AiDbContext context, [FromKeyedServices("seller")] GeminiClientService gemini, IMemoryCache cache, ILogger<AiSellerService> logger)
     {
         _context = context;
         _gemini = gemini;
@@ -1052,7 +1053,8 @@ public class AiSellerService : IAiSellerService
                 request.ImageUrls,
                 _analyzeImageSchema);
 
-            if (raw.StartsWith("⚠️"))
+            // GeminiClientService trả chuỗi lỗi (không phải JSON) khi API thất bại
+            if (!raw.TrimStart().StartsWith("{"))
                 return new AnalyzeImageResponseDto { Success = false, ErrorMessage = raw };
 
             // JSON mode trả snake_case theo schema → phải dùng _jsonSnakeReadOptions để map đúng
@@ -1168,7 +1170,8 @@ public class AiSellerService : IAiSellerService
         {
             var raw = await _gemini.GenerateJsonAsync(_sellerPrompt.Value, userMessage, _analyzeProductSchema);
 
-            if (raw.StartsWith("⚠️"))
+            // GeminiClientService trả chuỗi lỗi (không phải JSON) khi API thất bại
+            if (!raw.TrimStart().StartsWith("{"))
                 return new AnalyzeProductResponseDto { Success = false, ErrorMessage = raw };
 
             var result = ParseJsonResponseSnake<AnalyzeProductResponseDto>(raw, "AnalyzeProduct");
