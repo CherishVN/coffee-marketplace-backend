@@ -1531,8 +1531,10 @@ public class SellerService : ISellerService
     }
 
     /// <summary>
-    /// Luồng seller: tối đa đưa đơn tới "Đang chuẩn bị" (Processing);
-    /// không giao/đã giao/hoàn thành — bước đó do hệ thống/VC/admin.
+    /// Luồng seller: chỉ cho phép 2 transition tiến lên — Chờ xác nhận → Đã xác nhận
+    /// và Đã xác nhận → Đang chuẩn bị. Hủy đơn do buyer khởi tạo và seller duyệt
+    /// qua endpoint riêng (approve-cancel/reject-cancel); seller không được tự
+    /// chủ động hủy đơn qua API update status.
     /// </summary>
     private static bool IsAllowedSellerOrderTransition(OrderStatus from, OrderStatus to)
     {
@@ -1540,10 +1542,7 @@ public class SellerService : ISellerService
         return (from, to) switch
         {
             (OrderStatus.PendingConfirmation, OrderStatus.Confirmed) => true,
-            (OrderStatus.PendingConfirmation, OrderStatus.Cancelled) => true,
             (OrderStatus.Confirmed, OrderStatus.Processing) => true,
-            (OrderStatus.Confirmed, OrderStatus.Cancelled) => true,
-            (OrderStatus.Processing, OrderStatus.Cancelled) => true,
             _ => false
         };
     }

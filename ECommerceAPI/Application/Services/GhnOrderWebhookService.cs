@@ -372,13 +372,26 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         return new DateTimeOffset(dt, TimeSpan.Zero);
     }
 
+    /// <summary>
+    /// Bảng chuyển trạng thái hợp lệ từ GHN webhook.
+    /// Mỗi trạng thái chỉ được phép chuyển sang các trạng thái được liệt kê.
+    /// </summary>
+    private static readonly Dictionary<OrderStatus, HashSet<OrderStatus>> _allowedTransitions = new()
+    {
+        [OrderStatus.PendingPayment]     = new() { },                                                            // GHN không được đụng vào
+        [OrderStatus.PendingConfirmation] = new() { },                                                           // GHN không được đụng vào
+        [OrderStatus.Processing]         = new() { OrderStatus.Shipping, OrderStatus.Cancelled },               // Chuẩn bị → Đang giao / Hủy
+        [OrderStatus.Shipping]           = new() { OrderStatus.Delivered, OrderStatus.Cancelled },              // Đang giao → Đã giao / Hủy
+        [OrderStatus.Delivered]          = new() { OrderStatus.Completed, OrderStatus.Cancelled },              // Đã giao → Hoàn thành / Hủy (trường hợp trả hàng)
+        [OrderStatus.Completed]          = new() { },                                                            // Đã xong — không đổi nữa
+        [OrderStatus.Cancelled]          = new() { },                                                            // Đã hủy — không khôi phục từ GHN
+        [OrderStatus.Refunded]           = new() { },                                                            // Đã hoàn tiền — không đổi nữa
+    };
+
     private static bool IsAllowedTransition(OrderStatus from, OrderStatus to)
     {
         if (to == from) return true;
-        if (from is OrderStatus.PendingPayment or OrderStatus.Refunded) return false;
-        if (to == OrderStatus.PendingPayment) return false;
-        if (from == OrderStatus.Completed) return false;
-        return true;
+        return _allowedTransitions.TryGetValue(from, out var allowed) && allowed.Contains(to);
     }
 
     /// <summary>
