@@ -499,6 +499,15 @@ public class SellerService : ISellerService
             };
         }
 
+        if (!await IsCategoryTier2Async(dto.CategoryId.Value))
+        {
+            return new ServiceResponse<ProductDto>
+            {
+                Success = false,
+                Message = "Chỉ được chọn danh mục cấp 2 (sub-category). Danh mục cấp 1 quá rộng cho việc tìm kiếm và phân loại."
+            };
+        }
+
         var productCode = await GenerateUniqueProductCodeAsync();
         var slug = await GenerateUniqueProductSlugAsync(dto.Name);
 
@@ -647,8 +656,40 @@ public class SellerService : ISellerService
 
         var previousProductStatus = product.Status;
 
-        if (dto.CategoryId.HasValue)
+        if (dto.CategoryId.HasValue && dto.CategoryId.Value != product.CategoryId)
+        {
+            if (!await IsCategoryTier2Async(dto.CategoryId.Value))
+            {
+                return new ServiceResponse
+                {
+                    Success = false,
+                    Message = "Chỉ được chọn danh mục cấp 2 (sub-category). Danh mục cấp 1 quá rộng cho việc tìm kiếm và phân loại."
+                };
+            }
+        }
+
+        // ── Đổi danh mục: nếu chuyển sang **nhánh root khác** → bắt buộc chờ admin
+        // duyệt lại. Lý do: chống gaming SEO (đăng ở danh mục dễ duyệt rồi nhảy
+        // sang danh mục hot/cấm), bảo vệ chất lượng phân loại của sàn.
+        var rootBranchChanged = false;
+        if (dto.CategoryId.HasValue && dto.CategoryId.Value != product.CategoryId)
+        {
+            var oldRootId = product.CategoryId.HasValue
+                ? await GetRootCategoryIdAsync(product.CategoryId.Value)
+                : (long?)null;
+            var newRootId = await GetRootCategoryIdAsync(dto.CategoryId.Value);
+
+            if (oldRootId.HasValue && newRootId.HasValue && oldRootId.Value != newRootId.Value)
+            {
+                rootBranchChanged = true;
+            }
+
             product.CategoryId = dto.CategoryId;
+        }
+        else if (dto.CategoryId.HasValue)
+        {
+            product.CategoryId = dto.CategoryId;
+        }
 
         if (!string.IsNullOrWhiteSpace(dto.Name))
         {
@@ -758,6 +799,16 @@ public class SellerService : ISellerService
                         break;
                 }
             }
+        }
+
+        // Override: đổi nhánh root → bắt buộc chờ duyệt lại bất kể seller chọn status gì.
+        // Trừ khi SP đang là Draft (chưa được công khai) hoặc đã PendingApproval thì không cần override.
+        if (rootBranchChanged
+            && product.Status != (short)ProductStatus.Draft
+            && product.Status != (short)ProductStatus.PendingApproval)
+        {
+            product.Status = (short)ProductStatus.PendingApproval;
+            successMessage = "Bạn đã chuyển sản phẩm sang nhánh danh mục khác. Sản phẩm sẽ chờ admin duyệt lại trước khi hiển thị công khai.";
         }
 
         if (product.Status == (short)ProductStatus.Hidden
@@ -1586,6 +1637,60 @@ public class SellerService : ISellerService
         }
 
         return slug;
+    }
+
+    /// <summary>
+    /// Kiểm tra category có phải tier 2 (sub-category trực tiếp dưới root) không.
+    /// Tier 2 = ParentId != null AND parent.ParentId == null.
+    /// </summary>
+    private async Task<bool> IsCategoryTier2Async(long categoryId)
+    {
+        var category = await _context.Categories.AsNoTracking()
+            .Where(c => c.Id == categoryId)
+            .Select(c => new { c.Id, c.ParentId })
+            .FirstOrDefaultAsync();
+
+        if (category == null || !category.ParentId.HasValue)
+            return false;
+
+        var parentHasParent = await _context.Categories.AsNoTracking()
+            .Where(c => c.Id == category.ParentId.Value)
+            .Select(c => c.ParentId)
+            .FirstOrDefaultAsync();
+
+        return parentHasParent == null;
+    }
+
+    /// <summary>
+    /// Trả về Id của category gốc (root) bằng cách đi ngược chuỗi ParentId.
+    /// Cap depth 10 để tránh cycle dữ liệu lỗi.
+    /// </summary>
+    private async Task<long?> GetRootCategoryIdAsync(long categoryId)
+    {
+        var current = await _context.Categories.AsNoTracking()
+            .Where(c => c.Id == categoryId)
+            .Select(c => new { c.Id, c.ParentId })
+            .FirstOrDefaultAsync();
+
+        if (current == null)
+            return null;
+
+        var depth = 0;
+        while (current.ParentId.HasValue && depth < 10)
+        {
+            var parentId = current.ParentId.Value;
+            current = await _context.Categories.AsNoTracking()
+                .Where(c => c.Id == parentId)
+                .Select(c => new { c.Id, c.ParentId })
+                .FirstOrDefaultAsync();
+
+            if (current == null)
+                return null;
+
+            depth++;
+        }
+
+        return current.Id;
     }
 
     private static string GenerateSlug(string value)
