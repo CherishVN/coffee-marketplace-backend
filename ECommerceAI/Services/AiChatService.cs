@@ -261,7 +261,13 @@ public class AiChatService : IAiChatService
     }
 
     // ── Xác nhận tạo đơn hàng ───────────────────────────────────────────────
-    public async Task<ConfirmOrderResponseDto> ConfirmOrderAsync(Guid sessionId, Guid userId, Guid cartId, Guid shippingAddressId, string? accessToken)
+    public async Task<ConfirmOrderResponseDto> ConfirmOrderAsync(
+        Guid sessionId,
+        Guid userId,
+        Guid cartId,
+        Guid shippingAddressId,
+        IReadOnlyList<AiShopShippingOptionDto>? shippingOptions,
+        string? accessToken)
     {
         // Gọi Main API để tạo đơn hàng
         try
@@ -273,11 +279,25 @@ public class AiChatService : IAiChatService
                     new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
             }
 
-            var payload = JsonSerializer.Serialize(new
-            {
-                cartId = cartId,
-                shippingAddressId = shippingAddressId
-            });
+            // Main API yêu cầu `shippingOptions` (phí GHN từng shop) để tạo đơn — AI
+            // service không tự gọi GHN nên client phải tính trước & truyền vào.
+            var payload = JsonSerializer.Serialize(
+                new
+                {
+                    cartId = cartId,
+                    shippingAddressId = shippingAddressId,
+                    shippingOptions = shippingOptions?
+                        .Select(o => new
+                        {
+                            shopId = o.ShopId,
+                            shippingProvider = o.ShippingProvider,
+                            shippingServiceId = o.ShippingServiceId,
+                            shippingFee = o.ShippingFee,
+                            estimatedDeliveryDate = o.EstimatedDeliveryDate
+                        })
+                        .ToList()
+                },
+                ProductJsonOptions);
 
             var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
             var response = await httpClient.PostAsync("/api/cart/checkout", content);

@@ -18,6 +18,22 @@ public class ConfirmOrderRequestDto
     public Guid SessionId { get; set; }
     public Guid CartId { get; set; }
     public Guid ShippingAddressId { get; set; }
+
+    /// <summary>
+    /// Phí vận chuyển GHN tính sẵn theo từng shop. AI service không tự gọi GHN
+    /// nên FE/Mobile phải tính (giống trang checkout chuẩn) rồi truyền vào.
+    /// Thiếu trường này → Main API trả lỗi "Thiếu phí vận chuyển theo từng shop".
+    /// </summary>
+    public List<AiShopShippingOptionDto>? ShippingOptions { get; set; }
+}
+
+public class AiShopShippingOptionDto
+{
+    public Guid ShopId { get; set; }
+    public string? ShippingProvider { get; set; }
+    public string? ShippingServiceId { get; set; }
+    public decimal ShippingFee { get; set; }
+    public DateTimeOffset? EstimatedDeliveryDate { get; set; }
 }
 
 // ── Response DTOs ─────────────────────────────────────────────────────────────

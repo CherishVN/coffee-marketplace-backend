@@ -67,6 +67,7 @@ public class AiChatController : ControllerBase
             userId,
             dto.CartId,
             dto.ShippingAddressId,
+            dto.ShippingOptions,
             accessToken);
 
         if (!result.Success)
