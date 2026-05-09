@@ -25,8 +25,12 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
         public List<string> Providers { get; init; } = new();
     }
 
-    private static readonly TimeSpan SuccessTtl = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan EmptyTtl = TimeSpan.FromMinutes(2);
+    // Giữ TTL ngắn để khi user đổi avatar/email/metadata Supabase, dữ liệu mới
+    // sẽ được hiển thị nhanh chóng mà không cần chờ tới 10 phút.
+    private static readonly TimeSpan SuccessTtl = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan EmptyTtl = TimeSpan.FromMinutes(1);
+
+    private static string CacheKeyFor(Guid userId) => $"supabase-auth-user:{userId}";
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
@@ -81,9 +85,14 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
         };
     }
 
+    public void InvalidateUser(Guid userId)
+    {
+        _memoryCache.Remove(CacheKeyFor(userId));
+    }
+
     private async Task<AuthSnapshot?> LoadSnapshotAsync(Guid userId, CancellationToken cancellationToken)
     {
-        var cacheKey = $"supabase-auth-user:{userId}";
+        var cacheKey = CacheKeyFor(userId);
         if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is not null)
         {
             if (ReferenceEquals(cachedObj, FailedSentinel))

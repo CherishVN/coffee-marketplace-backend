@@ -13,13 +13,16 @@ public class ProfileController : ControllerBase
 {
     private readonly IUserClaimsService _userClaimsService;
     private readonly IUserProfileService _userProfileService;
+    private readonly IUserAuthEmailResolver _authEmailResolver;
 
     public ProfileController(
         IUserClaimsService userClaimsService,
-        IUserProfileService userProfileService)
+        IUserProfileService userProfileService,
+        IUserAuthEmailResolver authEmailResolver)
     {
         _userClaimsService = userClaimsService;
         _userProfileService = userProfileService;
+        _authEmailResolver = authEmailResolver;
     }
 
     /// <summary>
@@ -225,6 +228,22 @@ public class ProfileController : ControllerBase
             return BadRequest(new { success = false, message = result.Message });
 
         return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// Xóa cache snapshot Supabase Auth của user hiện tại. Gọi sau khi user
+    /// vừa cập nhật avatar (avatar_storage_path) hoặc metadata khác để các
+    /// service đọc avatar (review, conversation, ...) lấy dữ liệu mới ngay.
+    /// </summary>
+    [HttpPost("profile/refresh-auth-cache")]
+    public IActionResult RefreshAuthCache()
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (!userId.HasValue)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        _authEmailResolver.InvalidateUser(userId.Value);
+        return Ok(new { success = true });
     }
 
     /// <summary>
