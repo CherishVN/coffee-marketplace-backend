@@ -1053,7 +1053,8 @@ public class AiSellerService : IAiSellerService
                 request.ImageUrls,
                 _analyzeImageSchema);
 
-            if (raw.StartsWith("⚠️"))
+            // GeminiClientService trả chuỗi lỗi (không phải JSON) khi API thất bại
+            if (!raw.TrimStart().StartsWith("{"))
                 return new AnalyzeImageResponseDto { Success = false, ErrorMessage = raw };
 
             // JSON mode trả snake_case theo schema → phải dùng _jsonSnakeReadOptions để map đúng
@@ -1169,7 +1170,8 @@ public class AiSellerService : IAiSellerService
         {
             var raw = await _gemini.GenerateJsonAsync(_sellerPrompt.Value, userMessage, _analyzeProductSchema);
 
-            if (raw.StartsWith("⚠️"))
+            // GeminiClientService trả chuỗi lỗi (không phải JSON) khi API thất bại
+            if (!raw.TrimStart().StartsWith("{"))
                 return new AnalyzeProductResponseDto { Success = false, ErrorMessage = raw };
 
             var result = ParseJsonResponseSnake<AnalyzeProductResponseDto>(raw, "AnalyzeProduct");
