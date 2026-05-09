@@ -184,6 +184,18 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
                         cancellationToken);
                 }
             }
+
+            // Fallback: dùng avatar_url / picture từ user_metadata (thường là OAuth Google/Facebook…)
+            if (string.IsNullOrWhiteSpace(avatarUrl))
+            {
+                var externalAvatar = FirstString(metadataElement, "avatar_url", "picture", "avatar");
+                if (!string.IsNullOrWhiteSpace(externalAvatar)
+                    && Uri.TryCreate(externalAvatar, UriKind.Absolute, out var parsedUri)
+                    && (parsedUri.Scheme == Uri.UriSchemeHttp || parsedUri.Scheme == Uri.UriSchemeHttps))
+                {
+                    avatarUrl = externalAvatar;
+                }
+            }
         }
 
         var snapshot = new AuthSnapshot
