@@ -282,17 +282,33 @@ public class SupabaseAuthEmailResolver : IUserAuthEmailResolver
             var payload = await response.Content.ReadAsStringAsync(cancellationToken);
             using var doc = JsonDocument.Parse(payload);
 
-            if (doc.RootElement.TryGetProperty("signedURL", out var signedUrlElement)
-                && signedUrlElement.ValueKind == JsonValueKind.String)
+            // Supabase trả về key "signedURL" (cũ) hoặc "signedUrl" (camelCase mới).
+            string? signedUrl = null;
+            if (doc.RootElement.TryGetProperty("signedURL", out var legacyEl)
+                && legacyEl.ValueKind == JsonValueKind.String)
             {
-                var signedUrl = signedUrlElement.GetString();
-                if (!string.IsNullOrWhiteSpace(signedUrl))
-                {
-                    if (Uri.TryCreate(signedUrl, UriKind.Absolute, out _))
-                        return signedUrl;
+                signedUrl = legacyEl.GetString();
+            }
+            else if (doc.RootElement.TryGetProperty("signedUrl", out var newEl)
+                && newEl.ValueKind == JsonValueKind.String)
+            {
+                signedUrl = newEl.GetString();
+            }
 
-                    return $"{supabaseUrl.TrimEnd('/')}/storage/v1{signedUrl}";
+            if (!string.IsNullOrWhiteSpace(signedUrl))
+            {
+                // KHÔNG dùng Uri.TryCreate(_, UriKind.Absolute, _) ở đây: trên Linux,
+                // chuỗi bắt đầu bằng "/" (vd: "/object/sign/...") sẽ bị nhận diện là
+                // file URI tuyệt đối → trả nguyên dạng → FE fetch phải host của Next.js → 404.
+                // Chỉ coi là URL tuyệt đối khi bắt đầu bằng http(s)://.
+                if (signedUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                    || signedUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    return signedUrl;
                 }
+
+                var relative = signedUrl.StartsWith('/') ? signedUrl : "/" + signedUrl;
+                return $"{supabaseUrl.TrimEnd('/')}/storage/v1{relative}";
             }
         }
         catch
