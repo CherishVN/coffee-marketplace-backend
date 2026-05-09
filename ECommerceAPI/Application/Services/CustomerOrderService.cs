@@ -280,20 +280,6 @@ public class CustomerOrderService : ICustomerOrderService
             };
         }
 
-        var deliverAnchor = await OrderPostDeliveryHelper.GetDeliveryAnchorUtcAsync(
-            _context,
-            order.Id,
-            order.UpdatedAt);
-        if ((DateTime.UtcNow - deliverAnchor).TotalDays < SellerWalletLedgerPolicies.ReleaseDaysAfterOrderDelivered)
-        {
-            return new ConfirmOrderResponseDto
-            {
-                Success = false,
-                Message =
-                    $"Chỉ có thể xác nhận hoàn thành sau {SellerWalletLedgerPolicies.ReleaseDaysAfterOrderDelivered} ngày kể từ khi đơn đã giao (hết thời hạn khiếu nại)."
-            };
-        }
-
         if (await OrderPostDeliveryHelper.HasOpenDisputeAsync(_context, order.Id))
         {
             return new ConfirmOrderResponseDto
