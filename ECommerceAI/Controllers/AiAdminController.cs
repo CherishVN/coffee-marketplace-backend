@@ -3,6 +3,7 @@ using ECommerceAI.Services;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ECommerceAI.Controllers;
 
@@ -14,7 +15,7 @@ public class AiAdminController : ControllerBase
     private readonly IAiAdminService _adminService;
     private readonly GeminiClientService _gemini;
 
-    public AiAdminController(IAiAdminService adminService, GeminiClientService gemini)
+    public AiAdminController(IAiAdminService adminService, [FromKeyedServices("default")] GeminiClientService gemini)
     {
         _adminService = adminService;
         _gemini = gemini;

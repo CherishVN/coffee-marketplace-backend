@@ -9,9 +9,11 @@ using Microsoft.Extensions.Options;
 namespace ECommerceAPI.Infrastructure.Services;
 
 /// <summary>
-/// Service gọi AI Microservice để lấy gợi ý category, tags, materials
+/// Service gọi AI Microservice để lấy gợi ý category, tags, materials.
+/// Implement cả IAiSuggestionService (Admin/Customer) và ISellerAiSuggestionService (Seller) —
+/// hai instance được đăng ký với HttpClient mang API key khác nhau.
 /// </summary>
-public class AiSuggestionService : IAiSuggestionService
+public class AiSuggestionService : IAiSuggestionService, ISellerAiSuggestionService
 {
     private readonly HttpClient _httpClient;
     private readonly AiServiceSettings _settings;
@@ -26,16 +28,6 @@ public class AiSuggestionService : IAiSuggestionService
         _httpClient = httpClient;
         _settings = settings.Value;
         _logger = logger;
-
-        // Configure HttpClient
-        _httpClient.BaseAddress = new Uri(_settings.BaseUrl);
-        _httpClient.Timeout = TimeSpan.FromSeconds(_settings.TimeoutSeconds);
-
-        // Add API Key if configured
-        if (!string.IsNullOrEmpty(_settings.ApiKey))
-        {
-            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _settings.ApiKey);
-        }
 
         _jsonOptions = new JsonSerializerOptions
         {

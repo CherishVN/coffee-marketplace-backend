@@ -23,9 +23,14 @@ public class AiServiceSettings
     public int TimeoutSeconds { get; set; } = 30;
 
     /// <summary>
-    /// API Key để xác thực với AI service
+    /// API Key dùng cho Admin và Customer
     /// </summary>
     public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// API Key riêng dùng cho Seller
+    /// </summary>
+    public string SellerApiKey { get; set; } = string.Empty;
 }
 
 public class AiEndpoints

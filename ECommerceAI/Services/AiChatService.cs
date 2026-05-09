@@ -6,6 +6,7 @@ using ECommerceAI.Data.Entities.ReadOnly;
 using ECommerceAI.DTOs.Chat;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ECommerceAI.Services;
 
@@ -26,7 +27,7 @@ public class AiChatService : IAiChatService
 
     public AiChatService(
         AiDbContext context,
-        GeminiClientService gemini,
+        [FromKeyedServices("default")] GeminiClientService gemini,
         IHttpClientFactory httpClientFactory,
         IConfiguration config,
         ILogger<AiChatService> logger)

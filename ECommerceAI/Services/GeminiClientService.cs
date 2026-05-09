@@ -23,19 +23,24 @@ public class GeminiClientService
 
     private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
-    public GeminiClientService(IConfiguration config, ILogger<GeminiClientService> logger, IHttpClientFactory httpClientFactory)
+    public GeminiClientService(
+        IConfiguration config,
+        ILogger<GeminiClientService> logger,
+        IHttpClientFactory httpClientFactory,
+        string configSection = "Gemini")
     {
         _logger = logger;
-        _apiKey = config["Gemini:ApiKey"] ?? throw new InvalidOperationException("Gemini:ApiKey is missing");
-        _modelName = string.IsNullOrWhiteSpace(config["Gemini:Model"])
+        _apiKey = config[$"{configSection}:ApiKey"]
+            ?? throw new InvalidOperationException($"{configSection}:ApiKey is missing");
+        _modelName = string.IsNullOrWhiteSpace(config[$"{configSection}:Model"])
             ? "gemini-2.0-flash"
-            : config["Gemini:Model"]!.Trim();
-        _textTimeout = TimeSpan.FromSeconds(config.GetValue("Gemini:TimeoutSeconds", 90));
-        _imageTimeout = TimeSpan.FromSeconds(config.GetValue("Gemini:ImageTimeoutSeconds", 150));
-        _maxHttpAttempts = Math.Clamp(config.GetValue("Gemini:MaxHttpAttempts", 3), 1, 6);
+            : config[$"{configSection}:Model"]!.Trim();
+        _textTimeout = TimeSpan.FromSeconds(config.GetValue($"{configSection}:TimeoutSeconds", 90));
+        _imageTimeout = TimeSpan.FromSeconds(config.GetValue($"{configSection}:ImageTimeoutSeconds", 150));
+        _maxHttpAttempts = Math.Clamp(config.GetValue($"{configSection}:MaxHttpAttempts", 3), 1, 6);
         // Ảnh gửi Gemini: thu gọn cạnh dài + JPEG để giảm payload, thời gian upload, tránh hết quota.
-        _imageMaxEdgePixels = Math.Clamp(config.GetValue("Gemini:ImageMaxEdgePixels", 1280), 256, 4096);
-        _imageJpegQuality = Math.Clamp(config.GetValue("Gemini:ImageJpegQuality", 82), 40, 100);
+        _imageMaxEdgePixels = Math.Clamp(config.GetValue($"{configSection}:ImageMaxEdgePixels", 1280), 256, 4096);
+        _imageJpegQuality = Math.Clamp(config.GetValue($"{configSection}:ImageJpegQuality", 82), 40, 100);
         _http = httpClientFactory.CreateClient("GeminiClient");
     }
 

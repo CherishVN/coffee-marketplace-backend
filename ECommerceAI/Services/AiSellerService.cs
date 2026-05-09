@@ -7,6 +7,7 @@ using ECommerceAI.DTOs.Seller;
 using ECommerceAI.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ECommerceAI.Services;
 
@@ -50,7 +51,7 @@ public class AiSellerService : IAiSellerService
     private readonly IMemoryCache _cache;
     private readonly ILogger<AiSellerService> _logger;
 
-    public AiSellerService(AiDbContext context, GeminiClientService gemini, IMemoryCache cache, ILogger<AiSellerService> logger)
+    public AiSellerService(AiDbContext context, [FromKeyedServices("seller")] GeminiClientService gemini, IMemoryCache cache, ILogger<AiSellerService> logger)
     {
         _context = context;
         _gemini = gemini;
