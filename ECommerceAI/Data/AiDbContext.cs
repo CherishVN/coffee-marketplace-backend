@@ -241,6 +241,7 @@ public class AiDbContext : DbContext
             e.Property(x => x.OwnerId).HasColumnName("owner_id");
             e.Property(x => x.Name).HasColumnName("name");
             e.Property(x => x.Status).HasColumnName("status");
+            e.Property(x => x.VerificationStatus).HasColumnName("verification_status");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
         });
 

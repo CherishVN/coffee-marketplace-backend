@@ -6,5 +6,6 @@ public class Shop
     public Guid OwnerId { get; set; }
     public string Name { get; set; } = null!;
     public short Status { get; set; }
+    public short VerificationStatus { get; set; }
     public DateTime CreatedAt { get; set; }
 }
