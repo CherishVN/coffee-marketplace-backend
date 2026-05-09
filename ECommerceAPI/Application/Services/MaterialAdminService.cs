@@ -24,7 +24,10 @@ public class MaterialAdminService : IMaterialAdminService
             var query = _context.Materials.AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(search))
-                query = query.Where(m => m.Name.Contains(search) || m.Slug.Contains(search));
+            {
+                var pattern = $"%{search}%";
+                query = query.Where(m => EF.Functions.ILike(m.Name, pattern) || EF.Functions.ILike(m.Slug, pattern));
+            }
 
             if (isActive.HasValue)
                 query = query.Where(m => m.IsActive == isActive.Value);
