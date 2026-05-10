@@ -492,7 +492,7 @@ public class AiChatService : IAiChatService
         {
             var price = p.Variants.Any() ? p.Variants.Min(v => v.Price ?? p.BasePrice) : p.BasePrice;
             var imageUrl = p.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.ImageUrl ?? "";
-            var variants = string.Join(", ", p.Variants.Where(v => v.IsActive).Select(v => $"{v.VariantName}({v.Id})"));
+            var variants = string.Join(", ", p.Variants.Where(v => v.IsActive).Select(v => $"{GetVariantSuggestionDisplayName(v)}({v.Id})"));
             return $"ID:{p.Id} | Tên:{p.Name} | Giá:{price:N0}đ | Ảnh:{imageUrl} | Variants:[{variants}]";
         }));
     }
@@ -764,14 +764,84 @@ public class AiChatService : IAiChatService
             BasePrice = GetMinCustomerFacingPrice(p),
             ImageUrl = p.Images.OrderBy(i => i.SortOrder).FirstOrDefault()?.ImageUrl,
             CategoryName = p.Category?.Name,
-            Variants = p.Variants.Select(v => new VariantSuggestionDto
-            {
-                Id = v.Id,
-                VariantName = v.VariantName,
-                Price = v.Price
-            }).ToList()
+            Variants = p.Variants
+                .Where(v => v.IsActive)
+                .OrderBy(v => v.CreatedAt)
+                .Select(v => new VariantSuggestionDto
+                {
+                    Id = v.Id,
+                    VariantName = GetVariantSuggestionDisplayName(v),
+                    Price = v.Price
+                }).ToList()
         }).ToList();
     }
+
+    /// <summary>
+    /// Nhãn phân loại trên thẻ chat và trong câu «các phân loại: …».
+    /// Ưu tiên giá trị trong jsonb <c>attributes</c> để tránh «Size · Size · Size» khi mỗi dòng chỉ khác thuộc tính.
+    /// </summary>
+    private static string GetVariantSuggestionDisplayName(ProductVariant v)
+    {
+        var fromJson = TryFormatVariantAttributesLabel(v.Attributes);
+        if (!string.IsNullOrWhiteSpace(fromJson))
+            return fromJson.Trim();
+
+        var n = (v.VariantName ?? string.Empty).Trim();
+        return string.IsNullOrEmpty(n) ? "Mặc định" : n;
+    }
+
+    private static string? TryFormatVariantAttributesLabel(JsonDocument? doc)
+    {
+        if (doc == null) return null;
+
+        try
+        {
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                var s = root.GetString();
+                return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+            }
+
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var props = root.EnumerateObject().ToList();
+            if (props.Count == 0) return null;
+
+            if (props.Count == 1)
+            {
+                var s = FormatJsonElementAsDisplayValue(props[0].Value);
+                return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+            }
+
+            var parts = new List<string>();
+            foreach (var prop in props)
+            {
+                var s = FormatJsonElementAsDisplayValue(prop.Value);
+                if (string.IsNullOrWhiteSpace(s)) continue;
+
+                var key = prop.Name.Trim();
+                parts.Add(string.IsNullOrEmpty(key) ? s : $"{key}: {s}");
+            }
+
+            return parts.Count > 0 ? string.Join(" · ", parts) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? FormatJsonElementAsDisplayValue(JsonElement el) =>
+        el.ValueKind switch
+        {
+            JsonValueKind.String => el.GetString(),
+            JsonValueKind.Number => el.GetRawText(),
+            JsonValueKind.True => "Có",
+            JsonValueKind.False => "Không",
+            _ => null
+        };
 
     private static List<string> NormalizeSearchTokens(string query)
     {
@@ -785,7 +855,7 @@ public class AiChatService : IAiChatService
             "max", "min", "under", "below", "above", "around",
             "nghìn", "ngàn", "triệu", "trăm", "đồng", "vnđ", "vnd",
             "đặc", "sản",
-            "loại", "kiểu", "hàng", "bạn", "dạ", "vâng", "nhờ", "giùm", "lấy", "luôn", "ơi",
+            "loại", "kiểu", "hàng", "bạn", "dạ", "vâng", "nhờ", "giùm", "lấy", "luôn", "ơi","checkout","chọn","chọn loại",
         };
 
         return query
