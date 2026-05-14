@@ -343,7 +343,13 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
             if (string.Equals(raw, "delivered", StringComparison.OrdinalIgnoreCase))
                 created.ActualDeliveryDate = ParseGhnEventTimeToOffset(payload.Time) ?? DateTimeOffset.UtcNow;
             if (payload.DeliveryProofUrls is { Count: > 0 })
-                created.DeliveryProofUrls = JsonSerializer.Serialize(payload.DeliveryProofUrls);
+            {
+                var existing = string.IsNullOrEmpty(created.DeliveryProofUrls)
+                    ? new List<string>()
+                    : JsonSerializer.Deserialize<List<string>>(created.DeliveryProofUrls) ?? new List<string>();
+                var merged = existing.Union(payload.DeliveryProofUrls).ToList();
+                created.DeliveryProofUrls = JsonSerializer.Serialize(merged);
+            }
             _context.Shipments.Add(created);
             return;
         }
@@ -365,7 +371,13 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         if (string.Equals(raw, "delivered", StringComparison.OrdinalIgnoreCase))
             row.ActualDeliveryDate = ParseGhnEventTimeToOffset(payload.Time) ?? DateTimeOffset.UtcNow;
         if (payload.DeliveryProofUrls is { Count: > 0 })
-            row.DeliveryProofUrls = JsonSerializer.Serialize(payload.DeliveryProofUrls);
+        {
+            var existing = string.IsNullOrEmpty(row.DeliveryProofUrls)
+                ? new List<string>()
+                : JsonSerializer.Deserialize<List<string>>(row.DeliveryProofUrls) ?? new List<string>();
+            var merged = existing.Union(payload.DeliveryProofUrls).ToList();
+            row.DeliveryProofUrls = JsonSerializer.Serialize(merged);
+        }
     }
 
     private static DateTimeOffset? ParseGhnEventTimeToOffset(DateTime? time)
@@ -450,19 +462,26 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
 
     private async Task NotifyStatusChangedAsync(Order order, OrderStatus oldStatus, OrderStatus newStatus)
     {
-        var groupName = OrderTrackingHub.GetUserGroupName(order.CustomerId);
-        await _hubContext.Clients.Group(groupName).SendAsync(
+        // Thông báo cho khách hàng
+        var customerGroup = OrderTrackingHub.GetUserGroupName(order.CustomerId);
+        
+        // Thông báo cho người bán (Shop owner)
+        var sellerGroup = OrderTrackingHub.GetUserGroupName(order.Shop.OwnerId);
+
+        var data = new
+        {
+            orderId = order.Id,
+            oldStatus = (short)oldStatus,
+            oldStatusName = OrderStatusVnHelper.Vietnamese(oldStatus),
+            newStatus = (short)newStatus,
+            newStatusName = OrderStatusVnHelper.Vietnamese(newStatus),
+            updatedAt = order.UpdatedAt,
+            source = "ghn"
+        };
+
+        await _hubContext.Clients.Groups(customerGroup, sellerGroup).SendAsync(
             "OrderStatusUpdated",
-            new
-            {
-                orderId = order.Id,
-                oldStatus = (short)oldStatus,
-                oldStatusName = OrderStatusVnHelper.Vietnamese(oldStatus),
-                newStatus = (short)newStatus,
-                newStatusName = OrderStatusVnHelper.Vietnamese(newStatus),
-                updatedAt = order.UpdatedAt,
-                source = "ghn"
-            },
+            data,
             cancellationToken: CancellationToken.None);
     }
 
