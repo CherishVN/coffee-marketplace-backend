@@ -34,7 +34,6 @@ public class AiDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.HasDefaultSchema("ai_schema");
 
         // ── AI Chat Session ───────────────────────────────────────────────
         modelBuilder.Entity<AiChatSession>(e =>

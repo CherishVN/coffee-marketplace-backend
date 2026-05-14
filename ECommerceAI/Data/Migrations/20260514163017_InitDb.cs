@@ -8,17 +8,13 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ECommerceAI.Data.Migrations
 {
     /// <inheritdoc />
-    public partial class InitAiSchema : Migration
+    public partial class InitDb : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.EnsureSchema(
-                name: "ai_schema");
-
             migrationBuilder.CreateTable(
                 name: "ai_chat_sessions",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
@@ -34,7 +30,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "ai_material_suggestions",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
@@ -52,7 +47,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "ai_tag_suggestions",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
@@ -74,7 +68,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "categories",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<long>(type: "bigint", nullable: false)
@@ -92,7 +85,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "disputes",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -112,7 +104,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "materials",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -127,7 +118,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "orders",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -147,7 +137,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "shops",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -164,7 +153,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "tags",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<long>(type: "bigint", nullable: false)
@@ -179,7 +167,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "users",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -194,7 +181,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "ai_chat_messages",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<long>(type: "bigint", nullable: false)
@@ -211,7 +197,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "ai_chat_messages_session_id_fkey",
                         column: x => x.session_id,
-                        principalSchema: "ai_schema",
                         principalTable: "ai_chat_sessions",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -219,7 +204,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "ai_chat_session_preferences",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     session_id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -234,7 +218,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "ai_chat_session_preferences_session_id_fkey",
                         column: x => x.session_id,
-                        principalSchema: "ai_schema",
                         principalTable: "ai_chat_sessions",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -242,7 +225,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "ai_generated_carts",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
@@ -256,7 +238,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "ai_generated_carts_session_id_fkey",
                         column: x => x.session_id,
-                        principalSchema: "ai_schema",
                         principalTable: "ai_chat_sessions",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -264,7 +245,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "ai_product_recommendations",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
@@ -280,7 +260,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "ai_product_recommendations_session_id_fkey",
                         column: x => x.session_id,
-                        principalSchema: "ai_schema",
                         principalTable: "ai_chat_sessions",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -288,7 +267,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "products",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -308,14 +286,12 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "FK_products_categories_category_id",
                         column: x => x.category_id,
-                        principalSchema: "ai_schema",
                         principalTable: "categories",
                         principalColumn: "id");
                 });
 
             migrationBuilder.CreateTable(
                 name: "order_items",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -332,7 +308,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "FK_order_items_orders_order_id",
                         column: x => x.order_id,
-                        principalSchema: "ai_schema",
                         principalTable: "orders",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -340,7 +315,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "ai_recommendation_items",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
@@ -355,7 +329,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "ai_recommendation_items_ai_cart_id_fkey",
                         column: x => x.ai_cart_id,
-                        principalSchema: "ai_schema",
                         principalTable: "ai_generated_carts",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -363,7 +336,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "product_images",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -377,7 +349,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "FK_product_images_products_product_id",
                         column: x => x.product_id,
-                        principalSchema: "ai_schema",
                         principalTable: "products",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -385,7 +356,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "product_tags",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     product_id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -397,14 +367,12 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "FK_product_tags_products_product_id",
                         column: x => x.product_id,
-                        principalSchema: "ai_schema",
                         principalTable: "products",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
                         name: "FK_product_tags_tags_tag_id",
                         column: x => x.tag_id,
-                        principalSchema: "ai_schema",
                         principalTable: "tags",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -412,7 +380,6 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateTable(
                 name: "product_variants",
-                schema: "ai_schema",
                 columns: table => new
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
@@ -430,7 +397,6 @@ namespace ECommerceAI.Data.Migrations
                     table.ForeignKey(
                         name: "FK_product_variants_products_product_id",
                         column: x => x.product_id,
-                        principalSchema: "ai_schema",
                         principalTable: "products",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -438,55 +404,46 @@ namespace ECommerceAI.Data.Migrations
 
             migrationBuilder.CreateIndex(
                 name: "IX_ai_chat_messages_session_id",
-                schema: "ai_schema",
                 table: "ai_chat_messages",
                 column: "session_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_ai_generated_carts_session_id",
-                schema: "ai_schema",
                 table: "ai_generated_carts",
                 column: "session_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_ai_product_recommendations_session_id",
-                schema: "ai_schema",
                 table: "ai_product_recommendations",
                 column: "session_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_ai_recommendation_items_ai_cart_id",
-                schema: "ai_schema",
                 table: "ai_recommendation_items",
                 column: "ai_cart_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_order_items_order_id",
-                schema: "ai_schema",
                 table: "order_items",
                 column: "order_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_product_images_product_id",
-                schema: "ai_schema",
                 table: "product_images",
                 column: "product_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_product_tags_tag_id",
-                schema: "ai_schema",
                 table: "product_tags",
                 column: "tag_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_product_variants_product_id",
-                schema: "ai_schema",
                 table: "product_variants",
                 column: "product_id");
 
             migrationBuilder.CreateIndex(
                 name: "IX_products_category_id",
-                schema: "ai_schema",
                 table: "products",
                 column: "category_id");
         }
@@ -495,84 +452,64 @@ namespace ECommerceAI.Data.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "ai_chat_messages",
-                schema: "ai_schema");
+                name: "ai_chat_messages");
 
             migrationBuilder.DropTable(
-                name: "ai_chat_session_preferences",
-                schema: "ai_schema");
+                name: "ai_chat_session_preferences");
 
             migrationBuilder.DropTable(
-                name: "ai_material_suggestions",
-                schema: "ai_schema");
+                name: "ai_material_suggestions");
 
             migrationBuilder.DropTable(
-                name: "ai_product_recommendations",
-                schema: "ai_schema");
+                name: "ai_product_recommendations");
 
             migrationBuilder.DropTable(
-                name: "ai_recommendation_items",
-                schema: "ai_schema");
+                name: "ai_recommendation_items");
 
             migrationBuilder.DropTable(
-                name: "ai_tag_suggestions",
-                schema: "ai_schema");
+                name: "ai_tag_suggestions");
 
             migrationBuilder.DropTable(
-                name: "disputes",
-                schema: "ai_schema");
+                name: "disputes");
 
             migrationBuilder.DropTable(
-                name: "materials",
-                schema: "ai_schema");
+                name: "materials");
 
             migrationBuilder.DropTable(
-                name: "order_items",
-                schema: "ai_schema");
+                name: "order_items");
 
             migrationBuilder.DropTable(
-                name: "product_images",
-                schema: "ai_schema");
+                name: "product_images");
 
             migrationBuilder.DropTable(
-                name: "product_tags",
-                schema: "ai_schema");
+                name: "product_tags");
 
             migrationBuilder.DropTable(
-                name: "product_variants",
-                schema: "ai_schema");
+                name: "product_variants");
 
             migrationBuilder.DropTable(
-                name: "shops",
-                schema: "ai_schema");
+                name: "shops");
 
             migrationBuilder.DropTable(
-                name: "users",
-                schema: "ai_schema");
+                name: "users");
 
             migrationBuilder.DropTable(
-                name: "ai_generated_carts",
-                schema: "ai_schema");
+                name: "ai_generated_carts");
 
             migrationBuilder.DropTable(
-                name: "orders",
-                schema: "ai_schema");
+                name: "orders");
 
             migrationBuilder.DropTable(
-                name: "tags",
-                schema: "ai_schema");
+                name: "tags");
 
             migrationBuilder.DropTable(
-                name: "products",
-                schema: "ai_schema");
+                name: "products");
 
             migrationBuilder.DropTable(
-                name: "ai_chat_sessions",
-                schema: "ai_schema");
+                name: "ai_chat_sessions");
 
             migrationBuilder.DropTable(
-                name: "categories",
-                schema: "ai_schema");
+                name: "categories");
         }
     }
 }

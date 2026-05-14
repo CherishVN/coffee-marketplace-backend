@@ -18,7 +18,6 @@ namespace ECommerceAI.Data.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasDefaultSchema("ai_schema")
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
@@ -61,7 +60,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("SessionId");
 
-                    b.ToTable("ai_chat_messages", "ai_schema");
+                    b.ToTable("ai_chat_messages", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiChatSession", b =>
@@ -97,7 +96,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ai_chat_sessions", "ai_schema");
+                    b.ToTable("ai_chat_sessions", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiChatSessionPreference", b =>
@@ -130,7 +129,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("SessionId");
 
-                    b.ToTable("ai_chat_session_preferences", "ai_schema");
+                    b.ToTable("ai_chat_session_preferences", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiGeneratedCart", b =>
@@ -159,7 +158,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("SessionId");
 
-                    b.ToTable("ai_generated_carts", "ai_schema");
+                    b.ToTable("ai_generated_carts", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiMaterialSuggestion", b =>
@@ -202,7 +201,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ai_material_suggestions", "ai_schema");
+                    b.ToTable("ai_material_suggestions", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiProductRecommendation", b =>
@@ -240,7 +239,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("SessionId");
 
-                    b.ToTable("ai_product_recommendations", "ai_schema");
+                    b.ToTable("ai_product_recommendations", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiRecommendationItem", b =>
@@ -273,7 +272,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("AiCartId");
 
-                    b.ToTable("ai_recommendation_items", "ai_schema");
+                    b.ToTable("ai_recommendation_items", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiTagSuggestion", b =>
@@ -333,7 +332,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ai_tag_suggestions", "ai_schema");
+                    b.ToTable("ai_tag_suggestions", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.AppUser", b =>
@@ -357,7 +356,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("users", "ai_schema");
+                    b.ToTable("users", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.Category", b =>
@@ -393,7 +392,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("categories", "ai_schema");
+                    b.ToTable("categories", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.Dispute", b =>
@@ -439,7 +438,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("disputes", "ai_schema");
+                    b.ToTable("disputes", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.Material", b =>
@@ -465,7 +464,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("materials", "ai_schema");
+                    b.ToTable("materials", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.Order", b =>
@@ -512,7 +511,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("orders", "ai_schema");
+                    b.ToTable("orders", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.OrderItem", b =>
@@ -553,7 +552,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("order_items", "ai_schema");
+                    b.ToTable("order_items", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.Product", b =>
@@ -606,7 +605,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("CategoryId");
 
-                    b.ToTable("products", "ai_schema");
+                    b.ToTable("products", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.ProductImage", b =>
@@ -633,7 +632,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("product_images", "ai_schema");
+                    b.ToTable("product_images", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.ProductTag", b =>
@@ -650,7 +649,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("TagId");
 
-                    b.ToTable("product_tags", "ai_schema");
+                    b.ToTable("product_tags", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.ProductVariant", b =>
@@ -694,7 +693,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("product_variants", "ai_schema");
+                    b.ToTable("product_variants", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.Shop", b =>
@@ -727,7 +726,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("shops", "ai_schema");
+                    b.ToTable("shops", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.ReadOnly.Tag", b =>
@@ -751,7 +750,7 @@ namespace ECommerceAI.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("tags", "ai_schema");
+                    b.ToTable("tags", (string)null);
                 });
 
             modelBuilder.Entity("ECommerceAI.Data.Entities.AiChatMessage", b =>
