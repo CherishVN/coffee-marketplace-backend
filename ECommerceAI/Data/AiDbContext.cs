@@ -10,6 +10,7 @@ public class AiDbContext : DbContext
 
     // ── AI-owned tables (read/write) ──────────────────────────────────────
     public DbSet<AiChatSession> AiChatSessions { get; set; }
+    public DbSet<AiChatSessionPreference> AiChatSessionPreferences { get; set; }
     public DbSet<AiChatMessage> AiChatMessages { get; set; }
     public DbSet<AiGeneratedCart> AiGeneratedCarts { get; set; }
     public DbSet<AiProductRecommendation> AiProductRecommendations { get; set; }
@@ -33,6 +34,8 @@ public class AiDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasDefaultSchema("ai_schema");
+
         // ── AI Chat Session ───────────────────────────────────────────────
         modelBuilder.Entity<AiChatSession>(e =>
         {
@@ -50,6 +53,21 @@ public class AiDbContext : DbContext
                 .HasForeignKey(c => c.SessionId).HasConstraintName("ai_generated_carts_session_id_fkey");
             e.HasMany(x => x.Recommendations).WithOne(r => r.Session)
                 .HasForeignKey(r => r.SessionId).HasConstraintName("ai_product_recommendations_session_id_fkey");
+            
+            e.HasOne(x => x.Preference).WithOne(p => p.Session)
+                .HasForeignKey<AiChatSessionPreference>(p => p.SessionId).HasConstraintName("ai_chat_session_preferences_session_id_fkey");
+        });
+
+        // ── AI Chat Session Preference ────────────────────────────────────
+        modelBuilder.Entity<AiChatSessionPreference>(e =>
+        {
+            e.ToTable("ai_chat_session_preferences");
+            e.HasKey(x => x.SessionId);
+            e.Property(x => x.SessionId).HasColumnName("session_id");
+            e.Property(x => x.IsMuted).HasColumnName("is_muted").HasDefaultValue(false);
+            e.Property(x => x.IsDeleted).HasColumnName("is_deleted").HasDefaultValue(false);
+            e.Property(x => x.LastReadMessageId).HasColumnName("last_read_message_id");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
         });
 
         // ── AI Chat Message ───────────────────────────────────────────────
