@@ -26,9 +26,7 @@ public partial class Category
 
     public DateTime UpdatedAt { get; set; }
 
-    public virtual ICollection<AiTagSuggestion> AiTagSuggestionChosenCategories { get; set; } = new List<AiTagSuggestion>();
 
-    public virtual ICollection<AiTagSuggestion> AiTagSuggestionSuggestedCategories { get; set; } = new List<AiTagSuggestion>();
 
     public virtual ICollection<Category> InverseParent { get; set; } = new List<Category>();
 

@@ -31,11 +31,8 @@ public partial class User
 
     public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();
 
-        public virtual ICollection<AiChatSession> AiChatSessions { get; set; } = new List<AiChatSession>();
 
-    public virtual ICollection<AiMaterialSuggestion> AiMaterialSuggestions { get; set; } = new List<AiMaterialSuggestion>();
 
-    public virtual ICollection<AiTagSuggestion> AiTagSuggestions { get; set; } = new List<AiTagSuggestion>();
 
     public virtual ICollection<Cart> Carts { get; set; } = new List<Cart>();
 

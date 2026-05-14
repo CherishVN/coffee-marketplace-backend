@@ -17,7 +17,6 @@ public partial class Cart
 
     public virtual ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();
 
-    public virtual ICollection<AiGeneratedCart> AiGeneratedCarts { get; set; } = new List<AiGeneratedCart>();
 
     public virtual User Customer { get; set; } = null!;
 }
