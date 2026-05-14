@@ -948,6 +948,9 @@ public partial class ApplicationDbContext : DbContext
                 .HasColumnName("cod_amount");
             entity.Property(e => e.EstimatedDeliveryDate).HasColumnName("estimated_delivery_date");
             entity.Property(e => e.ActualDeliveryDate).HasColumnName("actual_delivery_date");
+            entity.Property(e => e.DeliveryProofUrls)
+                .HasColumnType("text")
+                .HasColumnName("delivery_proof_urls");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");

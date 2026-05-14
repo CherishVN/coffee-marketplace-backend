@@ -33,4 +33,7 @@ public class GhnOrderStatusPayload
 
     [JsonPropertyName("Description")]
     public string? Description { get; set; }
+
+    [JsonPropertyName("DeliveryProofUrls")]
+    public List<string>? DeliveryProofUrls { get; set; }
 }

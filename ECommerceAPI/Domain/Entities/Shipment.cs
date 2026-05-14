@@ -30,6 +30,8 @@ public partial class Shipment
 
     public DateTimeOffset? ActualDeliveryDate { get; set; }
 
+    public string? DeliveryProofUrls { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }

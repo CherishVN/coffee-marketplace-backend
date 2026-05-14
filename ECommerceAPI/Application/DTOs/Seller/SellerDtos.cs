@@ -172,6 +172,8 @@ public class OrderDto
     public string? TrackingCode { get; set; }
     public DateTimeOffset? EstimatedDeliveryDate { get; set; }
     public DateTimeOffset? ActualDeliveryDate { get; set; }
+    /// <summary>Danh sách URL ảnh bằng chứng giao hàng.</summary>
+    public List<string>? DeliveryProofUrls { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public List<OrderStatusHistoryItemDto> StatusHistory { get; set; } = new();

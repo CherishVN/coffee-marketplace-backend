@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Orders;
 using ECommerceAPI.Application.DTOs.Seller;
@@ -1157,6 +1158,7 @@ public class SellerService : ISellerService
                 TrackingCode = s.GhnDisplayTrackingOrNull(),
                 EstimatedDeliveryDate = s?.EstimatedDeliveryDate,
                 ActualDeliveryDate = s?.ActualDeliveryDate,
+                DeliveryProofUrls = ParseDeliveryProofUrls(s?.DeliveryProofUrls),
                 CreatedAt = o.CreatedAt,
                 ShopGhnShopId = shop.GhnShopId,
                 ShopFromDistrictId = shop.DistrictId,
@@ -1281,6 +1283,7 @@ public class SellerService : ISellerService
                 TrackingCode = ship.GhnDisplayTrackingOrNull(),
                 EstimatedDeliveryDate = ship?.EstimatedDeliveryDate,
                 ActualDeliveryDate = ship?.ActualDeliveryDate,
+                DeliveryProofUrls = ParseDeliveryProofUrls(ship?.DeliveryProofUrls),
                 CreatedAt = order.CreatedAt,
                 UpdatedAt = order.UpdatedAt,
                 StatusHistory = statusHistoryDtos,
@@ -1910,5 +1913,19 @@ public class SellerService : ISellerService
             queueEmail: true);
 
         return new ServiceResponse { Success = true, Message = "Đã từ chối yêu cầu hủy. Đơn hàng tiếp tục được xử lý." };
+    }
+
+    private static List<string>? ParseDeliveryProofUrls(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<string>>(json);
+            return list is { Count: > 0 } ? list : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

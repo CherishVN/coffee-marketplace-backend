@@ -77,8 +77,7 @@ public class GhnOrderWebhookController : ControllerBase
     }
 
     /// <summary>
-    /// Giả lập callback GHN (chỉ bật khi <c>GHN:AllowSimulateWebhook</c> = true). Dùng header
-    /// <c>X-Simulate-Key</c> = <c>GHN:SimulateKey</c>.
+    /// Giả lập callback GHN cho môi trường dev qua Postman.
     /// </summary>
     [HttpPost("simulate")]
     [AllowAnonymous]
@@ -98,6 +97,7 @@ public class GhnOrderWebhookController : ControllerBase
         {
             return Unauthorized();
         }
+
 
         GhnOrderStatusPayload? payload;
         try

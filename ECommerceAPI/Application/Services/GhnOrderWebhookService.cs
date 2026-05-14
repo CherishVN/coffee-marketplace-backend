@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Webhooks;
 using ECommerceAPI.Application.Interfaces;
@@ -341,6 +342,8 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
             };
             if (string.Equals(raw, "delivered", StringComparison.OrdinalIgnoreCase))
                 created.ActualDeliveryDate = ParseGhnEventTimeToOffset(payload.Time) ?? DateTimeOffset.UtcNow;
+            if (payload.DeliveryProofUrls is { Count: > 0 })
+                created.DeliveryProofUrls = JsonSerializer.Serialize(payload.DeliveryProofUrls);
             _context.Shipments.Add(created);
             return;
         }
@@ -361,6 +364,8 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         row.UpdatedAt = DateTime.UtcNow;
         if (string.Equals(raw, "delivered", StringComparison.OrdinalIgnoreCase))
             row.ActualDeliveryDate = ParseGhnEventTimeToOffset(payload.Time) ?? DateTimeOffset.UtcNow;
+        if (payload.DeliveryProofUrls is { Count: > 0 })
+            row.DeliveryProofUrls = JsonSerializer.Serialize(payload.DeliveryProofUrls);
     }
 
     private static DateTimeOffset? ParseGhnEventTimeToOffset(DateTime? time)

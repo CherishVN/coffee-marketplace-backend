@@ -205,6 +205,7 @@ public class CustomerOrderService : ICustomerOrderService
             ActualDeliveryDate = latestShipment?.ActualDeliveryDate,
             TrackingCode = latestShipment?.TrackingCode,
             ShippingProvider = latestShipment?.ShippingProvider,
+            DeliveryProofUrls = ParseDeliveryProofUrls(latestShipment?.DeliveryProofUrls),
             CancelRequestedAt = order.CancelRequestedAt,
             CancelRequestDeadline = order.CancelRequestedAt.HasValue
                 ? order.CancelRequestedAt.Value.AddHours(
@@ -849,6 +850,20 @@ public class CustomerOrderService : ICustomerOrderService
             newStatusName = OrderStatusVnHelper.Vietnamese(newStatus),
             updatedAt = order.UpdatedAt
         });
+    }
+
+    private static List<string>? ParseDeliveryProofUrls(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<string>>(json);
+            return list is { Count: > 0 } ? list : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
 

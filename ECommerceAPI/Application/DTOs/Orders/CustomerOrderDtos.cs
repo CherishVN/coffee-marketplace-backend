@@ -71,6 +71,8 @@ public class CustomerOrderDetailDto : CustomerOrderSummaryDto
     public string? TrackingCode { get; set; }
     /// <summary>Đơn vị vận chuyển (GHN, ...).</summary>
     public string? ShippingProvider { get; set; }
+    /// <summary>Danh sách URL ảnh bằng chứng giao hàng.</summary>
+    public List<string>? DeliveryProofUrls { get; set; }
     /// <summary>
     /// Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt.
     /// Null = không có yêu cầu hủy đang chờ.
