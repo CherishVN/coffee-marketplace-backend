@@ -607,6 +607,38 @@ public class SellerService : ISellerService
             }
         }
 
+        // Add local specialty meta
+        if (dto.LocalSpecialtyProfileId.HasValue)
+        {
+            var profile = await _context.LocalSpecialtyProfiles
+                .FirstOrDefaultAsync(p => p.Id == dto.LocalSpecialtyProfileId.Value && p.IsActive);
+
+            if (profile != null)
+            {
+                var selectedPipe = dto.SelectedTraits != null && dto.SelectedTraits.Count > 0
+                    ? string.Join("|", dto.SelectedTraits)
+                    : string.Empty;
+
+                string? mismatchWarning = null;
+                if (dto.SelectedTraits != null && dto.SelectedTraits.Count > 0)
+                {
+                    var expected = profile.ExpectedTraitsPipe.Split('|', StringSplitOptions.RemoveEmptyEntries);
+                    var missing = expected.Where(e => !dto.SelectedTraits.Contains(e)).ToList();
+                    if (missing.Count >= expected.Length / 2)
+                        mismatchWarning = $"Mô tả thiếu nhiều đặc điểm của {profile.ArchetypeName}: {string.Join(", ", missing)}";
+                }
+
+                _context.ProductLocalMetas.Add(new ProductLocalMeta
+                {
+                    ProductId = product.Id,
+                    LocalSpecialtyProfileId = profile.Id,
+                    SelectedTraitsPipe = selectedPipe,
+                    MismatchWarning = mismatchWarning,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
         // Add materials
         if (dto.MaterialIds != null && dto.MaterialIds.Any())
         {

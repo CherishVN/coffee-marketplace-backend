@@ -123,6 +123,28 @@ public class ProductModerationService : IProductModerationService
                 .Include(x => x.Inventories)
                 .FirstOrDefaultAsync(x => x.Id == productId);
 
+            // Load local meta với Include — Split() không thể dịch sang SQL nên map sau khi fetch
+            var rawMeta = await _context.ProductLocalMetas
+                .AsNoTracking()
+                .Include(m => m.LocalSpecialtyProfile)
+                .Where(m => m.ProductId == productId)
+                .FirstOrDefaultAsync();
+
+            var localMeta = rawMeta == null ? null : new ProductLocalMetaModerationDto
+            {
+                ProfileId       = rawMeta.LocalSpecialtyProfileId,
+                ProvinceName    = rawMeta.LocalSpecialtyProfile.ProvinceName,
+                ArchetypeName   = rawMeta.LocalSpecialtyProfile.ArchetypeName,
+                DisplayNote     = rawMeta.LocalSpecialtyProfile.DisplayNote,
+                MismatchWarning = rawMeta.MismatchWarning,
+                SelectedTraits  = string.IsNullOrEmpty(rawMeta.SelectedTraitsPipe)
+                    ? new List<string>()
+                    : rawMeta.SelectedTraitsPipe.Split('|', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                ExpectedTraits  = string.IsNullOrEmpty(rawMeta.LocalSpecialtyProfile.ExpectedTraitsPipe)
+                    ? new List<string>()
+                    : rawMeta.LocalSpecialtyProfile.ExpectedTraitsPipe.Split('|', StringSplitOptions.RemoveEmptyEntries).ToList(),
+            };
+
             if (p == null)
             {
                 return new ProductModerationResponseDto
@@ -154,6 +176,7 @@ public class ProductModerationService : IProductModerationService
                 MaterialNames = snap.MaterialNames,
                 BaseInventoryQuantity = snap.BaseInventoryQuantity,
                 Variants = snap.Variants,
+                LocalMeta = localMeta,
             };
 
             return new ProductModerationResponseDto

@@ -26,6 +26,19 @@ public class ProductStorefrontDto
 }
 
 /// <summary>
+/// Thông tin local specialty gắn với sản phẩm (hiển thị ở trang chi tiết).
+/// </summary>
+public class ProductLocalMetaDto
+{
+    public int ProfileId { get; set; }
+    public string ProvinceName { get; set; } = string.Empty;
+    public string ArchetypeName { get; set; } = string.Empty;
+    public string? DisplayNote { get; set; }
+    public List<string> SelectedTraits { get; set; } = new();
+    public List<string> ExpectedTraits { get; set; } = new();
+}
+
+/// <summary>
 /// Dùng cho trang chi tiết sản phẩm (có đầy đủ thông tin)
 /// </summary>
 public class ProductStorefrontDetailDto : ProductStorefrontDto
@@ -35,6 +48,9 @@ public class ProductStorefrontDetailDto : ProductStorefrontDto
     public int TotalStock { get; set; }
     public List<string> Tags { get; set; } = new();
     public List<string> Materials { get; set; } = new();
+
+    /// <summary>Null nếu sản phẩm không gắn với hồ sơ đặc sản nào.</summary>
+    public ProductLocalMetaDto? LocalMeta { get; set; }
 }
 
 public class ProductVariantStorefrontDto

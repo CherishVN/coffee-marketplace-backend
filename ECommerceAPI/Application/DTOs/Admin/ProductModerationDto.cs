@@ -1,5 +1,16 @@
 namespace ECommerceAPI.Application.DTOs.Admin;
 
+public class ProductLocalMetaModerationDto
+{
+    public int ProfileId { get; set; }
+    public string ProvinceName { get; set; } = string.Empty;
+    public string ArchetypeName { get; set; } = string.Empty;
+    public string? DisplayNote { get; set; }
+    public List<string> SelectedTraits { get; set; } = new();
+    public List<string> ExpectedTraits { get; set; } = new();
+    public string? MismatchWarning { get; set; }
+}
+
 public class ProductModerationDto
 {
     public Guid Id { get; set; }
@@ -22,6 +33,8 @@ public class ProductModerationDto
     public List<string> MaterialNames { get; set; } = new();
     public int? BaseInventoryQuantity { get; set; }
     public List<ProductApprovedVariantSnapshotDto> Variants { get; set; } = new();
+    /// <summary>Thông tin Local Brand — hiển thị cho admin khi duyệt.</summary>
+    public ProductLocalMetaModerationDto? LocalMeta { get; set; }
 }
 
 public class HideProductDto
