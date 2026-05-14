@@ -301,10 +301,13 @@ public class AiDbContext : DbContext
             e.ToTable("users");
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnName("id");
-            e.Property(x => x.Email).HasColumnName("email");
+            e.Property(x => x.UserCode).HasColumnName("user_code");
+            e.Property(x => x.FullName).HasColumnName("full_name");
+            e.Property(x => x.Phone).HasColumnName("phone");
             e.Property(x => x.RoleId).HasColumnName("role_id");
             e.Property(x => x.Status).HasColumnName("status");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
         });
 
         // ── Read-only: Dispute ────────────────────────────────────────────
