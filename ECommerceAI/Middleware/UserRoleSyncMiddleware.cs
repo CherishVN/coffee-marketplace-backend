@@ -32,18 +32,22 @@ public class UserRoleSyncMiddleware
             {
                 try
                 {
-                    var roleCode = await dbContext.Database
-                        .SqlQueryRaw<string>(
-                            "SELECT r.code AS \"Value\" FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = {0}",
-                            userId)
-                        .OrderBy(x => x)
-                        .FirstOrDefaultAsync();
-
-                    if (roleCode != null && context.User.Identity is ClaimsIdentity identity)
+                    var user = await dbContext.Users.FindAsync(userId);
+                    if (user != null && user.RoleId.HasValue)
                     {
-                        var existing = identity.FindFirst(ClaimTypes.Role);
-                        if (existing != null) identity.RemoveClaim(existing);
-                        identity.AddClaim(new Claim(ClaimTypes.Role, roleCode));
+                        string roleCode = user.RoleId.Value switch
+                        {
+                            1 => "admin",
+                            2 => "seller",
+                            _ => "customer"
+                        };
+
+                        if (context.User.Identity is ClaimsIdentity identity)
+                        {
+                            var existing = identity.FindFirst(ClaimTypes.Role);
+                            if (existing != null) identity.RemoveClaim(existing);
+                            identity.AddClaim(new Claim(ClaimTypes.Role, roleCode));
+                        }
                     }
                 }
                 catch (Exception ex)
