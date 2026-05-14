@@ -33,6 +33,17 @@ public class CreateProductDto
     public List<string>? ImageUrls { get; set; }
     public List<long>? TagIds { get; set; }
     public List<Guid>? MaterialIds { get; set; }
+
+    /// <summary>
+    /// ID của hồ sơ đặc sản địa phương (từ bảng local_specialty_profiles).
+    /// Bắt buộc nếu sản phẩm thuộc danh mục có local specialty (vd: cà phê).
+    /// </summary>
+    public int? LocalSpecialtyProfileId { get; set; }
+
+    /// <summary>
+    /// Các đặc điểm seller tick chọn (vd: ["Đắng đậm","Ít chua","Caffeine cao"]).
+    /// </summary>
+    public List<string>? SelectedTraits { get; set; }
 }
 
 public class UpdateProductDto

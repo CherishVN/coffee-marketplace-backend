@@ -423,6 +423,30 @@ public class ProductStorefrontService : IProductStorefrontService
                     Message = "Không tìm thấy sản phẩm"
                 };
 
+            // Load local meta riêng — Split() không thể dịch sang SQL trong EF Core + Npgsql
+            var rawMeta = await _context.ProductLocalMetas
+                .AsNoTracking()
+                .Include(m => m.LocalSpecialtyProfile)
+                .Where(m => m.ProductId == product.Id)
+                .FirstOrDefaultAsync();
+
+            if (rawMeta != null)
+            {
+                product.LocalMeta = new ProductLocalMetaDto
+                {
+                    ProfileId      = rawMeta.LocalSpecialtyProfileId,
+                    ProvinceName   = rawMeta.LocalSpecialtyProfile.ProvinceName,
+                    ArchetypeName  = rawMeta.LocalSpecialtyProfile.ArchetypeName,
+                    DisplayNote    = rawMeta.LocalSpecialtyProfile.DisplayNote,
+                    SelectedTraits = string.IsNullOrEmpty(rawMeta.SelectedTraitsPipe)
+                        ? new List<string>()
+                        : rawMeta.SelectedTraitsPipe.Split('|', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                    ExpectedTraits = string.IsNullOrEmpty(rawMeta.LocalSpecialtyProfile.ExpectedTraitsPipe)
+                        ? new List<string>()
+                        : rawMeta.LocalSpecialtyProfile.ExpectedTraitsPipe.Split('|', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                };
+            }
+
             return new ProductStorefrontDetailResponseDto { Success = true, Product = product };
         }
         catch (Exception ex)

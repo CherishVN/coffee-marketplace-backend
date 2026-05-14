@@ -90,6 +90,10 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<ShopFollow> ShopFollows { get; set; }
 
+    public virtual DbSet<LocalSpecialtyProfile> LocalSpecialtyProfiles { get; set; }
+
+    public virtual DbSet<ProductLocalMeta> ProductLocalMetas { get; set; }
+
 
     public virtual DbSet<Tag> Tags { get; set; }
 
@@ -1859,6 +1863,103 @@ public partial class ApplicationDbContext : DbContext
                 .HasForeignKey(d => d.EditorId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("user_audit_logs_editor_id_fkey");
+        });
+
+        modelBuilder.Entity<LocalSpecialtyProfile>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("local_specialty_profiles_pkey");
+            entity.ToTable("local_specialty_profiles");
+            entity.Property(e => e.Id).HasColumnName("id").UseIdentityColumn();
+            entity.Property(e => e.CategoryCode).HasColumnName("category_code").HasMaxLength(100);
+            entity.Property(e => e.ProvinceName).HasColumnName("province_name").HasMaxLength(200);
+            entity.Property(e => e.ArchetypeName).HasColumnName("archetype_name").HasMaxLength(200);
+            entity.Property(e => e.ExpectedTraitsPipe).HasColumnName("expected_traits_pipe");
+            entity.Property(e => e.KeywordsPipe).HasColumnName("keywords_pipe");
+            entity.Property(e => e.DisplayNote).HasColumnName("display_note");
+            entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+
+            entity.HasData(
+                new LocalSpecialtyProfile
+                {
+                    Id = 1,
+                    CategoryCode = "ca_phe",
+                    ProvinceName = "Đắk Lắk",
+                    ArchetypeName = "Robusta Buôn Ma Thuột",
+                    ExpectedTraitsPipe = "Đắng đậm|Ít chua|Caffeine cao|Mùi chocolate",
+                    KeywordsPipe = "robusta|buon ma thuot|buôn ma thuột|đắk lắk|dak lak|bmth",
+                    DisplayNote = "Thủ phủ Robusta toàn cầu — hạt chắc, vị đắng đậm, ít chua, thoảng mùi chocolate.",
+                    IsActive = true
+                },
+                new LocalSpecialtyProfile
+                {
+                    Id = 2,
+                    CategoryCode = "ca_phe",
+                    ProvinceName = "Lâm Đồng",
+                    ArchetypeName = "Arabica Cầu Đất",
+                    ExpectedTraitsPipe = "Chua thanh|Hương trái cây|Hậu ngọt|Body nhẹ",
+                    KeywordsPipe = "arabica|cau dat|cầu đất|lâm đồng|lam dong|da lat|đà lạt",
+                    DisplayNote = "Vùng cao Cầu Đất — Arabica chua thanh, hương trái cây tự nhiên, hậu vị ngọt dịu.",
+                    IsActive = true
+                },
+                new LocalSpecialtyProfile
+                {
+                    Id = 3,
+                    CategoryCode = "ca_phe",
+                    ProvinceName = "Sơn La",
+                    ArchetypeName = "Arabica Sơn La",
+                    ExpectedTraitsPipe = "Thơm nhẹ|Chua dịu|Hậu vị sạch|Body vừa",
+                    KeywordsPipe = "arabica|son la|sơn la|mộc châu|moc chau",
+                    DisplayNote = "Vùng núi Tây Bắc — Arabica thơm nhẹ, chua dịu, hậu vị sạch.",
+                    IsActive = true
+                },
+                new LocalSpecialtyProfile
+                {
+                    Id = 4,
+                    CategoryCode = "ca_phe",
+                    ProvinceName = "Gia Lai",
+                    ArchetypeName = "Robusta Pleiku",
+                    ExpectedTraitsPipe = "Đắng vừa|Mùi đất|Thể chất đậm|Ít chua",
+                    KeywordsPipe = "robusta|pleiku|plei ku|gia lai|ia grai|chư sê",
+                    DisplayNote = "Cao nguyên Gia Lai — Robusta đắng vừa, mùi đất đặc trưng Tây Nguyên.",
+                    IsActive = true
+                },
+                new LocalSpecialtyProfile
+                {
+                    Id = 5,
+                    CategoryCode = "ca_phe",
+                    ProvinceName = "Quảng Trị",
+                    ArchetypeName = "Arabica Khe Sanh",
+                    ExpectedTraitsPipe = "Hương dịu|Chua nhẹ|Hậu vị thanh|Đất đỏ bazan",
+                    KeywordsPipe = "arabica|khe sanh|quảng trị|quang tri|hướng hóa|huong hoa",
+                    DisplayNote = "Vùng cao Khe Sanh — Arabica trồng trên đất đỏ bazan, hương dịu, vị chua nhẹ, hậu vị thanh đặc trưng.",
+                    IsActive = true
+                }
+            );
+        });
+
+        modelBuilder.Entity<ProductLocalMeta>(entity =>
+        {
+            entity.HasKey(e => e.ProductId).HasName("product_local_meta_pkey");
+            entity.ToTable("product_local_meta");
+            entity.Property(e => e.ProductId).HasColumnName("product_id");
+            entity.Property(e => e.LocalSpecialtyProfileId).HasColumnName("local_specialty_profile_id");
+            entity.Property(e => e.SelectedTraitsPipe).HasColumnName("selected_traits_pipe");
+            entity.Property(e => e.MismatchWarning).HasColumnName("mismatch_warning");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+
+            entity.HasOne(d => d.Product)
+                .WithOne()
+                .HasForeignKey<ProductLocalMeta>(d => d.ProductId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("product_local_meta_product_id_fkey");
+
+            entity.HasOne(d => d.LocalSpecialtyProfile)
+                .WithMany(p => p.ProductLocalMetas)
+                .HasForeignKey(d => d.LocalSpecialtyProfileId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("product_local_meta_profile_id_fkey");
         });
 
         OnModelCreatingPartial(modelBuilder);
