@@ -68,6 +68,12 @@ public class CustomerDisputeDto
     [JsonPropertyName("adminNote")]
     public string? AdminNote { get; set; }
     public List<DisputeAffectedItemDto> AffectedItems { get; set; } = new();
+    public short? OrderStatus { get; set; }
+    public List<string> ReturnShipmentEvidenceUrls { get; set; } = new();
+    /// <summary>Mã vận đơn GHN của đơn hàng gốc (để hiển thị tham khảo cho khách khi gửi trả)</summary>
+    public string? OrderTrackingCode { get; set; }
+    /// <summary>Mã vận đơn trả hàng (nếu khách đã gửi)</summary>
+    public string? ReturnTrackingCode { get; set; }
 }
 
 public class CustomerDisputeListResponseDto

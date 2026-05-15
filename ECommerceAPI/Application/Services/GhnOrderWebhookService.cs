@@ -42,7 +42,8 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
     public async Task<GhnOrderWebhookResult> ProcessOrderStatusAsync(
         GhnOrderStatusPayload payload,
         bool validateShopId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        List<string>? evidenceUrls = null)
     {
         var client = payload.ClientOrderCode?.Trim();
         var ghnCode = payload.OrderCode?.Trim();
@@ -86,7 +87,7 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
 
         order.UpdatedAt = DateTime.UtcNow;
 
-        await UpsertShipmentFromGhnPayloadAsync(order, payload, ghnCode, cancellationToken);
+        await UpsertShipmentFromGhnPayloadAsync(order, payload, ghnCode, cancellationToken, evidenceUrls);
 
         var newMapped = MapGhnStatusToOrderStatus(payload.Status, payload.Type);
         var oldStatus = (OrderStatus)order.Status;
@@ -225,6 +226,8 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
 
         var code = NotificationFormatting.ShortEntityId(order.Id);
         var composed = await _orderEmailComposer.TryComposeAsync(order.Id, oldStatus, next);
+        
+        // Thông báo cho khách hàng
         await _notifications.PublishAsync(
             order.CustomerId,
             nameof(NotificationType.Order),
@@ -235,6 +238,19 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
             queueEmail: true,
             emailHtmlBody: composed?.Html,
             emailSubjectOverride: composed?.Subject);
+
+        // Nếu là trạng thái trả hàng, thông báo thêm cho Shop (Seller)
+        if (next == OrderStatus.Returned && order.Shop != null)
+        {
+            await _notifications.PublishAsync(
+                order.Shop.OwnerId,
+                nameof(NotificationType.Dispute),
+                "Hàng trả đã về kho",
+                $"Hàng trả của đơn #{code} đã được GHN giao về kho của bạn. Vui lòng kiểm tra hàng và xác nhận nhận hàng trong trang khiếu nại.",
+                "Dispute",
+                order.Dispute?.Id ?? order.Id
+            );
+        }
 
         _logger.LogInformation(
             "GHN webhook: order {OrderId} {Old} → {New} (GHN status {GhnStatus})",
@@ -256,7 +272,8 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         IQueryable<Order> q = _context.Orders
             .Include(o => o.Shipments)
             .Include(o => o.Shop)
-            .Include(o => o.OrderItems);
+            .Include(o => o.OrderItems)
+            .Include(o => o.Dispute);
 
         if (!string.IsNullOrEmpty(clientOrder))
         {
@@ -289,7 +306,8 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         Order order,
         GhnOrderStatusPayload payload,
         string? ghnOrderCode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        List<string>? evidenceUrls = null)
     {
         var st = (OrderStatus)order.Status;
         if (st is OrderStatus.PendingPayment or OrderStatus.PendingConfirmation)
@@ -368,14 +386,19 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         if (primary?.ShippingServiceId is { } ssid) row.ShippingServiceId = ssid;
         if (primary?.EstimatedDeliveryDate is { } ed) row.EstimatedDeliveryDate = ed;
         row.UpdatedAt = DateTime.UtcNow;
-        if (string.Equals(raw, "delivered", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(raw, "delivered", StringComparison.OrdinalIgnoreCase) || string.Equals(raw, "returned", StringComparison.OrdinalIgnoreCase))
             row.ActualDeliveryDate = ParseGhnEventTimeToOffset(payload.Time) ?? DateTimeOffset.UtcNow;
-        if (payload.DeliveryProofUrls is { Count: > 0 })
+
+        var finalEvidence = new List<string>();
+        if (payload.DeliveryProofUrls != null) finalEvidence.AddRange(payload.DeliveryProofUrls);
+        if (evidenceUrls != null) finalEvidence.AddRange(evidenceUrls);
+
+        if (finalEvidence.Count > 0)
         {
             var existing = string.IsNullOrEmpty(row.DeliveryProofUrls)
                 ? new List<string>()
                 : JsonSerializer.Deserialize<List<string>>(row.DeliveryProofUrls) ?? new List<string>();
-            var merged = existing.Union(payload.DeliveryProofUrls).ToList();
+            var merged = existing.Union(finalEvidence).Distinct().ToList();
             row.DeliveryProofUrls = JsonSerializer.Serialize(merged);
         }
     }
@@ -399,8 +422,10 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         [OrderStatus.PendingConfirmation] = new() { },                                                           // GHN không được đụng vào
         [OrderStatus.Processing]         = new() { OrderStatus.Shipping, OrderStatus.Cancelled },               // Chuẩn bị → Đang giao / Hủy
         [OrderStatus.Shipping]           = new() { OrderStatus.Delivered, OrderStatus.Cancelled },              // Đang giao → Đã giao / Hủy
-        [OrderStatus.Delivered]          = new() { OrderStatus.Completed, OrderStatus.Cancelled },              // Đã giao → Hoàn thành / Hủy (trường hợp trả hàng)
-        [OrderStatus.Completed]          = new() { },                                                            // Đã xong — không đổi nữa
+        [OrderStatus.Delivered]          = new() { OrderStatus.Completed, OrderStatus.Cancelled, OrderStatus.Returning }, // Đã giao → Hoàn thành / Hủy / Trả hàng
+        [OrderStatus.Completed]          = new() { OrderStatus.Returning },                                      // Đã xong → Trả hàng
+        [OrderStatus.Returning]          = new() { OrderStatus.Returned, OrderStatus.Cancelled },                // Đang trả → Đã nhận trả / Hủy
+        [OrderStatus.Returned]           = new() { OrderStatus.Refunded, OrderStatus.Cancelled },                // Đã nhận trả → Hoàn tiền / Hủy
         [OrderStatus.Cancelled]          = new() { },                                                            // Đã hủy — không khôi phục từ GHN
         [OrderStatus.Refunded]           = new() { },                                                            // Đã hoàn tiền — không đổi nữa
     };
@@ -439,14 +464,14 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
             "delivery_fail" or "not_deliver" or "not_delivered" => OrderStatus.Shipping,
 
             "waiting_to_return" or "return" or "return_transporting" or "return_sorting" or "returning" or "return_fail" =>
-                OrderStatus.Shipping,
+                OrderStatus.Returning,
 
-            "returned" => OrderStatus.Cancelled,
+            "returned" => OrderStatus.Returned,
 
             "exception" or "fulfilling" or "on_process" or "pending" => OrderStatus.Shipping,
 
             _ => s.StartsWith("return", StringComparison.Ordinal) && s != "returned"
-                ? OrderStatus.Shipping
+                ? OrderStatus.Returning
                 : GhnMapLegacy(s),
         };
     }
@@ -455,7 +480,7 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
     {
         return s switch
         {
-            "wait_to_return" => OrderStatus.Shipping,
+            "wait_to_return" => OrderStatus.Returning,
             _ => null,
         };
     }

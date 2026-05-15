@@ -16,4 +16,5 @@ public interface IDisputeAdminService
     Task<DisputeResponseDto> RejectDisputeAsync(Guid disputeId, RejectDisputeDto dto, Guid adminId);
     Task<DisputeResponseDto> RequestSellerResponseAsync(Guid disputeId, RequestResponseDto dto, Guid adminId);
     Task<DisputeResponseDto> RequestCustomerResponseAsync(Guid disputeId, RequestResponseDto dto, Guid adminId);
+    Task<int> AutoRefundReturnedDisputesAsync(int days, CancellationToken cancellationToken = default);
 }

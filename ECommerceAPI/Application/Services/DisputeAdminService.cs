@@ -3,8 +3,11 @@ using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.DTOs.Disputes;
 using ECommerceAPI.Application.Interfaces;
+using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Domain.Enums;
+using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ECommerceAPI.Application.Services;
@@ -25,6 +28,7 @@ public class DisputeAdminService : IDisputeAdminService
     private readonly ISellerWalletReversalService _walletReversal;
     private readonly ICustomerWalletService _customerWallet;
     private readonly IOrderStatusHistoryService _orderStatusHistory;
+    private readonly IHubContext<OrderTrackingHub> _hubContext;
 
     public DisputeAdminService(
         ApplicationDbContext context,
@@ -32,7 +36,8 @@ public class DisputeAdminService : IDisputeAdminService
         INotificationService notifications,
         ISellerWalletReversalService walletReversal,
         ICustomerWalletService customerWallet,
-        IOrderStatusHistoryService orderStatusHistory)
+        IOrderStatusHistoryService orderStatusHistory,
+        IHubContext<OrderTrackingHub> hubContext)
     {
         _context = context;
         _logger = logger;
@@ -40,6 +45,7 @@ public class DisputeAdminService : IDisputeAdminService
         _walletReversal = walletReversal;
         _customerWallet = customerWallet;
         _orderStatusHistory = orderStatusHistory;
+        _hubContext = hubContext;
     }
 
     public async Task<DisputeListResponseDto> GetAllDisputesAsync(
@@ -432,6 +438,9 @@ public class DisputeAdminService : IDisputeAdminService
                 dispute.Id,
                 queueEmail: true);
 
+            await NotifyOrderStatusChangedAsync(dispute.Order, (OrderStatus)orderPrevStatus, OrderStatus.Refunded, "admin");
+            await NotifyDisputeUpdatedAsync(dispute, "admin");
+
             return new DisputeResponseDto
             {
                 Success = true,
@@ -480,6 +489,16 @@ public class DisputeAdminService : IDisputeAdminService
                 };
             }
 
+
+            if (dispute.Type == (short)DisputeType.Return &&
+                dispute.Order.Status != (short)OrderStatus.Returned)
+            {
+                return new DisputeResponseDto
+                {
+                    Success = false,
+                    Message = "Chỉ có thể hoàn tiền sau khi shop xác nhận đã nhận hàng trả"
+                };
+            }
             dispute.Status = (short)DisputeStatus.Rejected;
             dispute.Resolution = dto.Resolution;
             dispute.AdminNote = dto.AdminNote;
@@ -512,6 +531,8 @@ public class DisputeAdminService : IDisputeAdminService
                 "Dispute",
                 dispute.Id,
                 queueEmail: true);
+
+            await NotifyDisputeUpdatedAsync(dispute, "admin");
 
             return new DisputeResponseDto
             {
@@ -559,6 +580,8 @@ public class DisputeAdminService : IDisputeAdminService
                 $"Admin yêu cầu bạn phản hồi khiếu nại liên quan đơn #{orderRef}.{noteText}",
                 "Dispute", dispute.Id, queueEmail: true);
 
+            await NotifyDisputeUpdatedAsync(dispute, "admin");
+
             return new DisputeResponseDto { Success = true, Message = "Đã yêu cầu seller phản hồi" };
         }
         catch (Exception ex)
@@ -596,6 +619,8 @@ public class DisputeAdminService : IDisputeAdminService
                 $"Admin yêu cầu bạn bổ sung thông tin khiếu nại đơn #{orderRef}.{noteText}",
                 "Dispute", dispute.Id, queueEmail: true);
 
+            await NotifyDisputeUpdatedAsync(dispute, "admin");
+
             return new DisputeResponseDto { Success = true, Message = "Đã yêu cầu customer bổ sung" };
         }
         catch (Exception ex)
@@ -603,6 +628,176 @@ public class DisputeAdminService : IDisputeAdminService
             _logger.LogError(ex, "Error requesting customer response: {DisputeId}", disputeId);
             return new DisputeResponseDto { Success = false, Message = "Có lỗi xảy ra" };
         }
+    }
+
+    public async Task<int> AutoRefundReturnedDisputesAsync(int days, CancellationToken cancellationToken = default)
+    {
+        var cutoff = DateTime.UtcNow.AddDays(-Math.Max(1, days));
+
+        var eligible = await _context.Disputes
+            .Include(d => d.Order)
+            .Include(d => d.Shop)
+            .Include(d => d.DisputeOrderItems)
+            .ThenInclude(x => x.OrderItem)
+            .Where(d => d.Type == (short)DisputeType.Return)
+            .Where(d => !FinalStatuses.Contains((DisputeStatus)d.Status))
+            .Where(d => d.Order.Status == (short)OrderStatus.Returned)
+            .Join(
+                _context.OrderStatusHistories,
+                d => d.OrderId,
+                h => h.OrderId,
+                (d, h) => new { d, h })
+            .Where(x => x.h.NewStatus == (short)OrderStatus.Returned && x.h.CreatedAt <= cutoff)
+            .Select(x => x.d)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (eligible.Count == 0)
+            return 0;
+
+        var processed = 0;
+        foreach (var dispute in eligible)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                break;
+
+            await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var fresh = await _context.Disputes
+                    .Include(d => d.Order)
+                    .Include(d => d.Shop)
+                    .Include(d => d.DisputeOrderItems)
+                    .ThenInclude(x => x.OrderItem)
+                    .FirstOrDefaultAsync(d => d.Id == dispute.Id, cancellationToken);
+
+                if (fresh == null)
+                    continue;
+
+                if (FinalStatuses.Contains((DisputeStatus)fresh.Status))
+                    continue;
+
+                if (fresh.Order.Status != (short)OrderStatus.Returned)
+                    continue;
+
+                var lineSum = fresh.DisputeOrderItems.Sum(x => x.LineSnapshotTotal);
+                var refundCeiling = fresh.RequestedAmount > 0
+                    ? fresh.RequestedAmount
+                    : fresh.Order.Total;
+                if (lineSum > 0)
+                    refundCeiling = Math.Min(refundCeiling, lineSum);
+
+                if (refundCeiling <= 0)
+                    continue;
+
+                var approvedAmount = refundCeiling;
+
+                fresh.Status = (short)DisputeStatus.Refunded;
+                fresh.ApprovedAmount = approvedAmount;
+                fresh.Resolution = "Hoàn tiền tự động sau 7 ngày kể từ khi nhận hàng trả";
+                fresh.AdminNote = "Tự động hoàn tiền sau 7 ngày";
+                fresh.ResolvedBy = null;
+                fresh.ResolvedAt = DateTime.UtcNow;
+                fresh.UpdatedAt = DateTime.UtcNow;
+
+                var orderPrevStatus = fresh.Order.Status;
+                fresh.Order.Status = (short)OrderStatus.Refunded;
+                fresh.Order.UpdatedAt = DateTime.UtcNow;
+                _orderStatusHistory.AddEntry(
+                    fresh.OrderId,
+                    orderPrevStatus,
+                    (short)OrderStatus.Refunded,
+                    null,
+                    "Hoàn tiền tự động sau 7 ngày kể từ khi nhận hàng trả");
+
+                await _walletReversal.TryReverseSettlementForOrderAsync(fresh.OrderId, "Hoàn tiền tự động (return)");
+                await _context.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
+                await _customerWallet.CreditRefundAsync(
+                    fresh.CustomerId,
+                    approvedAmount,
+                    "Order",
+                    fresh.OrderId,
+                    $"Hoàn tiền tự động đơn #{NotificationFormatting.ShortEntityId(fresh.OrderId)}");
+
+                var orderRef = NotificationFormatting.ShortEntityId(fresh.OrderId);
+                await _notifications.PublishAsync(
+                    fresh.CustomerId,
+                    nameof(NotificationType.Dispute),
+                    "Hoàn tiền tự động",
+                    $"Đơn #{orderRef} đã được hoàn tiền tự động sau 7 ngày kể từ khi nhận hàng trả.",
+                    "Dispute",
+                    fresh.Id,
+                    queueEmail: true,
+                    cancellationToken: cancellationToken);
+
+                await _notifications.PublishAsync(
+                    fresh.Shop.OwnerId,
+                    nameof(NotificationType.Dispute),
+                    "Hoàn tiền tự động",
+                    $"Đơn #{orderRef} đã được hoàn tiền tự động sau 7 ngày kể từ khi nhận hàng trả.",
+                    "Dispute",
+                    fresh.Id,
+                    queueEmail: true,
+                    cancellationToken: cancellationToken);
+
+                await NotifyOrderStatusChangedAsync(fresh.Order, (OrderStatus)orderPrevStatus, OrderStatus.Refunded, "system");
+                await NotifyDisputeUpdatedAsync(fresh, "system");
+
+                processed++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Return auto-refund] Failed for dispute {DisputeId}", dispute.Id);
+                await transaction.RollbackAsync(cancellationToken);
+            }
+        }
+
+        return processed;
+    }
+
+    private Task NotifyOrderStatusChangedAsync(Order order, OrderStatus oldStatus, OrderStatus newStatus, string source)
+    {
+        var customerGroup = OrderTrackingHub.GetUserGroupName(order.CustomerId);
+        var sellerGroup = OrderTrackingHub.GetUserGroupName(order.Shop.OwnerId);
+
+        var data = new
+        {
+            orderId = order.Id,
+            oldStatus = (short)oldStatus,
+            oldStatusName = OrderStatusVnHelper.Vietnamese(oldStatus),
+            newStatus = (short)newStatus,
+            newStatusName = OrderStatusVnHelper.Vietnamese(newStatus),
+            updatedAt = order.UpdatedAt,
+            source
+        };
+
+        return _hubContext.Clients.Groups(customerGroup, sellerGroup).SendAsync(
+            "OrderStatusUpdated",
+            data,
+            cancellationToken: CancellationToken.None);
+    }
+
+    private Task NotifyDisputeUpdatedAsync(Dispute dispute, string source)
+    {
+        var customerGroup = OrderTrackingHub.GetUserGroupName(dispute.CustomerId);
+        var sellerGroup = OrderTrackingHub.GetUserGroupName(dispute.Shop.OwnerId);
+
+        var data = new
+        {
+            disputeId = dispute.Id,
+            orderId = dispute.OrderId,
+            status = dispute.Status,
+            statusName = ((DisputeStatus)dispute.Status).ToString(),
+            type = dispute.Type,
+            typeName = ((DisputeType)dispute.Type).ToString(),
+            updatedAt = dispute.UpdatedAt,
+            source
+        };
+
+        return _hubContext.Clients.Groups(customerGroup, sellerGroup)
+            .SendAsync("DisputeUpdated", data, cancellationToken: CancellationToken.None);
     }
 
     private static List<string> TryDeserializeUrls(string? json)

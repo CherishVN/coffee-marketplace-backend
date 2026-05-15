@@ -179,6 +179,14 @@ public class OrderDto
     public List<OrderStatusHistoryItemDto> StatusHistory { get; set; } = new();
     public List<OrderStatusStepDto> StatusTimeline { get; set; } = new();
     public List<OrderItemDto>? Items { get; set; }
+    public bool HasActiveDispute { get; set; }
+    /// <summary>ID khiếu nại đang mở (nếu có).</summary>
+    /// <summary>ID khiếu nại đang mở (nếu có).</summary>
+    public Guid? ActiveDisputeId { get; set; }
+    /// <summary>Trạng thái khiếu nại đang mở (nếu có).</summary>
+    public short? ActiveDisputeStatus { get; set; }
+    /// <summary>Loại khiếu nại đang mở (nếu có).</summary>
+    public short? ActiveDisputeType { get; set; }
 
     public int? ShopGhnShopId { get; set; }
     public int? ShopFromDistrictId { get; set; }

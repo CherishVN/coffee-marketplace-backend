@@ -40,7 +40,7 @@ namespace ECommerceAPI
                     npgsql =>
                     {
                         npgsql.EnableRetryOnFailure(3);
-                        npgsql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
+                        npgsql.UseQuerySplittingBehavior(QuerySplittingBehavior.SingleQuery);
                     }));
 
             builder.Services.Configure<AiServiceSettings>(
@@ -112,6 +112,7 @@ namespace ECommerceAPI
             builder.Services.AddHostedService<SellerWalletReleaseBackgroundService>();
             builder.Services.AddHostedService<OrderAutoCompleteBackgroundService>();
             builder.Services.AddHostedService<CancelRequestTimeoutBackgroundService>();
+            builder.Services.AddHostedService<ReturnAutoRefundBackgroundService>();
             builder.Services.AddMemoryCache();
 
             builder.Services.Configure<ForwardedHeadersOptions>(opts =>

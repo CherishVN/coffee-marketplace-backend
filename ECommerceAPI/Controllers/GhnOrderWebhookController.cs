@@ -121,6 +121,67 @@ public class GhnOrderWebhookController : ControllerBase
         return Ok(new { success = true, result.Message, result.OrderId });
     }
 
+    /// <summary>
+    /// Giả lập callback GHN cho luồng trả hàng (Return) qua Postman.
+    /// Body: { "TrackingCode": "RTN-XXXX", "Status": "returned" }
+    /// </summary>
+    [HttpPost("simulate-return")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SimulateReturn(
+        [FromBody] JsonElement body,
+        CancellationToken cancellationToken)
+    {
+        if (!_configuration.GetValue("GHN:AllowSimulateWebhook", false)) return NotFound();
+
+        var expected = _configuration["GHN:SimulateKey"]?.Trim();
+        if (string.IsNullOrEmpty(expected)
+            || !Request.Headers.TryGetValue("X-Simulate-Key", out var key)
+            || !string.Equals(key.ToString(), expected, StringComparison.Ordinal))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var input = JsonSerializer.Deserialize<Dictionary<string, object>>(body.GetRawText(), options);
+            
+            if (input == null || !input.TryGetValue("TrackingCode", out var tcObj))
+                return BadRequest(new { success = false, message = "Missing TrackingCode" });
+
+            var trackingCode = tcObj.ToString();
+            var status = input.TryGetValue("Status", out var s) ? s.ToString() : "returned";
+            
+            List<string>? evidenceUrls = null;
+            if (input.TryGetValue("EvidenceUrls", out var evObj) && evObj is JsonElement evEl && evEl.ValueKind == JsonValueKind.Array)
+            {
+                evidenceUrls = JsonSerializer.Deserialize<List<string>>(evEl.GetRawText());
+            }
+
+            // Tạo payload giả lập để gửi vào service xử lý chung
+            var payload = new GhnOrderStatusPayload
+            {
+                OrderCode = trackingCode, 
+                Status = status,
+                Time = DateTime.UtcNow,
+                Description = "Giả lập GHN giao trả hàng thành công",
+                // Chúng ta sẽ cần mở rộng GhnOrderStatusPayload để chứa ảnh nếu muốn truyền qua Service
+            };
+
+            var result = await _ghnOrderWebhook.ProcessOrderStatusAsync(
+                payload,
+                validateShopId: false,
+                cancellationToken,
+                evidenceUrls); // Cần cập nhật Service để nhận thêm tham số này
+
+            return Ok(new { success = true, result.Message, result.OrderId });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
     private bool ValidateWebhookToken()
     {
         var expected = _configuration["GHN:WebhookToken"]?.Trim();

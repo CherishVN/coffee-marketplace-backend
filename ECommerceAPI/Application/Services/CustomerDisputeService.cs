@@ -4,7 +4,9 @@ using ECommerceAPI.Application.DTOs.Disputes;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Domain.Enums;
+using ECommerceAPI.Hubs;
 using ECommerceAPI.Infrastructure.Data;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ECommerceAPI.Application.Services;
@@ -13,6 +15,7 @@ public class CustomerDisputeService : ICustomerDisputeService
 {
     private readonly ApplicationDbContext _context;
     private readonly INotificationService _notifications;
+    private readonly IHubContext<OrderTrackingHub> _hubContext;
 
     /// <summary>Cửa sổ khiếu nại sau khi nhận hàng (mốc từ lịch sử Đã giao / Hoàn thành).</summary>
     private const int DisputeWindowDaysAfterReceipt = 7;
@@ -42,10 +45,14 @@ public class CustomerDisputeService : ICustomerDisputeService
         DisputeStatus.WaitingCustomer
     ];
 
-    public CustomerDisputeService(ApplicationDbContext context, INotificationService notifications)
+    public CustomerDisputeService(
+        ApplicationDbContext context,
+        INotificationService notifications,
+        IHubContext<OrderTrackingHub> hubContext)
     {
         _context = context;
         _notifications = notifications;
+        _hubContext = hubContext;
     }
 
     public async Task<CustomerDisputeResponseDto> CreateDisputeAsync(Guid customerId, CreateDisputeDto dto)
@@ -130,7 +137,7 @@ public class CustomerDisputeService : ICustomerDisputeService
             CustomerId = customerId,
             ShopId = order.ShopId,
             Type = dto.Type,
-            Status = (short)DisputeStatus.Pending,
+            Status = (short)DisputeStatus.WaitingSeller,
             Title = dto.Title,
             Reason = dto.Reason,
             EvidenceUrls = evidenceJson,
@@ -178,9 +185,12 @@ public class CustomerDisputeService : ICustomerDisputeService
             dispute.Id,
             queueEmail: false);
 
+        await NotifyDisputeUpdatedAsync(dispute, "customer");
+
         var created = await _context.Disputes
             .Include(d => d.DisputeOrderItems)
             .ThenInclude(x => x.OrderItem)
+            .Include(d => d.Order)
             .Include(d => d.Shop)
             .FirstAsync(d => d.Id == dispute.Id);
 
@@ -237,6 +247,8 @@ public class CustomerDisputeService : ICustomerDisputeService
                 queueEmail: false);
         }
 
+        await NotifyDisputeUpdatedAsync(dispute, "customer");
+
         return new CustomerDisputeResponseDto
         {
             Success = true,
@@ -261,6 +273,7 @@ public class CustomerDisputeService : ICustomerDisputeService
         var totalCount = await query.CountAsync();
 
         var disputes = await query
+            .Include(d => d.Order)
             .Include(d => d.DisputeOrderItems)
             .ThenInclude(x => x.OrderItem)
             .OrderByDescending(d => d.CreatedAt)
@@ -282,6 +295,8 @@ public class CustomerDisputeService : ICustomerDisputeService
     {
         var dispute = await _context.Disputes
             .Include(d => d.Shop)
+            .Include(d => d.Order)
+                .ThenInclude(o => o.Shipments)
             .Include(d => d.DisputeOrderItems)
             .ThenInclude(x => x.OrderItem)
             .FirstOrDefaultAsync(d => d.Id == disputeId && d.CustomerId == customerId);
@@ -302,6 +317,7 @@ public class CustomerDisputeService : ICustomerDisputeService
     {
         var dispute = await _context.Disputes
             .Include(d => d.Shop)
+            .Include(d => d.Order)
             .Include(d => d.DisputeOrderItems)
             .ThenInclude(x => x.OrderItem)
             .FirstOrDefaultAsync(d => d.Id == disputeId && d.CustomerId == customerId);
@@ -341,12 +357,120 @@ public class CustomerDisputeService : ICustomerDisputeService
             dispute.Id,
             queueEmail: false);
 
+        await NotifyDisputeUpdatedAsync(dispute, "customer");
+
         return new CustomerDisputeResponseDto
         {
             Success = true,
             Message = "Đã hủy khiếu nại",
             Dispute = MapToDto(dispute, dispute.Shop.Name)
         };
+    }
+
+    public async Task<CustomerDisputeResponseDto> SendReturnAsync(Guid customerId, Guid disputeId, string? trackingCode)
+    {
+        var dispute = await _context.Disputes
+            .Include(d => d.Order)
+            .Include(d => d.Shop)
+            .FirstOrDefaultAsync(d => d.Id == disputeId && d.CustomerId == customerId);
+
+        if (dispute == null) return Fail("Không tìm thấy khiếu nại");
+        if (FinalStatuses.Contains((DisputeStatus)dispute.Status)) return Fail("Khiếu nại đã kết thúc");
+        if (dispute.Type != (short)DisputeType.Return) return Fail("Đây không phải là yêu cầu trả hàng");
+        if (dispute.Order.Status != (short)OrderStatus.Returning) return Fail("Đơn hàng không ở trạng thái đang trả hàng");
+
+        // 1. Tìm theo Order + Provider "Return" trước
+        var shipment = await _context.Shipments
+            .FirstOrDefaultAsync(s => s.OrderId == dispute.OrderId && s.ShippingProvider == "Return");
+
+        // Nếu có mã từ customer thì ưu tiên dùng, không thì dùng mã RTN- đã có trong shipment
+        var effectiveCode = !string.IsNullOrWhiteSpace(trackingCode)
+            ? trackingCode.Trim()
+            : shipment?.TrackingCode;
+
+        if (string.IsNullOrWhiteSpace(effectiveCode))
+            return Fail("Không tìm thấy mã vận đơn. Vui lòng nhập mã vận đơn trả hàng.");
+
+        // 2. Nếu không tìm thấy shipment theo Order, kiểm tra xem mã TrackingCode này đã tồn tại ở đâu chưa
+        if (shipment == null)
+        {
+            shipment = await _context.Shipments
+                .FirstOrDefaultAsync(s => s.TrackingCode.ToLower() == effectiveCode.ToLower());
+        }
+
+        if (shipment == null)
+        {
+            // Nếu thực sự chưa có thì mới tạo mới
+            shipment = new Shipment
+            {
+                Id = Guid.NewGuid(),
+                OrderId = dispute.OrderId,
+                ShopId = dispute.ShopId,
+                ShippingProvider = "Return",
+                TrackingCode = effectiveCode,
+                Status = "ready_to_pick", // Chuyển sang trạng thái chờ lấy hàng
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _context.Shipments.Add(shipment);
+        }
+        else
+        {
+            // Nếu đã có (dù là do Shop tạo trước hay gì) thì chỉ cập nhật status và code
+            shipment.TrackingCode = effectiveCode;
+            shipment.Status = "ready_to_pick";
+            shipment.UpdatedAt = DateTime.UtcNow;
+            
+            // Đảm bảo shipment này thuộc đúng Order (đề phòng trường hợp gõ nhầm mã của đơn khác)
+            if (shipment.OrderId != dispute.OrderId)
+            {
+                shipment.OrderId = dispute.OrderId;
+                shipment.ShopId = dispute.ShopId;
+            }
+        }
+
+        dispute.Status = (short)DisputeStatus.WaitingSeller;
+        dispute.UpdatedAt = DateTime.UtcNow;
+        dispute.Order.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        await _notifications.PublishAsync(
+            dispute.Shop.OwnerId,
+            nameof(NotificationType.Dispute),
+            "Khách hàng đã gửi hàng trả",
+            $"Khách hàng đã xác nhận gửi hàng trả cho đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}. Mã vận đơn: {effectiveCode}.",
+            "Dispute", dispute.Id);
+
+        await NotifyDisputeUpdatedAsync(dispute, "customer");
+
+        return new CustomerDisputeResponseDto
+        {
+            Success = true,
+            Message = "Đã xác nhận gửi hàng trả. Đang chờ người bán xác nhận nhận hàng.",
+            Dispute = MapToDto(dispute, dispute.Shop.Name)
+        };
+    }
+
+    private Task NotifyDisputeUpdatedAsync(Dispute dispute, string source)
+    {
+        var customerGroup = OrderTrackingHub.GetUserGroupName(dispute.CustomerId);
+        var sellerGroup = OrderTrackingHub.GetUserGroupName(dispute.Shop.OwnerId);
+
+        var data = new
+        {
+            disputeId = dispute.Id,
+            orderId = dispute.OrderId,
+            status = dispute.Status,
+            statusName = ((DisputeStatus)dispute.Status).ToString(),
+            type = dispute.Type,
+            typeName = ((DisputeType)dispute.Type).ToString(),
+            updatedAt = dispute.UpdatedAt,
+            source
+        };
+
+        return _hubContext.Clients.Groups(customerGroup, sellerGroup)
+            .SendAsync("DisputeUpdated", data, cancellationToken: CancellationToken.None);
     }
 
     private static CustomerDisputeDto MapToDto(Dispute dispute, string shopName)
@@ -377,7 +501,23 @@ public class CustomerDisputeService : ICustomerDisputeService
             CanUpdateEvidence = !isFinal,
             CustomerNote = dispute.CustomerNote,
             AdminNote = string.IsNullOrWhiteSpace(dispute.AdminNote) ? null : dispute.AdminNote.Trim(),
-            AffectedItems = MapAffectedItems(dispute)
+            AffectedItems = MapAffectedItems(dispute),
+            OrderStatus = dispute.Order?.Status,
+            OrderTrackingCode = dispute.Order?.Shipments
+                ?.Where(s => s.ShippingProvider != "Return")
+                .OrderByDescending(s => s.CreatedAt)
+                .Select(s => s.TrackingCode)
+                .FirstOrDefault(),
+            ReturnTrackingCode = dispute.Order?.Shipments
+                ?.Where(s => s.ShippingProvider != null && s.ShippingProvider.Equals("Return", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(s => s.CreatedAt)
+                .Select(s => s.TrackingCode)
+                .FirstOrDefault(),
+            ReturnShipmentEvidenceUrls = TryDeserializeUrls(dispute.Order?.Shipments
+                ?.Where(s => s.ShippingProvider != null && s.ShippingProvider.Equals("Return", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(s => s.CreatedAt)
+                .Select(s => s.DeliveryProofUrls)
+                .FirstOrDefault())
         };
     }
 

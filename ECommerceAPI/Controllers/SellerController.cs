@@ -428,4 +428,36 @@ public class SellerController : ControllerBase
 
         return Ok(new { success = true, message = result.Message });
     }
+
+    /// <summary>
+    /// Lấy số lượng yêu cầu rút tiền đang chờ duyệt
+    /// </summary>
+    [HttpGet("withdrawals/count/pending")]
+    public async Task<IActionResult> GetPendingWithdrawalCount()
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null) return Unauthorized();
+
+        var result = await _sellerService.GetMyWithdrawalRequestsAsync(userId.Value, 1, 100);
+        if (!result.Success) return BadRequest(result);
+
+        var pendingCount = result.Data.Count(w => w.Status == 0); 
+
+        return Ok(new { count = pendingCount });
+    }
+
+    /// <summary>
+    /// Lấy số lượng đơn hàng chờ xác nhận
+    /// </summary>
+    [HttpGet("orders/count/pending")]
+    public async Task<IActionResult> GetPendingOrderCount()
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null) return Unauthorized();
+
+        // Lấy trang 1 với status = 1 (PendingConfirmation)
+        var result = await _sellerService.GetMyOrdersAsync(userId.Value, 1, 1, 1); 
+        
+        return Ok(new { count = result.TotalCount });
+    }
 }

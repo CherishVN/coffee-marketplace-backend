@@ -17,6 +17,8 @@ public static class OrderStatusTimelineBuilder
         OrderStatus.Completed => "Hoàn thành",
         OrderStatus.Cancelled => "Đã hủy",
         OrderStatus.Refunded => "Đã hoàn tiền",
+        OrderStatus.Returning => "Đang trả hàng",
+        OrderStatus.Returned => "Đã nhận hàng trả",
         _ => ((OrderStatus)status).ToString()
     };
 
@@ -41,6 +43,10 @@ public static class OrderStatusTimelineBuilder
             return state == "current" ? order.UpdatedAt : null;
         }
 
+        var includeReturnSteps = currentStatus is OrderStatus.Returning or OrderStatus.Returned or OrderStatus.Refunded
+            || (histories?.Any(h => h.NewStatus == (short)OrderStatus.Returning
+                                    || h.NewStatus == (short)OrderStatus.Returned) ?? false);
+
         var normalFlow = new List<OrderStatus>
         {
             OrderStatus.PendingPayment,
@@ -51,6 +57,12 @@ public static class OrderStatusTimelineBuilder
             OrderStatus.Delivered,
             OrderStatus.Completed,
         };
+
+        if (includeReturnSteps)
+        {
+            normalFlow.Add(OrderStatus.Returning);
+            normalFlow.Add(OrderStatus.Returned);
+        }
 
         var terminalStatuses = new[] { OrderStatus.Cancelled, OrderStatus.Refunded };
 

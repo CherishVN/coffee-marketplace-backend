@@ -11,7 +11,6 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ECommerceAPI.Application.Services;
@@ -1135,9 +1134,30 @@ public class SellerService : ISellerService
             .Take(pageSize)
             .ToListAsync();
 
+        var orderIds = orderRows.Select(o => o.Id).ToList();
+        var activeDisputes = orderIds.Count == 0
+            ? new List<(Guid OrderId, Guid Id, short Status, short Type, DateTime CreatedAt)>()
+            : (await _context.Disputes
+                .AsNoTracking()
+                .Where(d => orderIds.Contains(d.OrderId))
+                .Where(d => d.Status != (short)DisputeStatus.Resolved
+                            && d.Status != (short)DisputeStatus.Rejected
+                            && d.Status != (short)DisputeStatus.Refunded
+                            && d.Status != (short)DisputeStatus.Cancelled)
+                .OrderByDescending(d => d.CreatedAt)
+                .Select(d => new { d.OrderId, d.Id, d.Status, d.Type, d.CreatedAt })
+                .ToListAsync())
+                .Select(d => (d.OrderId, d.Id, d.Status, d.Type, d.CreatedAt))
+                .ToList();
+
+        var activeDisputeByOrderId = activeDisputes
+            .GroupBy(x => x.OrderId)
+            .ToDictionary(x => x.Key, x => x.First());
+
         var orders = orderRows.Select(o =>
         {
             var s = o.ShipmentForDisplay();
+            var hasActiveDispute = activeDisputeByOrderId.TryGetValue(o.Id, out var active);
             return new OrderDto
             {
                 Id = o.Id,
@@ -1176,7 +1196,11 @@ public class SellerService : ISellerService
                     Quantity = oi.Quantity,
                     UnitPrice = oi.UnitPrice,
                     TotalPrice = oi.LineTotal
-                }).ToList()
+                }).ToList(),
+                HasActiveDispute = hasActiveDispute,
+                ActiveDisputeId = hasActiveDispute ? active.Id : null,
+                ActiveDisputeStatus = hasActiveDispute ? active.Status : null,
+                ActiveDisputeType = hasActiveDispute ? active.Type : null
             };
         }).ToList();
 
@@ -1258,6 +1282,17 @@ public class SellerService : ISellerService
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.OrderId == orderId && f.ReversedAt == null);
 
+        var activeDispute = await _context.Disputes
+            .AsNoTracking()
+            .Where(d => d.OrderId == order.Id)
+            .Where(d => d.Status != (short)DisputeStatus.Resolved
+                        && d.Status != (short)DisputeStatus.Rejected
+                        && d.Status != (short)DisputeStatus.Refunded
+                        && d.Status != (short)DisputeStatus.Cancelled)
+            .OrderByDescending(d => d.CreatedAt)
+            .Select(d => new { d.Id, d.Status, d.Type })
+            .FirstOrDefaultAsync();
+
         return new ServiceResponse<OrderDto>
         {
             Success = true,
@@ -1315,7 +1350,11 @@ public class SellerService : ISellerService
                     Quantity = oi.Quantity,
                     UnitPrice = oi.UnitPrice,
                     TotalPrice = oi.LineTotal
-                }).ToList()
+                }).ToList(),
+                HasActiveDispute = activeDispute != null,
+                ActiveDisputeId = activeDispute?.Id,
+                ActiveDisputeStatus = activeDispute?.Status,
+                ActiveDisputeType = activeDispute?.Type
             }
         };
     }

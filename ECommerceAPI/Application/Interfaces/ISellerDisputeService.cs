@@ -12,4 +12,16 @@ public interface ISellerDisputeService
 
     /// <summary>Seller phản hồi dispute kèm bằng chứng</summary>
     Task<SellerDisputeResponseDto> RespondToDisputeAsync(Guid sellerId, Guid disputeId, SellerRespondDisputeDto dto);
+
+    /// <summary>Seller chấp nhận yêu cầu trả hàng</summary>
+    Task<SellerDisputeResponseDto> ApproveReturnAsync(Guid sellerId, Guid disputeId);
+
+    /// <summary>Seller xác nhận đã nhận hàng trả về kèm bằng chứng ảnh (đối soát)</summary>
+    Task<SellerDisputeResponseDto> ConfirmReturnReceiptAsync(Guid sellerId, Guid disputeId, ConfirmReturnReceiptDto dto);
+
+    /// <summary>Seller chấp nhận hoàn tiền (dành cho loại khiếu nại không yêu cầu trả hàng)</summary>
+    Task<SellerDisputeResponseDto> ApproveRefundAsync(Guid sellerId, Guid disputeId);
+
+    /// <summary>Seller từ chối khiếu nại (chuyển cho Admin phân xử)</summary>
+    Task<SellerDisputeResponseDto> RejectDisputeAsync(Guid sellerId, Guid disputeId, SellerRespondDisputeDto dto);
 }

@@ -31,6 +31,9 @@ public class SellerDisputeDto
     [JsonPropertyName("adminNote")]
     public string? AdminNote { get; set; }
     public List<DisputeAffectedItemDto> AffectedItems { get; set; } = new();
+    public short? OrderStatus { get; set; }
+    public string? ReturnTrackingCode { get; set; }
+    public List<string> ReturnShipmentEvidenceUrls { get; set; } = new();
 }
 
 public class SellerDisputeListResponseDto
@@ -65,6 +68,21 @@ public class SellerRespondDisputeDtoValidator : AbstractValidator<SellerRespondD
             .MinimumLength(10).WithMessage("Phản hồi phải có ít nhất 10 ký tự")
             .MaximumLength(2000).WithMessage("Phản hồi không được vượt quá 2000 ký tự");
 
+        RuleFor(x => x.EvidenceUrls)
+            .Must(urls => urls == null || urls.Count <= 10)
+            .WithMessage("Tối đa 10 file bằng chứng");
+    }
+}
+
+public class ConfirmReturnReceiptDto
+{
+    public List<string>? EvidenceUrls { get; set; }
+}
+
+public class ConfirmReturnReceiptDtoValidator : AbstractValidator<ConfirmReturnReceiptDto>
+{
+    public ConfirmReturnReceiptDtoValidator()
+    {
         RuleFor(x => x.EvidenceUrls)
             .Must(urls => urls == null || urls.Count <= 10)
             .WithMessage("Tối đa 10 file bằng chứng");

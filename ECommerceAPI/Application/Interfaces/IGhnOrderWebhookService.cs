@@ -9,8 +9,9 @@ public interface IGhnOrderWebhookService
     /// </summary>
     Task<GhnOrderWebhookResult> ProcessOrderStatusAsync(
         GhnOrderStatusPayload payload,
-        bool validateShopId,
-        CancellationToken cancellationToken = default);
+        bool validateShopId = true,
+        CancellationToken cancellationToken = default,
+        List<string>? evidenceUrls = null);
 }
 
 public sealed class GhnOrderWebhookResult

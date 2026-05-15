@@ -135,4 +135,19 @@ public class ConversationController : ControllerBase
 
         return Ok(new { success = true, message = result.Message });
     }
+
+    /// <summary>Lấy tổng số tin nhắn chưa đọc của user</summary>
+    [HttpGet("unread-count")]
+    public async Task<IActionResult> GetUnreadCount()
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null) return Unauthorized();
+
+        var result = await _conversationService.GetMyConversationsAsync(userId.Value);
+        if (!result.Success) return BadRequest(result);
+
+        var totalUnread = result.Data.Sum(c => c.UnreadCount);
+
+        return Ok(new { count = totalUnread });
+    }
 }

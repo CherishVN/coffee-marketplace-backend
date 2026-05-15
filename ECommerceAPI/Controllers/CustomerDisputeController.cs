@@ -106,4 +106,21 @@ public class CustomerDisputeController : ControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>
+    /// Customer gửi hàng trả (cung cấp mã vận đơn)
+    /// </summary>
+    [HttpPost("{disputeId}/send-return")]
+    public async Task<IActionResult> SendReturn(Guid disputeId, [FromBody] string trackingCode)
+    {
+        var userId = _userClaimsService.GetUserId();
+        if (userId == null)
+            return Unauthorized(new { success = false, message = "Token không hợp lệ" });
+
+        var result = await _disputeService.SendReturnAsync(userId.Value, disputeId, trackingCode);
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
 }

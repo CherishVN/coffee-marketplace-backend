@@ -16,6 +16,8 @@ public static class OrderStatusVnHelper
         OrderStatus.Completed => "Hoàn thành",
         OrderStatus.Cancelled => "Đã hủy",
         OrderStatus.Refunded => "Đã hoàn tiền",
+        OrderStatus.Returning => "Đang trả hàng",
+        OrderStatus.Returned => "Đã nhận hàng trả",
         _ => status.ToString()
     };
 }
