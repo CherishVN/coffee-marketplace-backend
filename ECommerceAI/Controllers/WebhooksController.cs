@@ -145,4 +145,51 @@ public class WebhooksController : ControllerBase
             }
         }
     }
+
+    /// <summary>
+    /// Full resync: Gọi Main API để lấy lại toàn bộ dữ liệu Users và cập nhật vào AI DB.
+    /// Dùng khi AI DB bị mất dữ liệu. Chỉ dành cho nội bộ (X-Internal-Key).
+    /// URL: POST /api/ai/webhooks/full-resync/users
+    /// </summary>
+    [HttpPost("full-resync/users")]
+    public async Task<IActionResult> ResyncUsers()
+    {
+        try
+        {
+            var httpClientFactory = HttpContext.RequestServices.GetRequiredService<IHttpClientFactory>();
+            var client = httpClientFactory.CreateClient("MainApi");
+
+            var response = await client.GetAsync("/api/internal/users/all");
+            if (!response.IsSuccessStatusCode)
+                return StatusCode(502, new { success = false, message = "Không lấy được dữ liệu từ Main API" });
+
+            var json = await response.Content.ReadAsStringAsync();
+            var users = JsonSerializer.Deserialize<List<AppUser>>(json, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (users == null || users.Count == 0)
+                return Ok(new { success = true, message = "Không có dữ liệu để resync" });
+
+            foreach (var user in users)
+            {
+                var existing = await _context.Users.FindAsync(user.Id);
+                if (existing == null)
+                    _context.Users.Add(user);
+                else
+                    _context.Entry(existing).CurrentValues.SetValues(user);
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Full resync users: {Count} records synced", users.Count);
+            return Ok(new { success = true, syncedCount = users.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during full resync users");
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
 }

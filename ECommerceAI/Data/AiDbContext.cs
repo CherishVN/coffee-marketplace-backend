@@ -295,7 +295,8 @@ public class AiDbContext : DbContext
             e.Property(x => x.LineTotal).HasColumnName("line_total").HasPrecision(12, 2);
         });
 
-        // ── Read-only: AppUser ────────────────────────────────────────────
+
+        // ── Read-only: AppUser (dùng cho AI Analytics, không dùng cho auth) ────
         modelBuilder.Entity<AppUser>(e =>
         {
             e.ToTable("users");
@@ -310,7 +311,7 @@ public class AiDbContext : DbContext
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
         });
 
-        // ── Read-only: Dispute ────────────────────────────────────────────
+
         modelBuilder.Entity<Dispute>(e =>
         {
             e.ToTable("disputes");
