@@ -289,59 +289,49 @@ public class SellerDisputeService : ISellerDisputeService
                     _context.Shipments.Update(returnShipment);
                 }
                 
-                var lineSum = dispute.DisputeOrderItems.Sum(x => x.LineSnapshotTotal);
-                var refundCeiling = dispute.RequestedAmount > 0 ? dispute.RequestedAmount : dispute.Order.Total;
-                if (lineSum > 0) refundCeiling = Math.Min(refundCeiling, lineSum);
-                if (refundCeiling <= 0) refundCeiling = dispute.Order.Total;
-                var approvedAmount = refundCeiling;
-
-                dispute.Order.Status = (short)OrderStatus.Refunded;
+                // Bỏ phần tự động hoàn tiền, chỉ cập nhật trạng thái đơn và khiếu nại để Admin duyệt
+                dispute.Order.Status = (short)OrderStatus.Returned;
                 dispute.Order.UpdatedAt = DateTime.UtcNow;
 
                 _orderStatusHistory.AddEntry(
                     dispute.OrderId,
                     (short)oldStatus,
-                    (short)OrderStatus.Refunded,
+                    (short)OrderStatus.Returned,
                     sellerId,
-                    "Seller xác nhận đã nhận hàng trả về (tự động hoàn tiền)");
+                    "Seller xác nhận đã nhận hàng trả về (Chờ Admin duyệt hoàn tiền)");
 
-                dispute.Status = (short)DisputeStatus.Refunded;
-                dispute.ApprovedAmount = approvedAmount;
-                dispute.Resolution = "Tự động hoàn tiền do Seller xác nhận đã nhận hàng";
+                dispute.Status = (short)DisputeStatus.UnderReview;
+                dispute.AdminNote = (string.IsNullOrEmpty(dispute.AdminNote) ? "" : dispute.AdminNote + "\n") + 
+                                   $"[Hệ thống] Seller đã xác nhận nhận hàng vào {DateTime.UtcNow:dd/MM/yyyy HH:mm}. Vui lòng duyệt hoàn tiền.";
                 dispute.UpdatedAt = DateTime.UtcNow;
-                dispute.ResolvedAt = DateTime.UtcNow;
 
-                await _walletReversal.TryReverseSettlementForOrderAsync(dispute.OrderId, "Hoàn tiền khiếu nại (return)");
-                
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                if (approvedAmount > 0)
-                {
-                    await _customerWallet.CreditRefundAsync(
-                        dispute.CustomerId,
-                        approvedAmount,
-                        "Order",
-                        dispute.OrderId,
-                        $"Hoàn tiền khiếu nại đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}");
-                }
+                // Thông báo cho Admin
+                await _notifications.PublishToUsersWithRoleAsync(
+                    "admin",
+                    nameof(NotificationType.Dispute),
+                    "Hàng trả đã về - Cần duyệt hoàn tiền",
+                    $"Đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}: Seller đã nhận hàng trả, vui lòng duyệt hoàn tiền.",
+                    "Dispute", dispute.Id, queueEmail: false);
 
                 await _notifications.PublishAsync(
                     dispute.CustomerId,
                     nameof(NotificationType.Dispute),
-                    "Đã hoàn tiền trả hàng",
-                    $"Shop đã nhận được hàng trả cho đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}. Số tiền {approvedAmount:N0} VND đã được hoàn vào ví của bạn.",
+                    "Shop đã nhận hàng trả",
+                    $"Shop đã nhận được hàng trả cho đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}. Admin đang tiến hành duyệt hoàn tiền cho bạn.",
                     "Dispute", dispute.Id, queueEmail: true);
 
-                await NotifyOrderStatusChangedAsync(dispute.Order, oldStatus, OrderStatus.Refunded, "seller");
+                await NotifyOrderStatusChangedAsync(dispute.Order, oldStatus, OrderStatus.Returned, "seller");
                 await NotifyDisputeUpdatedAsync(dispute, "seller");
 
-                return new SellerDisputeResponseDto { Success = true, Message = "Đã xác nhận nhận hàng và tự động hoàn tiền" };
+                return new SellerDisputeResponseDto { Success = true, Message = "Đã xác nhận nhận hàng. Vui lòng đợi Admin duyệt hoàn tiền." };
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return Fail("Có lỗi xảy ra khi xác nhận nhận hàng và hoàn tiền");
+                return Fail("Có lỗi xảy ra khi xác nhận nhận hàng: " + ex.Message);
             }
         });
     }
@@ -375,53 +365,38 @@ public class SellerDisputeService : ISellerDisputeService
                 if (refundCeiling <= 0) refundCeiling = dispute.Order.Total;
                 var approvedAmount = refundCeiling;
 
-                dispute.Order.Status = (short)OrderStatus.Refunded;
-                dispute.Order.UpdatedAt = DateTime.UtcNow;
-
-                _orderStatusHistory.AddEntry(
-                    dispute.OrderId,
-                    (short)oldStatus,
-                    (short)OrderStatus.Refunded,
-                    sellerId,
-                    "Seller chấp nhận yêu cầu hoàn tiền");
-
-                dispute.Status = (short)DisputeStatus.Refunded;
-                dispute.ApprovedAmount = approvedAmount;
-                dispute.Resolution = "Seller chấp nhận yêu cầu hoàn tiền";
+                // Bỏ phần tự động hoàn tiền, chuyển sang UnderReview để Admin duyệt
+                dispute.Status = (short)DisputeStatus.UnderReview;
+                dispute.AdminNote = (string.IsNullOrEmpty(dispute.AdminNote) ? "" : dispute.AdminNote + "\n") + 
+                                   $"[Hệ thống] Seller đã đồng ý hoàn tiền vào {DateTime.UtcNow:dd/MM/yyyy HH:mm}. Vui lòng duyệt số tiền hoàn.";
                 dispute.UpdatedAt = DateTime.UtcNow;
-                dispute.ResolvedAt = DateTime.UtcNow;
 
-                await _walletReversal.TryReverseSettlementForOrderAsync(dispute.OrderId, "Hoàn tiền khiếu nại");
-                
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                if (approvedAmount > 0)
-                {
-                    await _customerWallet.CreditRefundAsync(
-                        dispute.CustomerId,
-                        approvedAmount,
-                        "Order",
-                        dispute.OrderId,
-                        $"Hoàn tiền khiếu nại đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}");
-                }
+                // Thông báo cho Admin
+                await _notifications.PublishToUsersWithRoleAsync(
+                    "admin",
+                    nameof(NotificationType.Dispute),
+                    "Seller đồng ý hoàn tiền",
+                    $"Đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}: Seller đã chấp nhận hoàn tiền, vui lòng duyệt số tiền cuối cùng.",
+                    "Dispute", dispute.Id, queueEmail: false);
 
                 await _notifications.PublishAsync(
                     dispute.CustomerId,
                     nameof(NotificationType.Dispute),
-                    "Yêu cầu hoàn tiền được chấp nhận",
-                    $"Shop đã chấp nhận yêu cầu hoàn tiền cho đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}. Số tiền {approvedAmount:N0} VND đã được hoàn vào ví của bạn.",
+                    "Shop đã chấp nhận hoàn tiền",
+                    $"Shop đã chấp nhận yêu cầu hoàn tiền cho đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}. Admin đang tiến hành duyệt số tiền hoàn cho bạn.",
                     "Dispute", dispute.Id, queueEmail: true);
 
-                await NotifyOrderStatusChangedAsync(dispute.Order, oldStatus, OrderStatus.Refunded, "seller");
                 await NotifyDisputeUpdatedAsync(dispute, "seller");
 
-                return new SellerDisputeResponseDto { Success = true, Message = "Đã chấp nhận hoàn tiền thành công" };
+                return new SellerDisputeResponseDto { Success = true, Message = "Đã chấp nhận yêu cầu hoàn tiền. Vui lòng đợi Admin duyệt." };
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return Fail("Có lỗi xảy ra khi hoàn tiền");
+                return Fail("Có lỗi xảy ra: " + ex.Message);
             }
         });
     }

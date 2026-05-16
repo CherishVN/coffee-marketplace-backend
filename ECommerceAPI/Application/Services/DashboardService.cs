@@ -159,6 +159,13 @@ public class DashboardService : IDashboardService
                     UnderReview = g.Count(d => d.Status == (short)DisputeStatus.UnderReview),
                     Resolved = g.Count(d => d.Status == (short)DisputeStatus.Resolved),
                     Refunded = g.Count(d => d.Status == (short)DisputeStatus.Refunded),
+                    TypeReturn = g.Count(d => d.Type == (short)DisputeType.Return),
+                    TypeRefund = g.Count(d => d.Type == (short)DisputeType.Refund),
+                    TypeDamaged = g.Count(d => d.Type == (short)DisputeType.Damaged),
+                    TypeNotReceived = g.Count(d => d.Type == (short)DisputeType.NotReceived),
+                    TypeWrongItem = g.Count(d => d.Type == (short)DisputeType.WrongItem),
+                    TypeQualityIssue = g.Count(d => d.Type == (short)DisputeType.QualityIssue),
+                    TypeOther = g.Count(d => d.Type == (short)DisputeType.Other),
                 })
                 .FirstOrDefaultAsync();
 
@@ -275,7 +282,14 @@ public class DashboardService : IDashboardService
                     Pending = disputeStats?.Pending ?? 0,
                     UnderReview = disputeStats?.UnderReview ?? 0,
                     Resolved = disputeStats?.Resolved ?? 0,
-                    Refunded = disputeStats?.Refunded ?? 0
+                    Refunded = disputeStats?.Refunded ?? 0,
+                    TypeReturn = disputeStats?.TypeReturn ?? 0,
+                    TypeRefund = disputeStats?.TypeRefund ?? 0,
+                    TypeDamaged = disputeStats?.TypeDamaged ?? 0,
+                    TypeNotReceived = disputeStats?.TypeNotReceived ?? 0,
+                    TypeWrongItem = disputeStats?.TypeWrongItem ?? 0,
+                    TypeQualityIssue = disputeStats?.TypeQualityIssue ?? 0,
+                    TypeOther = disputeStats?.TypeOther ?? 0
                 },
                 PlatformFees = new PlatformFeeStats
                 {

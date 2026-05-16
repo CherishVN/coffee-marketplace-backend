@@ -91,6 +91,14 @@ public class DisputeStats
     public int UnderReview { get; set; }
     public int Resolved { get; set; }
     public int Refunded { get; set; }
+    
+    public int TypeReturn { get; set; }
+    public int TypeRefund { get; set; }
+    public int TypeDamaged { get; set; }
+    public int TypeNotReceived { get; set; }
+    public int TypeWrongItem { get; set; }
+    public int TypeQualityIssue { get; set; }
+    public int TypeOther { get; set; }
 }
 
 public class PlatformFeeStats
