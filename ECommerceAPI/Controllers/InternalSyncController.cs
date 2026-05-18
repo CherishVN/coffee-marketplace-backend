@@ -174,6 +174,7 @@ public class InternalSyncController : ControllerBase
                 id = t.Id,
                 name = t.Name,
                 slug = t.Slug,
+                is_active = t.IsActive,
             })
             .ToListAsync();
 

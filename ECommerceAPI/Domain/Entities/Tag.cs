@@ -11,6 +11,8 @@ public partial class Tag
 
     public string Slug { get; set; } = null!;
 
+    public bool IsActive { get; set; } = true;
+
     public DateTime CreatedAt { get; set; }
 
     public virtual ICollection<ProductTag> ProductTags { get; set; } = new List<ProductTag>();

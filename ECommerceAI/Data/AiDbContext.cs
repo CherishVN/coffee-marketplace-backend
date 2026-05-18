@@ -236,6 +236,7 @@ public class AiDbContext : DbContext
             e.Property(x => x.Id).HasColumnName("id");
             e.Property(x => x.Name).HasColumnName("name");
             e.Property(x => x.Slug).HasColumnName("slug");
+            e.Property(x => x.IsActive).HasColumnName("is_active");
         });
 
         // ── Read-only: Material ───────────────────────────────────────────

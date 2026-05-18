@@ -508,6 +508,19 @@ public class SellerService : ISellerService
             };
         }
 
+        if (dto.TagIds != null && dto.TagIds.Any())
+        {
+            var tagErr = await ValidateActiveTagIdsForSellerAsync(dto.TagIds);
+            if (tagErr != null)
+            {
+                return new ServiceResponse<ProductDto>
+                {
+                    Success = false,
+                    Message = tagErr
+                };
+            }
+        }
+
         var productCode = await GenerateUniqueProductCodeAsync();
         var slug = await GenerateUniqueProductSlugAsync(dto.Name);
 
@@ -762,6 +775,18 @@ public class SellerService : ISellerService
 
         if (dto.TagIds != null)
         {
+            if (dto.TagIds.Count > 0)
+            {
+                var tagErr = await ValidateActiveTagIdsForSellerAsync(dto.TagIds);
+                if (tagErr != null)
+                {
+                    return new ServiceResponse
+                    {
+                        Success = false,
+                        Message = tagErr
+                    };
+                }
+            }
             var existingTags = await _context.Set<ProductTag>().Where(t => t.ProductId == product.Id).ToListAsync();
             _context.Set<ProductTag>().RemoveRange(existingTags);
             foreach (var tagId in dto.TagIds)
@@ -1966,5 +1991,25 @@ public class SellerService : ISellerService
         {
             return null;
         }
+    }
+
+    /// <summary>Chỉ cho phép gắn tag đang bật (đồng bộ với API /api/tags và gợi ý AI).</summary>
+    private async Task<string?> ValidateActiveTagIdsForSellerAsync(IEnumerable<long> tagIds)
+    {
+        var ids = tagIds.Distinct().ToList();
+        if (ids.Count == 0) return null;
+
+        var found = await _context.Tags
+            .Where(t => ids.Contains(t.Id))
+            .Select(t => new { t.Id, t.IsActive })
+            .ToListAsync();
+
+        if (found.Count != ids.Count)
+            return "Một hoặc nhiều tag không tồn tại.";
+
+        if (found.Any(t => !t.IsActive))
+            return "Không thể gắn tag đã bị tắt (inactive). Vui lòng bỏ tag đó hoặc chọn tag khác.";
+
+        return null;
     }
 }

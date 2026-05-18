@@ -41,6 +41,7 @@ public class TagAdminService : ITagAdminService
                     Id = t.Id,
                     Name = t.Name,
                     Slug = t.Slug,
+                    IsActive = t.IsActive,
                     CreatedAt = t.CreatedAt,
                     ProductCount = t.ProductTags.Count
                 })
@@ -77,6 +78,7 @@ public class TagAdminService : ITagAdminService
                     Id = t.Id,
                     Name = t.Name,
                     Slug = t.Slug,
+                    IsActive = t.IsActive,
                     CreatedAt = t.CreatedAt,
                     ProductCount = t.ProductTags.Count
                 })
@@ -132,6 +134,7 @@ public class TagAdminService : ITagAdminService
             {
                 Name = dto.Name.Trim(),
                 Slug = slug,
+                IsActive = dto.IsActive ?? true,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -149,6 +152,7 @@ public class TagAdminService : ITagAdminService
                     Id = tag.Id,
                     Name = tag.Name,
                     Slug = tag.Slug,
+                    IsActive = tag.IsActive,
                     CreatedAt = tag.CreatedAt,
                     ProductCount = 0
                 }
@@ -198,6 +202,8 @@ public class TagAdminService : ITagAdminService
 
             tag.Name = dto.Name.Trim();
             tag.Slug = newSlug;
+            if (dto.IsActive.HasValue)
+                tag.IsActive = dto.IsActive.Value;
 
             await _context.SaveChangesAsync();
 
@@ -212,6 +218,7 @@ public class TagAdminService : ITagAdminService
                     Id = tag.Id,
                     Name = tag.Name,
                     Slug = tag.Slug,
+                    IsActive = tag.IsActive,
                     CreatedAt = tag.CreatedAt,
                     ProductCount = tag.ProductTags.Count
                 }

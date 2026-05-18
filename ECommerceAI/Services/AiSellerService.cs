@@ -178,6 +178,7 @@ public class AiSellerService : IAiSellerService
             .ToList();
 
         var allTags = await _context.Tags
+            .Where(t => t.IsActive)
             .OrderBy(t => t.Name)
             .Select(t => new TagCandidate(t.Id, t.Name))
             .ToListAsync();

@@ -23,7 +23,7 @@ public class TagsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetTags([FromQuery] string? search = null)
     {
-        var query = _context.Tags.AsQueryable();
+        var query = _context.Tags.AsQueryable().Where(t => t.IsActive);
 
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(t => t.Name.Contains(search));
@@ -35,6 +35,7 @@ public class TagsController : ControllerBase
                 id = t.Id,
                 name = t.Name,
                 slug = t.Slug,
+                isActive = t.IsActive,
                 productCount = t.ProductTags.Count
             })
             .ToListAsync();

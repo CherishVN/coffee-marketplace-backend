@@ -63,8 +63,9 @@ public class ProductStorefrontService : IProductStorefrontService
                         p.Category.Name.ToLower().Contains(searchLower)
                         || p.Category.Slug.ToLower().Contains(searchLower)))
                     || p.ProductTags.Any(pt =>
+                        pt.Tag.IsActive && (
                         pt.Tag.Name.ToLower().Contains(searchLower)
-                        || pt.Tag.Slug.ToLower().Contains(searchLower)));
+                        || pt.Tag.Slug.ToLower().Contains(searchLower))));
             }
 
             // Giá trên danh sách = min(giá gốc, variant active); variant không Price thì dùng giá gốc.
@@ -253,7 +254,7 @@ public class ProductStorefrontService : IProductStorefrontService
                         .ToList(),
                     TotalStock = p.Inventories
                         .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
-                    Tags = p.ProductTags.Select(pt => pt.Tag.Name).ToList(),
+                    Tags = p.ProductTags.Where(pt => pt.Tag.IsActive).Select(pt => pt.Tag.Name).ToList(),
                     Materials = p.ProductMaterials.Select(pm => pm.Material.Name).ToList(),
                     CreatedAt = p.CreatedAt,
                     SoldCount = p.SoldCount,
@@ -409,7 +410,7 @@ public class ProductStorefrontService : IProductStorefrontService
                         .ToList(),
                     TotalStock = p.Inventories
                         .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
-                    Tags = p.ProductTags.Select(pt => pt.Tag.Name).ToList(),
+                    Tags = p.ProductTags.Where(pt => pt.Tag.IsActive).Select(pt => pt.Tag.Name).ToList(),
                     Materials = p.ProductMaterials.Select(pm => pm.Material.Name).ToList(),
                     CreatedAt = p.CreatedAt,
                     SoldCount = p.SoldCount,
