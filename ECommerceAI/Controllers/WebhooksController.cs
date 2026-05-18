@@ -147,6 +147,69 @@ public class WebhooksController : ControllerBase
     }
 
     /// <summary>
+    /// Full resync: Gọi Main API lấy lại categories, tags, materials khi AI DB bị mất data.
+    /// URL: POST /api/ai/webhooks/full-resync/catalog
+    /// </summary>
+    [HttpPost("full-resync/catalog")]
+    public async Task<IActionResult> ResyncCatalog()
+    {
+        var httpClientFactory = HttpContext.RequestServices.GetRequiredService<IHttpClientFactory>();
+        var client = httpClientFactory.CreateClient("MainApi");
+        var opts = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, PropertyNameCaseInsensitive = true };
+
+        try
+        {
+            // Categories
+            var catRes = await client.GetAsync("/api/internal/categories/all");
+            if (catRes.IsSuccessStatusCode)
+            {
+                var categories = JsonSerializer.Deserialize<List<Category>>(await catRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in categories)
+                {
+                    var existing = await _context.Categories.FindAsync(item.Id);
+                    if (existing == null) _context.Categories.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+            }
+
+            // Tags
+            var tagRes = await client.GetAsync("/api/internal/tags/all");
+            if (tagRes.IsSuccessStatusCode)
+            {
+                var tags = JsonSerializer.Deserialize<List<Tag>>(await tagRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in tags)
+                {
+                    var existing = await _context.Tags.FindAsync(item.Id);
+                    if (existing == null) _context.Tags.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+            }
+
+            // Materials
+            var matRes = await client.GetAsync("/api/internal/materials/all");
+            if (matRes.IsSuccessStatusCode)
+            {
+                var materials = JsonSerializer.Deserialize<List<Material>>(await matRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in materials)
+                {
+                    var existing = await _context.Materials.FindAsync(item.Id);
+                    if (existing == null) _context.Materials.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Full resync catalog completed.");
+            return Ok(new { success = true, message = "Đã resync categories, tags, materials từ Main API." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during full resync catalog");
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Full resync: Gọi Main API để lấy lại toàn bộ dữ liệu Users và cập nhật vào AI DB.
     /// Dùng khi AI DB bị mất dữ liệu. Chỉ dành cho nội bộ (X-Internal-Key).
     /// URL: POST /api/ai/webhooks/full-resync/users

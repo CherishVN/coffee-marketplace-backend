@@ -134,4 +134,71 @@ public class InternalSyncController : ControllerBase
 
         return Ok(products);
     }
+
+    /// <summary>
+    /// Trả về toàn bộ categories để AI Service resync.
+    /// </summary>
+    [HttpGet("categories/all")]
+    public async Task<IActionResult> GetAllCategories()
+    {
+        if (!IsAuthorized())
+            return Unauthorized(new { message = "Invalid internal key" });
+
+        var categories = await _context.Categories
+            .Select(c => new
+            {
+                id = c.Id,
+                name = c.Name,
+                slug = c.Slug,
+                parent_id = c.ParentId,
+                level = c.Level,
+                is_active = c.IsActive,
+            })
+            .ToListAsync();
+
+        return Ok(categories);
+    }
+
+    /// <summary>
+    /// Trả về toàn bộ tags để AI Service resync.
+    /// </summary>
+    [HttpGet("tags/all")]
+    public async Task<IActionResult> GetAllTags()
+    {
+        if (!IsAuthorized())
+            return Unauthorized(new { message = "Invalid internal key" });
+
+        var tags = await _context.Tags
+            .Select(t => new
+            {
+                id = t.Id,
+                name = t.Name,
+                slug = t.Slug,
+            })
+            .ToListAsync();
+
+        return Ok(tags);
+    }
+
+    /// <summary>
+    /// Trả về toàn bộ materials để AI Service resync.
+    /// </summary>
+    [HttpGet("materials/all")]
+    public async Task<IActionResult> GetAllMaterials()
+    {
+        if (!IsAuthorized())
+            return Unauthorized(new { message = "Invalid internal key" });
+
+        var materials = await _context.Materials
+            .Select(m => new
+            {
+                id = m.Id,
+                name = m.Name,
+                slug = m.Slug,
+                is_active = m.IsActive,
+            })
+            .ToListAsync();
+
+        return Ok(materials);
+    }
 }
