@@ -2,8 +2,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using ECommerceAI.Data;
 using ECommerceAI.Data.Entities.ReadOnly;
+using ECommerceAI.Services;
 
 namespace ECommerceAI.Controllers;
 
@@ -12,11 +14,13 @@ namespace ECommerceAI.Controllers;
 public class WebhooksController : ControllerBase
 {
     private readonly AiDbContext _context;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<WebhooksController> _logger;
 
-    public WebhooksController(AiDbContext context, ILogger<WebhooksController> logger)
+    public WebhooksController(AiDbContext context, IMemoryCache cache, ILogger<WebhooksController> logger)
     {
         _context = context;
+        _cache = cache;
         _logger = logger;
     }
 
@@ -52,7 +56,10 @@ public class WebhooksController : ControllerBase
 
         try
         {
-            switch (payload.Table.ToLower())
+            var table = payload.Table.ToLower();
+            var invalidatePromptCatalog = table is "categories" or "tags" or "materials";
+
+            switch (table)
             {
                 case "products":
                     await SyncEntity<Product>(payload, options, _context.Products);
@@ -96,6 +103,13 @@ public class WebhooksController : ControllerBase
             }
 
             await _context.SaveChangesAsync();
+
+            if (invalidatePromptCatalog)
+            {
+                _cache.Remove(PromptCatalogCacheKeys.Candidates);
+                _logger.LogInformation("Invalidated prompt catalog cache after webhook on {Table}", payload.Table);
+            }
+
             return Ok(new { success = true, syncedTable = payload.Table });
         }
         catch (Exception ex)
@@ -199,7 +213,8 @@ public class WebhooksController : ControllerBase
             }
 
             await _context.SaveChangesAsync();
-            _logger.LogInformation("Full resync catalog completed.");
+            _cache.Remove(PromptCatalogCacheKeys.Candidates);
+            _logger.LogInformation("Full resync catalog completed; prompt catalog cache cleared.");
             return Ok(new { success = true, message = "Đã resync categories, tags, materials từ Main API." });
         }
         catch (Exception ex)

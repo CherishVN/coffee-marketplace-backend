@@ -19,7 +19,9 @@ public class AiSellerService : IAiSellerService
     private const int MaxPromptTags = 100;
     private const int MaxPromptMaterials = 80;
     private const int MaxAnalyzeImageUrls = 2;
-    private static readonly TimeSpan CandidateCacheDuration = TimeSpan.FromHours(1);
+    /// <summary>Lưới an toàn nếu webhook lỡ không chạy; đổi catalog vẫn được pick up sau tối đa thời gian này.
+    /// Invalidate chủ yếu qua webhook + full-resync — TTL ngắn tránh kẹt catalog cũ như cache 1 giờ trước đây.</summary>
+    private static readonly TimeSpan CandidateCacheDuration = TimeSpan.FromMinutes(5);
 
     /// <summary>Parse JSON từ Gemini khi model trả camelCase (suggest-* endpoints).</summary>
     private static readonly JsonSerializerOptions _jsonReadOptions = new()
@@ -43,8 +45,6 @@ public class AiSellerService : IAiSellerService
     private static readonly Lazy<string> _imagePrompt = new(() => LoadPromptFromFile("ImageAnalysisPrompt.txt", DefaultSystemPrompt));
     private static readonly object _analyzeImageSchema = BuildAnalyzeImageSchema();
     private static readonly object _analyzeProductSchema = BuildAnalyzeProductSchema();
-
-    private const string CandidateCacheKey = "PromptCandidates";
 
     private readonly AiDbContext _context;
     private readonly GeminiClientService _gemini;
@@ -163,7 +163,7 @@ public class AiSellerService : IAiSellerService
     /// </summary>
     private async Task<CandidateSet> GetPromptCandidatesAsync()
     {
-        if (_cache.TryGetValue(CandidateCacheKey, out CandidateSet? cached) && cached != null)
+        if (_cache.TryGetValue(PromptCatalogCacheKeys.Candidates, out CandidateSet? cached) && cached != null)
             return cached;
 
         var allCats = await _context.Categories
@@ -190,7 +190,7 @@ public class AiSellerService : IAiSellerService
 
         var result = new CandidateSet(catById, allCatsOrdered, allTags, allMaterials);
 
-        _cache.Set(CandidateCacheKey, result, CandidateCacheDuration);
+        _cache.Set(PromptCatalogCacheKeys.Candidates, result, CandidateCacheDuration);
 
         return result;
     }
