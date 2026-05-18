@@ -18,7 +18,7 @@ public class TagAdminService : ITagAdminService
         _logger = logger;
     }
 
-    public async Task<TagListResponseDto> GetAllTagsAsync(int page, int pageSize, string? search = null)
+    public async Task<TagListResponseDto> GetAllTagsAsync(int page, int pageSize, string? search = null, bool? isActive = null)
     {
         try
         {
@@ -29,6 +29,9 @@ public class TagAdminService : ITagAdminService
                 var pattern = $"%{search}%";
                 query = query.Where(t => EF.Functions.ILike(t.Name, pattern) || EF.Functions.ILike(t.Slug, pattern));
             }
+
+            if (isActive.HasValue)
+                query = query.Where(t => t.IsActive == isActive.Value);
 
             var totalCount = await query.CountAsync();
 

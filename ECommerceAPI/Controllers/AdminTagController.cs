@@ -25,9 +25,10 @@ public class AdminTagController : ControllerBase
     public async Task<IActionResult> GetAllTags(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] string? search = null)
+        [FromQuery] string? search = null,
+        [FromQuery] bool? isActive = null)
     {
-        var result = await _tagAdminService.GetAllTagsAsync(page, pageSize, search);
+        var result = await _tagAdminService.GetAllTagsAsync(page, pageSize, search, isActive);
         return Ok(result);
     }
 
