@@ -220,7 +220,6 @@ public class InternalSyncController : ControllerBase
                 sku = v.Sku,
                 variant_name = v.VariantName,
                 price = v.Price,
-                stock_quantity = v.StockQuantity,
                 attributes = v.Attributes,
                 is_active = v.IsActive,
                 created_at = v.CreatedAt
