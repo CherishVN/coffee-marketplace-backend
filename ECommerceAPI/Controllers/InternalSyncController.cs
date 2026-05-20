@@ -202,4 +202,74 @@ public class InternalSyncController : ControllerBase
 
         return Ok(materials);
     }
+
+    /// <summary>
+    /// Trả về toàn bộ product variants để AI Service resync.
+    /// </summary>
+    [HttpGet("product-variants/all")]
+    public async Task<IActionResult> GetAllProductVariants()
+    {
+        if (!IsAuthorized())
+            return Unauthorized(new { message = "Invalid internal key" });
+
+        var variants = await _context.ProductVariants
+            .Select(v => new
+            {
+                id = v.Id,
+                product_id = v.ProductId,
+                sku = v.Sku,
+                variant_name = v.VariantName,
+                price = v.Price,
+                stock_quantity = v.StockQuantity,
+                attributes = v.Attributes,
+                is_active = v.IsActive,
+                created_at = v.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(variants);
+    }
+
+    /// <summary>
+    /// Trả về toàn bộ product images để AI Service resync.
+    /// </summary>
+    [HttpGet("product-images/all")]
+    public async Task<IActionResult> GetAllProductImages()
+    {
+        if (!IsAuthorized())
+            return Unauthorized(new { message = "Invalid internal key" });
+
+        var images = await _context.ProductImages
+            .Select(i => new
+            {
+                id = i.Id,
+                product_id = i.ProductId,
+                image_url = i.ImageUrl,
+                sort_order = i.SortOrder,
+                created_at = i.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(images);
+    }
+
+    /// <summary>
+    /// Trả về toàn bộ product tags để AI Service resync.
+    /// </summary>
+    [HttpGet("product-tags/all")]
+    public async Task<IActionResult> GetAllProductTags()
+    {
+        if (!IsAuthorized())
+            return Unauthorized(new { message = "Invalid internal key" });
+
+        var productTags = await _context.ProductTags
+            .Select(pt => new
+            {
+                product_id = pt.ProductId,
+                tag_id = pt.TagId
+            })
+            .ToListAsync();
+
+        return Ok(productTags);
+    }
 }

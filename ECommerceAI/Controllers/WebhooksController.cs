@@ -319,9 +319,51 @@ public class WebhooksController : ControllerBase
                 _logger.LogInformation("Synced {Count} shops", shops.Count);
             }
 
+            // Product Variants
+            var varRes = await client.GetAsync("/api/internal/product-variants/all");
+            if (varRes.IsSuccessStatusCode)
+            {
+                var variants = JsonSerializer.Deserialize<List<ProductVariant>>(await varRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in variants)
+                {
+                    var existing = await _context.ProductVariants.FindAsync(item.Id);
+                    if (existing == null) _context.ProductVariants.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+                _logger.LogInformation("Synced {Count} product variants", variants.Count);
+            }
+
+            // Product Images
+            var imgRes = await client.GetAsync("/api/internal/product-images/all");
+            if (imgRes.IsSuccessStatusCode)
+            {
+                var images = JsonSerializer.Deserialize<List<ProductImage>>(await imgRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in images)
+                {
+                    var existing = await _context.ProductImages.FindAsync(item.Id);
+                    if (existing == null) _context.ProductImages.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+                _logger.LogInformation("Synced {Count} product images", images.Count);
+            }
+
+            // Product Tags
+            var ptRes = await client.GetAsync("/api/internal/product-tags/all");
+            if (ptRes.IsSuccessStatusCode)
+            {
+                var productTags = JsonSerializer.Deserialize<List<ProductTag>>(await ptRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in productTags)
+                {
+                    var existing = await _context.ProductTags.FindAsync(item.ProductId, item.TagId);
+                    if (existing == null) _context.ProductTags.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+                _logger.LogInformation("Synced {Count} product tags", productTags.Count);
+            }
+
             await _context.SaveChangesAsync();
             _logger.LogInformation("Full resync products completed: {Total} products synced", totalSynced);
-            return Ok(new { success = true, message = $"Đã resync {totalSynced} products + shops từ Main API." });
+            return Ok(new { success = true, message = $"Đã resync {totalSynced} products + shops + variants + images + tags từ Main API." });
         }
         catch (Exception ex)
         {
