@@ -270,4 +270,63 @@ public class WebhooksController : ControllerBase
             return StatusCode(500, new { success = false, message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Full resync: Gọi Main API để lấy lại toàn bộ dữ liệu Products + variants + images + tags.
+    /// URL: POST /api/ai/webhooks/full-resync/products
+    /// </summary>
+    [HttpPost("full-resync/products")]
+    public async Task<IActionResult> ResyncProducts()
+    {
+        var httpClientFactory = HttpContext.RequestServices.GetRequiredService<IHttpClientFactory>();
+        var client = httpClientFactory.CreateClient("MainApi");
+        var opts = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
+        };
+
+        try
+        {
+            int totalSynced = 0;
+
+            // Products
+            var prodRes = await client.GetAsync("/api/internal/products/all");
+            if (prodRes.IsSuccessStatusCode)
+            {
+                var products = JsonSerializer.Deserialize<List<Product>>(await prodRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in products)
+                {
+                    var existing = await _context.Products.FindAsync(item.Id);
+                    if (existing == null) _context.Products.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+                totalSynced += products.Count;
+                _logger.LogInformation("Synced {Count} products", products.Count);
+            }
+
+            // Shops (cần cho hiển thị SP)
+            var shopRes = await client.GetAsync("/api/internal/shops/all");
+            if (shopRes.IsSuccessStatusCode)
+            {
+                var shops = JsonSerializer.Deserialize<List<Shop>>(await shopRes.Content.ReadAsStringAsync(), opts) ?? new();
+                foreach (var item in shops)
+                {
+                    var existing = await _context.Shops.FindAsync(item.Id);
+                    if (existing == null) _context.Shops.Add(item);
+                    else _context.Entry(existing).CurrentValues.SetValues(item);
+                }
+                _logger.LogInformation("Synced {Count} shops", shops.Count);
+            }
+
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Full resync products completed: {Total} products synced", totalSynced);
+            return Ok(new { success = true, message = $"Đã resync {totalSynced} products + shops từ Main API." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during full resync products");
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
 }
