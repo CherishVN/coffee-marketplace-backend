@@ -782,12 +782,30 @@ public class AiChatService : IAiChatService
     /// </summary>
     private static string GetVariantSuggestionDisplayName(ProductVariant v)
     {
-        var fromJson = TryFormatVariantAttributesLabel(v.Attributes);
-        if (!string.IsNullOrWhiteSpace(fromJson))
-            return fromJson.Trim();
+        // 1. Ưu tiên parse từ cột attributes (jsonb)
+        var fromAttributes = TryFormatVariantAttributesLabel(v.Attributes);
+        if (!string.IsNullOrWhiteSpace(fromAttributes))
+            return fromAttributes.Trim();
 
-        var n = (v.VariantName ?? string.Empty).Trim();
-        return string.IsNullOrEmpty(n) ? "Mặc định" : n;
+        // 2. variant_name đôi khi chứa JSON string thô như {"Khối lượng": "200g"}
+        //    → thử parse để hiển thị nhãn đẹp thay vì raw JSON
+        var raw = (v.VariantName ?? string.Empty).Trim();
+        if (raw.StartsWith("{") && raw.EndsWith("}"))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                var formatted = TryFormatVariantAttributesLabel(doc);
+                if (!string.IsNullOrWhiteSpace(formatted))
+                    return formatted.Trim();
+            }
+            catch
+            {
+                // không parse được → dùng raw
+            }
+        }
+
+        return string.IsNullOrEmpty(raw) ? "Mặc định" : raw;
     }
 
     private static string? TryFormatVariantAttributesLabel(JsonDocument? doc)
