@@ -461,6 +461,46 @@ public class ProductStorefrontService : IProductStorefrontService
         }
     }
 
+    public async Task<ProductStockBatchResponseDto> GetStockBatchAsync(List<Guid> productIds)
+    {
+        try
+        {
+            if (productIds == null || productIds.Count == 0)
+                return new ProductStockBatchResponseDto { Success = true, Items = new() };
+
+            // Cap at 50 to prevent abuse
+            var ids = productIds.Take(50).ToList();
+
+            var variants = await _context.ProductVariants
+                .Include(v => v.Inventories)
+                .Where(v => ids.Contains(v.ProductId) && v.IsActive)
+                .Select(v => new
+                {
+                    v.Id,
+                    v.ProductId,
+                    Stock = v.Inventories.Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity))
+                })
+                .ToListAsync();
+
+            var result = ids.Select(pid => new ProductStockDto
+            {
+                ProductId = pid,
+                TotalStock = variants.Where(v => v.ProductId == pid).Sum(v => v.Stock),
+                Variants = variants
+                    .Where(v => v.ProductId == pid)
+                    .Select(v => new VariantStockDto { VariantId = v.Id, Stock = v.Stock })
+                    .ToList()
+            }).ToList();
+
+            return new ProductStockBatchResponseDto { Success = true, Items = result };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching stock batch");
+            return new ProductStockBatchResponseDto { Success = false, Items = new() };
+        }
+    }
+
     private async Task<HashSet<long>> GetDescendantCategoryIdsAsync(long rootCategoryId)
     {
         var categories = await _context.Categories

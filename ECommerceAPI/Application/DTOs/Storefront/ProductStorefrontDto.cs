@@ -79,3 +79,28 @@ public class ProductStorefrontDetailResponseDto
     public string? Message { get; set; }
     public ProductStorefrontDetailDto? Product { get; set; }
 }
+
+public class ProductStockBatchRequestDto
+{
+    /// <summary>List of product IDs to fetch stock for (max 50)</summary>
+    public List<Guid> ProductIds { get; set; } = new();
+}
+
+public class VariantStockDto
+{
+    public Guid VariantId { get; set; }
+    public int Stock { get; set; }
+}
+
+public class ProductStockDto
+{
+    public Guid ProductId { get; set; }
+    public int TotalStock { get; set; }
+    public List<VariantStockDto> Variants { get; set; } = new();
+}
+
+public class ProductStockBatchResponseDto
+{
+    public bool Success { get; set; }
+    public List<ProductStockDto> Items { get; set; } = new();
+}

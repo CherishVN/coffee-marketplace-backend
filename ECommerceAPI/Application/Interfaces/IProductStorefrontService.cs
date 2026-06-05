@@ -21,4 +21,6 @@ public interface IProductStorefrontService
 
     /// <summary>Lấy sản phẩm gợi ý: trending (nhiều lượt bán) + mới nhất</summary>
     Task<ProductStorefrontListResponseDto> GetSuggestionsAsync(int limit = 10);
+
+    Task<ProductStockBatchResponseDto> GetStockBatchAsync(List<Guid> productIds);
 }

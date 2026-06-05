@@ -1,3 +1,4 @@
+using ECommerceAPI.Application.DTOs.Storefront;
 using ECommerceAPI.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -70,6 +71,19 @@ public class ProductController : ControllerBase
         var result = await _productStorefrontService.GetProductBySlugAsync(slug);
         if (!result.Success)
             return NotFound(result);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Lấy tồn kho cho nhiều sản phẩm cùng lúc (dùng bởi AI Chat để validate số lượng).
+    /// Không yêu cầu xác thực. Giới hạn tối đa 50 sản phẩm mỗi lần.
+    /// </summary>
+    [HttpPost("stock-batch")]
+    public async Task<IActionResult> GetStockBatch([FromBody] ProductStockBatchRequestDto dto)
+    {
+        if (dto.ProductIds == null || dto.ProductIds.Count == 0)
+            return Ok(new ProductStockBatchResponseDto { Success = true, Items = new() });
+        var result = await _productStorefrontService.GetStockBatchAsync(dto.ProductIds);
         return Ok(result);
     }
 }
