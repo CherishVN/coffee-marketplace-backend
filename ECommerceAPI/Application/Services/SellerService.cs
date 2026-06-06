@@ -997,6 +997,8 @@ public class SellerService : ISellerService
         RequireReapprovalIfProductWasActive(product);
 
         await _context.SaveChangesAsync();
+        await SyncProductBasePriceFromVariantsAsync(product.Id);
+        await _context.SaveChangesAsync();
 
         return new ServiceResponse<ProductVariantDetailDto>
         {
@@ -1051,6 +1053,8 @@ public class SellerService : ISellerService
         var wasListedActive = product.Status == (short)ProductStatus.Active;
         product.UpdatedAt = DateTime.UtcNow;
         RequireReapprovalIfProductWasActive(product);
+        await _context.SaveChangesAsync();
+        await SyncProductBasePriceFromVariantsAsync(product.Id);
         await _context.SaveChangesAsync();
 
         return new ServiceResponse
@@ -1678,6 +1682,29 @@ public class SellerService : ISellerService
         catch (JsonException)
         {
             return JsonSerializer.Serialize(t);
+        }
+    }
+
+    private async Task SyncProductBasePriceFromVariantsAsync(Guid productId)
+    {
+        var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == productId);
+        if (product == null) return;
+
+        var activeVariants = await _context.ProductVariants
+            .Where(v => v.ProductId == productId && v.IsActive)
+            .ToListAsync();
+
+        if (activeVariants.Any())
+        {
+            var validPrices = activeVariants
+                .Where(v => v.Price.HasValue && v.Price.Value > 0)
+                .Select(v => v.Price!.Value)
+                .ToList();
+
+            if (validPrices.Any())
+            {
+                product.BasePrice = validPrices.Min();
+            }
         }
     }
 
