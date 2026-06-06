@@ -339,6 +339,19 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
             row = primary;
         }
 
+        if (row == null
+            && !string.IsNullOrEmpty(ghn)
+            && primary != null
+            && string.Equals(primary.ShippingProvider, "GHN", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(primary.TrackingCode, ghn, StringComparison.OrdinalIgnoreCase))
+            {
+                primary.TrackingCode = ghn;
+                primary.UpdatedAt = DateTime.UtcNow;
+            }
+            row = primary;
+        }
+
         if (row == null)
         {
             var created = new Shipment
