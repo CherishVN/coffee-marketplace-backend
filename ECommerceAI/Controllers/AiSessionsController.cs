@@ -271,5 +271,13 @@ public class AiSessionsController : ControllerBase
         public string? Slug { get; set; }
         public decimal? MatchScore { get; set; }
         public string? MatchReason { get; set; }
+        public List<AiChatHistoryVariantItem>? Variants { get; set; }
+    }
+
+    private sealed class AiChatHistoryVariantItem
+    {
+        public Guid Id { get; set; }
+        public string VariantName { get; set; } = "";
+        public decimal? Price { get; set; }
     }
 }
