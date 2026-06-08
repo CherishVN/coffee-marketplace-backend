@@ -2009,6 +2009,22 @@ public class SellerService : ISellerService
     private static List<string>? ParseDeliveryProofUrls(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
+        // Try new format (List of objects with Url, OrderStatus, UploadedAt)
+        try
+        {
+            var newFormat = JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(json);
+            if (newFormat != null && newFormat.Count > 0 && newFormat[0].ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                var urls = newFormat
+                    .Select(e => e.TryGetProperty("Url", out var v) ? v.GetString() : null)
+                    .Where(u => !string.IsNullOrEmpty(u))
+                    .Select(u => u!)
+                    .ToList();
+                return urls.Count > 0 ? urls : null;
+            }
+        }
+        catch { }
+        // Backward compat: old flat string array
         try
         {
             var list = JsonSerializer.Deserialize<List<string>>(json);

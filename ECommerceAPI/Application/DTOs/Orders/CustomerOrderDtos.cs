@@ -55,6 +55,15 @@ public class CustomerOrderSummaryDto
     public List<CustomerOrderItemDto> Items { get; set; } = new();
 }
 
+/// <summary>Ảnh bằng chứng giao hàng kèm trạng thái đơn tại thời điểm upload.</summary>
+public class DeliveryProofEntry
+{
+    public string Url { get; set; } = string.Empty;
+    /// <summary>Giá trị OrderStatus lúc ảnh được upload (4=Đang giao, 5=Đã giao, ...).</summary>
+    public int OrderStatus { get; set; }
+    public DateTime UploadedAt { get; set; }
+}
+
 public class CustomerOrderDetailDto : CustomerOrderSummaryDto
 {
     public string? ShipFullName { get; set; }
@@ -71,8 +80,8 @@ public class CustomerOrderDetailDto : CustomerOrderSummaryDto
     public string? TrackingCode { get; set; }
     /// <summary>Đơn vị vận chuyển (GHN, ...).</summary>
     public string? ShippingProvider { get; set; }
-    /// <summary>Danh sách URL ảnh bằng chứng giao hàng.</summary>
-    public List<string>? DeliveryProofUrls { get; set; }
+    /// <summary>Danh sách ảnh bằng chứng giao hàng kèm thông tin trạng thái tương ứng.</summary>
+    public List<DeliveryProofEntry>? DeliveryProofUrls { get; set; }
     /// <summary>
     /// Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt.
     /// Null = không có yêu cầu hủy đang chờ.

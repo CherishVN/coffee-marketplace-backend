@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ECommerceAPI.Application;
+using ECommerceAPI.Application.DTOs.Orders;
 using ECommerceAPI.Application.DTOs.Webhooks;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
@@ -375,11 +376,13 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
                 created.ActualDeliveryDate = ParseGhnEventTimeToOffset(payload.Time) ?? DateTimeOffset.UtcNow;
             if (payload.DeliveryProofUrls is { Count: > 0 })
             {
-                var existing = string.IsNullOrEmpty(created.DeliveryProofUrls)
-                    ? new List<string>()
-                    : JsonSerializer.Deserialize<List<string>>(created.DeliveryProofUrls) ?? new List<string>();
-                var merged = existing.Union(payload.DeliveryProofUrls).ToList();
-                created.DeliveryProofUrls = JsonSerializer.Serialize(merged);
+                var mappedStatus = MapGhnStatusToOrderStatus(raw, payload.Type);
+                var orderStatusInt = mappedStatus.HasValue ? (int)mappedStatus.Value : (int)OrderStatus.Delivered;
+                var entries = payload.DeliveryProofUrls
+                    .Where(u => !string.IsNullOrEmpty(u))
+                    .Select(u => new DeliveryProofEntry { Url = u, OrderStatus = orderStatusInt, UploadedAt = DateTime.UtcNow })
+                    .ToList();
+                created.DeliveryProofUrls = JsonSerializer.Serialize(entries);
             }
             _context.Shipments.Add(created);
             return;
@@ -408,10 +411,17 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
 
         if (finalEvidence.Count > 0)
         {
-            var existing = string.IsNullOrEmpty(row.DeliveryProofUrls)
-                ? new List<string>()
-                : JsonSerializer.Deserialize<List<string>>(row.DeliveryProofUrls) ?? new List<string>();
-            var merged = existing.Union(finalEvidence).Distinct().ToList();
+            var mappedStatus = MapGhnStatusToOrderStatus(raw, payload.Type);
+            var orderStatusInt = mappedStatus.HasValue ? (int)mappedStatus.Value : row.Order?.Status ?? (int)OrderStatus.Delivered;
+            var now = DateTime.UtcNow;
+
+            var existingEntries = ParseProofEntries(row.DeliveryProofUrls);
+            var newEntries = finalEvidence
+                .Where(u => !string.IsNullOrEmpty(u))
+                .Select(u => new DeliveryProofEntry { Url = u, OrderStatus = orderStatusInt, UploadedAt = now });
+            var merged = existingEntries
+                .UnionBy(newEntries, e => e.Url)
+                .ToList();
             row.DeliveryProofUrls = JsonSerializer.Serialize(merged);
         }
     }
@@ -423,6 +433,40 @@ public class GhnOrderWebhookService : IGhnOrderWebhookService
         if (dt.Kind == DateTimeKind.Unspecified)
             dt = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
         return new DateTimeOffset(dt, TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// Parse DeliveryProofUrls JSON từ DB — hỗ trợ cả format mới (List&lt;DeliveryProofEntry&gt;)
+    /// lẫn format cũ (List&lt;string&gt;) để backward compat.
+    /// </summary>
+    private static List<DeliveryProofEntry> ParseProofEntries(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        // Try new format first
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<DeliveryProofEntry>>(json);
+            if (list != null && list.Any(e => !string.IsNullOrEmpty(e.Url)))
+                return list;
+        }
+        catch { }
+        // Backward compat: old flat string array
+        try
+        {
+            var old = JsonSerializer.Deserialize<List<string>>(json);
+            if (old != null)
+                return old
+                    .Where(u => !string.IsNullOrEmpty(u))
+                    .Select(u => new DeliveryProofEntry
+                    {
+                        Url = u,
+                        OrderStatus = (int)OrderStatus.Delivered,
+                        UploadedAt = DateTime.UtcNow
+                    })
+                    .ToList();
+        }
+        catch { }
+        return new();
     }
 
     /// <summary>

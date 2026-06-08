@@ -852,18 +852,34 @@ public class CustomerOrderService : ICustomerOrderService
         });
     }
 
-    private static List<string>? ParseDeliveryProofUrls(string? json)
+    private static List<DeliveryProofEntry>? ParseDeliveryProofUrls(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
+        // Try new format (with status info)
         try
         {
-            var list = JsonSerializer.Deserialize<List<string>>(json);
-            return list is { Count: > 0 } ? list : null;
+            var newFormat = JsonSerializer.Deserialize<List<DeliveryProofEntry>>(json);
+            if (newFormat is { Count: > 0 } && newFormat.Any(e => !string.IsNullOrEmpty(e.Url)))
+                return newFormat;
         }
-        catch
+        catch { }
+        // Backward compat: old flat string array — assume Delivered status
+        try
         {
-            return null;
+            var oldFormat = JsonSerializer.Deserialize<List<string>>(json);
+            if (oldFormat is { Count: > 0 })
+                return oldFormat
+                    .Where(u => !string.IsNullOrEmpty(u))
+                    .Select(u => new DeliveryProofEntry
+                    {
+                        Url = u,
+                        OrderStatus = (int)OrderStatus.Delivered,
+                        UploadedAt = DateTime.UtcNow
+                    })
+                    .ToList();
         }
+        catch { }
+        return null;
     }
 }
 
