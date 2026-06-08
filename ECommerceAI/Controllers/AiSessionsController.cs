@@ -131,17 +131,157 @@ public class AiSessionsController : ControllerBase
             })
             .ToListAsync();
 
-        var messages = rows.Select(m => new
+        var messages = new List<object>();
+
+        // Collect all distinct product IDs from historical messages to batch-load
+        var allProductIds = new HashSet<Guid>();
+        var parsedRowProducts = new List<(long MsgId, List<AiChatHistoryProductItem>? Products)>();
+
+        foreach (var r in rows)
         {
-            id = m.Id.ToString(),
-            role      = m.Role,
-            content   = m.Content,
-            createdAt = m.CreatedAt,
-            products  = ParseSuggestedProductsJson(m.SuggestedProductsJson),
-        }).ToList();
+            var prods = ParseSuggestedProductsJson(r.SuggestedProductsJson);
+            parsedRowProducts.Add((r.Id, prods));
+            if (prods != null)
+            {
+                foreach (var p in prods)
+                {
+                    allProductIds.Add(p.Id);
+                }
+            }
+        }
+
+        // Batch load all products with their images and variants
+        var dbProducts = allProductIds.Count > 0
+            ? await _context.Products
+                .Include(p => p.Images)
+                .Include(p => p.Variants)
+                .Where(p => allProductIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id)
+            : new Dictionary<Guid, Data.Entities.ReadOnly.Product>();
+
+        foreach (var r in rows)
+        {
+            var prods = parsedRowProducts.First(x => x.MsgId == r.Id).Products;
+
+            if (prods != null)
+            {
+                foreach (var p in prods)
+                {
+                    if (dbProducts.TryGetValue(p.Id, out var dbProd))
+                    {
+                        // Fill image if missing
+                        if (string.IsNullOrEmpty(p.ImageUrl))
+                        {
+                            p.ImageUrl = dbProd.Images.OrderBy(img => img.SortOrder).FirstOrDefault()?.ImageUrl;
+                        }
+
+                        // Fill variants if missing
+                        if (p.Variants == null || p.Variants.Count == 0)
+                        {
+                            p.Variants = dbProd.Variants
+                                .Where(v => v.IsActive)
+                                .OrderBy(v => v.CreatedAt)
+                                .Select(v => new AiChatHistoryVariantItem
+                                {
+                                    Id = v.Id,
+                                    VariantName = GetVariantSuggestionDisplayName(v),
+                                    Price = v.Price
+                                })
+                                .ToList();
+                        }
+                    }
+                }
+            }
+
+            messages.Add(new
+            {
+                id = r.Id.ToString(),
+                role      = r.Role,
+                content   = r.Content,
+                createdAt = r.CreatedAt,
+                products  = prods,
+            });
+        }
 
         return Ok(new { success = true, sessionId, messages });
     }
+
+    private static string GetVariantSuggestionDisplayName(Data.Entities.ReadOnly.ProductVariant v)
+    {
+        var fromAttributes = TryFormatVariantAttributesLabel(v.Attributes);
+        if (!string.IsNullOrWhiteSpace(fromAttributes))
+            return fromAttributes.Trim();
+
+        var raw = (v.VariantName ?? string.Empty).Trim();
+        if (raw.StartsWith("{") && raw.EndsWith("}"))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                var formatted = TryFormatVariantAttributesLabel(doc);
+                if (!string.IsNullOrWhiteSpace(formatted))
+                    return formatted.Trim();
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return string.IsNullOrEmpty(raw) ? "Mặc định" : raw;
+    }
+
+    private static string? TryFormatVariantAttributesLabel(JsonDocument? doc)
+    {
+        if (doc == null) return null;
+        try
+        {
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                var s = root.GetString();
+                return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+            }
+
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var props = root.EnumerateObject().ToList();
+            if (props.Count == 0) return null;
+
+            if (props.Count == 1)
+            {
+                var s = FormatJsonElementAsDisplayValue(props[0].Value);
+                return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+            }
+
+            var parts = new List<string>();
+            foreach (var prop in props)
+            {
+                var s = FormatJsonElementAsDisplayValue(prop.Value);
+                if (string.IsNullOrWhiteSpace(s)) continue;
+
+                var key = prop.Name.Trim();
+                parts.Add(string.IsNullOrEmpty(key) ? s : $"{key}: {s}");
+            }
+
+            return parts.Count > 0 ? string.Join(" · ", parts) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? FormatJsonElementAsDisplayValue(JsonElement el) =>
+        el.ValueKind switch
+        {
+            JsonValueKind.String => el.GetString(),
+            JsonValueKind.Number => el.GetRawText(),
+            JsonValueKind.True => "Có",
+            JsonValueKind.False => "Không",
+            _ => null
+        };
 
     [HttpPost("{sessionId:guid}/read")]
     public async Task<IActionResult> MarkSessionAsRead(Guid sessionId)
