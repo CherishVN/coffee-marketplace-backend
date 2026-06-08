@@ -113,6 +113,7 @@ namespace ECommerceAPI
             builder.Services.AddHostedService<OrderAutoCompleteBackgroundService>();
             builder.Services.AddHostedService<CancelRequestTimeoutBackgroundService>();
             builder.Services.AddHostedService<ReturnAutoRefundBackgroundService>();
+            builder.Services.AddHostedService<DisputeTimeoutBackgroundService>();
             builder.Services.AddMemoryCache();
 
             builder.Services.Configure<ForwardedHeadersOptions>(opts =>

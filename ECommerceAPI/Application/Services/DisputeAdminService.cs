@@ -640,6 +640,168 @@ public class DisputeAdminService : IDisputeAdminService
         */
     }
 
+    public async Task<int> AutoProcessExpiredDisputesAsync(int days, CancellationToken cancellationToken = default)
+    {
+        var cutoff = DateTime.UtcNow.AddDays(-Math.Max(1, days));
+
+        var expiredDisputes = await _context.Disputes
+            .Include(d => d.Order)
+            .Include(d => d.Shop)
+            .Include(d => d.DisputeOrderItems)
+            .Where(d => d.Status == (short)DisputeStatus.WaitingSeller && d.CreatedAt <= cutoff)
+            .ToListAsync(cancellationToken);
+
+        if (expiredDisputes.Count == 0) return 0;
+
+        var processedCount = 0;
+        foreach (var dispute in expiredDisputes)
+        {
+            var strategy = _context.Database.CreateExecutionStrategy();
+            var success = await strategy.ExecuteAsync(async () =>
+            {
+                using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    if (dispute.Type == (short)DisputeType.Return)
+                    {
+                        // 1. AUTO ACCEPT RETURN
+                        var currentStatus = (OrderStatus)dispute.Order.Status;
+                        if (currentStatus is OrderStatus.Delivered or OrderStatus.Completed)
+                        {
+                            var oldStatus = currentStatus;
+                            dispute.Order.Status = (short)OrderStatus.Returning;
+                            dispute.Order.UpdatedAt = DateTime.UtcNow;
+
+                            _orderStatusHistory.AddEntry(
+                                dispute.OrderId,
+                                (short)oldStatus,
+                                (short)OrderStatus.Returning,
+                                null,
+                                "Hệ thống tự động chấp nhận yêu cầu trả hàng do shop quá hạn phản hồi");
+
+                            dispute.Status = (short)DisputeStatus.WaitingCustomer;
+                            dispute.UpdatedAt = DateTime.UtcNow;
+
+                            // Tự động tạo vận đơn trả hàng (giả lập GHN)
+                            var returnTrackingCode = $"RTN-{dispute.Order.OrderCode ?? dispute.Id.ToString("N")[..8].ToUpper()}";
+                            var existingReturnShipment = await _context.Shipments
+                                .FirstOrDefaultAsync(s => s.OrderId == dispute.OrderId && s.ShippingProvider == "Return", cancellationToken);
+                            if (existingReturnShipment == null)
+                            {
+                                _context.Shipments.Add(new Shipment
+                                {
+                                    Id = Guid.NewGuid(),
+                                    OrderId = dispute.OrderId,
+                                    ShopId = dispute.ShopId,
+                                    ShippingProvider = "Return",
+                                    TrackingCode = returnTrackingCode,
+                                    Status = "waiting_customer",
+                                    CreatedAt = DateTime.UtcNow,
+                                    UpdatedAt = DateTime.UtcNow
+                                });
+                            }
+
+                            await _context.SaveChangesAsync(cancellationToken);
+                            await transaction.CommitAsync(cancellationToken);
+
+                            var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+                            await _notifications.PublishAsync(
+                                dispute.CustomerId,
+                                nameof(NotificationType.Dispute),
+                                "Yêu cầu trả hàng được tự động chấp nhận",
+                                $"Hệ thống tự động chấp nhận trả hàng cho đơn #{orderRef} do shop không phản hồi sau {days} ngày. Mã vận đơn trả hàng: {returnTrackingCode}. Shipper GHN sẽ liên hệ và đến tận nhà lấy hàng trả.",
+                                "Dispute", dispute.Id);
+
+                            await NotifyOrderStatusChangedAsync(dispute.Order, oldStatus, OrderStatus.Returning, "system");
+                            await NotifyDisputeUpdatedAsync(dispute, "system");
+                        }
+                    }
+                    else
+                    {
+                        // 2. AUTO ACCEPT REFUND
+                        var lineSum = dispute.DisputeOrderItems.Sum(x => x.LineSnapshotTotal);
+                        var refundCeiling = dispute.RequestedAmount > 0
+                            ? dispute.RequestedAmount
+                            : dispute.Order.Total;
+
+                        if (lineSum > 0)
+                            refundCeiling = Math.Min(refundCeiling, lineSum);
+
+                        decimal approvedAmount = dispute.RequestedAmount > 0 ? dispute.RequestedAmount : refundCeiling;
+                        if (approvedAmount > dispute.Order.Total)
+                            approvedAmount = dispute.Order.Total;
+
+                        dispute.Status = (short)DisputeStatus.Refunded;
+                        dispute.ApprovedAmount = approvedAmount;
+                        dispute.Resolution = $"Tự động hoàn tiền do Seller không phản hồi sau {days} ngày.";
+                        dispute.ResolvedAt = DateTime.UtcNow;
+                        dispute.UpdatedAt = DateTime.UtcNow;
+
+                        var orderPrevStatus = dispute.Order.Status;
+                        dispute.Order.Status = (short)OrderStatus.Refunded;
+                        dispute.Order.UpdatedAt = DateTime.UtcNow;
+
+                        _orderStatusHistory.AddEntry(
+                            dispute.OrderId,
+                            orderPrevStatus,
+                            (short)OrderStatus.Refunded,
+                            null,
+                            "Tự động hoàn tiền khiếu nại do Seller không phản hồi sau 7 ngày");
+
+                        await _walletReversal.TryReverseSettlementForOrderAsync(dispute.OrderId, "Tự động hoàn tiền khiếu nại (Seller không phản hồi)");
+
+                        await _context.SaveChangesAsync(cancellationToken);
+                        await transaction.CommitAsync(cancellationToken);
+
+                        if (approvedAmount > 0)
+                        {
+                            await _customerWallet.CreditRefundAsync(
+                                dispute.CustomerId,
+                                approvedAmount,
+                                "Order",
+                                dispute.OrderId,
+                                $"Hoàn tiền khiếu nại tự động đơn #{NotificationFormatting.ShortEntityId(dispute.OrderId)}");
+                        }
+
+                        var orderRef = NotificationFormatting.ShortEntityId(dispute.OrderId);
+                        await _notifications.PublishAsync(
+                            dispute.CustomerId,
+                            nameof(NotificationType.Dispute),
+                            "Tự động hoàn tiền khiếu nại",
+                            $"Khiếu nại cho đơn #{orderRef} được tự động hoàn tiền do shop không phản hồi sau {days} ngày. Số tiền: {approvedAmount:N0} VND.",
+                            "Dispute",
+                            dispute.Id,
+                            queueEmail: true);
+
+                        await _notifications.PublishAsync(
+                            dispute.Shop.OwnerId,
+                            nameof(NotificationType.Dispute),
+                            "Tự động hoàn tiền khiếu nại — quá hạn",
+                            $"Hệ thống đã tự động hoàn tiền cho khách đơn #{orderRef} do shop không phản hồi khiếu nại sau {days} ngày.",
+                            "Dispute",
+                            dispute.Id,
+                            queueEmail: true);
+
+                        await NotifyOrderStatusChangedAsync(dispute.Order, (OrderStatus)orderPrevStatus, OrderStatus.Refunded, "system");
+                        await NotifyDisputeUpdatedAsync(dispute, "system");
+                    }
+
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _logger.LogError(ex, "Lỗi tự động xử lý khiếu nại quá hạn: {DisputeId}", dispute.Id);
+                    return false;
+                }
+            });
+
+            if (success) processedCount++;
+        }
+
+        return processedCount;
+    }
+
     private Task NotifyOrderStatusChangedAsync(Order order, OrderStatus oldStatus, OrderStatus newStatus, string source)
     {
         var customerGroup = OrderTrackingHub.GetUserGroupName(order.CustomerId);
