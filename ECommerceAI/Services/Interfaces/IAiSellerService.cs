@@ -27,4 +27,8 @@ public interface IAiSellerService
 
  
     Task<bool> CommitProductAiTagSessionAsync(CommitProductAiTagSessionDto dto, Guid sellerId);
+
+    /// <summary>Xác thực Local Brand claim bằng AI — phân tích ngữ nghĩa tên và mô tả sản phẩm</summary>
+    Task<ValidateLocalBrandResponseDto> ValidateLocalBrandAsync(ValidateLocalBrandRequestDto request);
 }
+

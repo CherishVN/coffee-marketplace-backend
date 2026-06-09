@@ -186,4 +186,25 @@ public class AiSellerController : ControllerBase
         }
         return BadRequest(new { message = errorMessage });
     }
+
+    /// <summary>
+    /// Xác thực Local Brand claim bằng AI — phân tích ngữ nghĩa tên và mô tả sản phẩm.
+    /// AI tự nhận biết "cà phê bún bò Huế" là không hợp lệ mà không cần blocklist.
+    /// </summary>
+    [HttpPost("validate-local-brand")]
+    public async Task<IActionResult> ValidateLocalBrand([FromBody] ValidateLocalBrandRequestDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Title))
+            return BadRequest(new { message = "Tên sản phẩm là bắt buộc." });
+        if (string.IsNullOrWhiteSpace(dto.ProvinceName))
+            return BadRequest(new { message = "Tên vùng xuất xứ là bắt buộc." });
+
+        var result = await _sellerService.ValidateLocalBrandAsync(dto);
+
+        if (!result.Success && result.ErrorMessage != null)
+            return AiErrorResult(result.ErrorMessage);
+
+        return Ok(result);
+    }
 }
+

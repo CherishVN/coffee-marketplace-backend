@@ -43,6 +43,7 @@ public class AiSellerService : IAiSellerService
 
     private static readonly Lazy<string> _sellerPrompt = new(() => LoadPromptFromFile("SellerSuggestPrompt.txt", DefaultSystemPrompt));
     private static readonly Lazy<string> _imagePrompt = new(() => LoadPromptFromFile("ImageAnalysisPrompt.txt", DefaultSystemPrompt));
+    private static readonly Lazy<string> _localBrandValidationPrompt = new(() => LoadPromptFromFile("LocalBrandValidationPrompt.txt", DefaultSystemPrompt));
     private static readonly object _analyzeImageSchema = BuildAnalyzeImageSchema();
     private static readonly object _analyzeProductSchema = BuildAnalyzeProductSchema();
 
@@ -1563,6 +1564,80 @@ public class AiSellerService : IAiSellerService
             },
             Required = new[] { "categories", "tags", "materials" }
         };
+    }
+
+    // ── Validate Local Brand (AI semantic analysis) ─────────────────────────────────────────────────
+    /// <summary>
+    /// Dùng Gemini phân tích ngữ nghĩa: sản phẩm có thực sự là cà phê vùng đăng ký không?
+    /// AI tự hiểu càc trường hợp như "cà phê bún bò Huế" là không hợp lệ mà không cần blocklist.
+    /// </summary>
+    public async Task<ValidateLocalBrandResponseDto> ValidateLocalBrandAsync(ValidateLocalBrandRequestDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            return new ValidateLocalBrandResponseDto { Success = false, IsValid = false, Reason = "Tên sản phẩm trống.", Confidence = 0 };
+
+        var userMessage = $"""
+            Sản phẩm đăng ký:
+            - Tên: {request.Title}
+            - Mô tả: {(string.IsNullOrWhiteSpace(request.Description) ? "Không có" : request.Description)}
+            - Vùng xuất xứ đăng ký: {request.ProvinceName} ({request.ArchetypeName})
+
+            Hãy xác định:
+            1. Tên sản phẩm có thực sự là cà phê hay sản phẩm từ cà phê không? (không phải món ăn, thức uống khác)
+            2. Mô tả có nội dung liên quan đến cà phê không?
+            3. Thông tin về vùng xuất xứ (nếu có đề cập) có khớp với {request.ProvinceName} không?
+            """
+        ;
+
+        try
+        {
+            var raw = await _gemini.GenerateAsync(_localBrandValidationPrompt.Value, userMessage);
+            var cleaned = CleanJsonResponse(raw);
+            var parsed = JsonSerializer.Deserialize<LocalBrandValidationResult>(cleaned, _jsonSnakeReadOptions);
+
+            if (parsed == null)
+                return new ValidateLocalBrandResponseDto { Success = false, IsValid = false, Reason = "Không đọc được phản hồi AI.", Confidence = 0 };
+
+            return new ValidateLocalBrandResponseDto
+            {
+                Success = true,
+                IsValid = parsed.IsValid,
+                Confidence = (double)Math.Clamp(parsed.Confidence, 0m, 1m),
+                Reason = parsed.Reason ?? string.Empty
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ValidateLocalBrand failed for title: {Title}", request.Title);
+            return new ValidateLocalBrandResponseDto
+            {
+                Success = false,
+                IsValid = false,
+                Reason = "Không kết nối được AI. Vui lòng thử lại.",
+                Confidence = 0,
+                ErrorMessage = ex.Message
+            };
+        }
+    }
+
+    private sealed class LocalBrandValidationResult
+    {
+        [JsonPropertyName("is_valid")] public bool IsValid { get; set; }
+        [JsonPropertyName("confidence")] public decimal Confidence { get; set; }
+        [JsonPropertyName("reason")] public string? Reason { get; set; }
+    }
+
+    private static string CleanJsonResponse(string raw)
+    {
+        var s = raw.Trim();
+        if (s.StartsWith("```"))
+        {
+            var firstNewline = s.IndexOf('\n');
+            if (firstNewline >= 0) s = s[(firstNewline + 1)..];
+            var lastFence = s.LastIndexOf("```");
+            if (lastFence >= 0) s = s[..lastFence];
+        }
+        return s.Trim();
     }
 
     private static string LoadPromptFromFile(string fileName, string fallback)
