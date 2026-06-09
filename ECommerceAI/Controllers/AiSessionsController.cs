@@ -228,7 +228,7 @@ public class AiSessionsController : ControllerBase
             }
         }
 
-        return string.IsNullOrEmpty(raw) ? "Mặc định" : raw;
+        return string.IsNullOrEmpty(raw) || raw == "{}" ? "Mặc định" : raw;
     }
 
     private static string? TryFormatVariantAttributesLabel(JsonDocument? doc)
