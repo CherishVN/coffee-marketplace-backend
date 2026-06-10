@@ -471,6 +471,7 @@ public class ProductStorefrontService : IProductStorefrontService
             // Cap at 50 to prevent abuse
             var ids = productIds.Take(50).ToList();
 
+            // 1. Variant-level stock (products with active variants)
             var variants = await _context.ProductVariants
                 .Include(v => v.Inventories)
                 .Where(v => ids.Contains(v.ProductId) && v.IsActive)
@@ -482,14 +483,41 @@ public class ProductStorefrontService : IProductStorefrontService
                 })
                 .ToListAsync();
 
-            var result = ids.Select(pid => new ProductStockDto
+            // 2. For products with NO active variants, fall back to product-level inventory
+            //    (rows where VariantId IS NULL — same source as the product detail page)
+            var idsWithVariants = variants.Select(v => v.ProductId).ToHashSet();
+            var idsWithoutVariants = ids.Where(pid => !idsWithVariants.Contains(pid)).ToList();
+
+            var productStockMap = new Dictionary<Guid, int>();
+            if (idsWithoutVariants.Count > 0)
             {
-                ProductId = pid,
-                TotalStock = variants.Where(v => v.ProductId == pid).Sum(v => v.Stock),
-                Variants = variants
-                    .Where(v => v.ProductId == pid)
-                    .Select(v => new VariantStockDto { VariantId = v.Id, Stock = v.Stock })
-                    .ToList()
+                var productStocks = await _context.Inventories
+                    .Where(i => idsWithoutVariants.Contains(i.ProductId) && i.VariantId == null)
+                    .GroupBy(i => i.ProductId)
+                    .Select(g => new
+                    {
+                        ProductId = g.Key,
+                        Stock = g.Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity))
+                    })
+                    .ToListAsync();
+
+                foreach (var ps in productStocks)
+                    productStockMap[ps.ProductId] = ps.Stock;
+            }
+
+            var result = ids.Select(pid =>
+            {
+                var pVariants = variants.Where(v => v.ProductId == pid).ToList();
+                return new ProductStockDto
+                {
+                    ProductId  = pid,
+                    TotalStock = pVariants.Count > 0
+                        ? pVariants.Sum(v => v.Stock)
+                        : productStockMap.GetValueOrDefault(pid, 0),
+                    Variants = pVariants
+                        .Select(v => new VariantStockDto { VariantId = v.Id, Stock = v.Stock })
+                        .ToList()
+                };
             }).ToList();
 
             return new ProductStockBatchResponseDto { Success = true, Items = result };

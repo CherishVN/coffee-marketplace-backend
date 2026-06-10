@@ -151,7 +151,8 @@ public class AiChatService : IAiChatService
         if (!string.IsNullOrEmpty(parsed.SearchQuery))
         {
             var maxPrice = ExtractMaxPrice(message);
-            products = await SearchProductsAsync(parsed.SearchQuery, maxPrice);
+            var minPrice = ExtractMinPrice(message);
+            products = await SearchProductsAsync(parsed.SearchQuery, maxPrice, minPrice);
         }
 
         // Khi LLM trả search_query kèm mức giá, token hóa có thể sai — thử lại từ khóa sạch từ câu user.
@@ -160,7 +161,7 @@ public class AiChatService : IAiChatService
             var cleaned = ExtractProductKeyword(message);
             if (!string.IsNullOrWhiteSpace(cleaned))
             {
-                products = await SearchProductsAsync(cleaned, ExtractMaxPrice(message));
+                products = await SearchProductsAsync(cleaned, ExtractMaxPrice(message), ExtractMinPrice(message));
                 if (products.Any()) parsed.SearchQuery = cleaned;
             }
         }
@@ -171,7 +172,7 @@ public class AiChatService : IAiChatService
             var fallbackKeyword = ExtractProductKeyword(message);
             if (!string.IsNullOrWhiteSpace(fallbackKeyword))
             {
-                products = await SearchProductsAsync(fallbackKeyword, ExtractMaxPrice(message));
+                products = await SearchProductsAsync(fallbackKeyword, ExtractMaxPrice(message), ExtractMinPrice(message));
                 if (products.Any()) parsed.SearchQuery = fallbackKeyword;
             }
         }
@@ -183,7 +184,7 @@ public class AiChatService : IAiChatService
             var fallbackQueries = BuildFallbackQueries(message, session.Messages);
             foreach (var query in fallbackQueries)
             {
-                products = await SearchProductsAsync(query, ExtractMaxPrice(message));
+                products = await SearchProductsAsync(query, ExtractMaxPrice(message), ExtractMinPrice(message));
                 if (products.Any())
                 {
                     parsed.SearchQuery = query;
@@ -198,8 +199,26 @@ public class AiChatService : IAiChatService
             var fromSession = TryMatchRecentSuggestedProducts(message, session.Messages);
             if (fromSession.Count > 0)
             {
-                products = fromSession;
-                if (string.IsNullOrWhiteSpace(parsed.SearchQuery))
+                var maxPrice = ExtractMaxPrice(message);
+                var minPrice = ExtractMinPrice(message);
+                if (maxPrice.HasValue || minPrice.HasValue)
+                {
+                    products = fromSession.Where(p =>
+                    {
+                        var price = p.Variants?.Any() == true
+                            ? p.Variants.Min(v => v.Price ?? p.BasePrice)
+                            : p.BasePrice;
+                        if (maxPrice.HasValue && price > maxPrice.Value) return false;
+                        if (minPrice.HasValue && price < minPrice.Value) return false;
+                        return true;
+                    }).ToList();
+                }
+                else
+                {
+                    products = fromSession;
+                }
+
+                if (products.Any() && string.IsNullOrWhiteSpace(parsed.SearchQuery))
                     parsed.SearchQuery = ExtractProductKeyword(message);
             }
         }
@@ -466,7 +485,7 @@ public class AiChatService : IAiChatService
     private async Task<string> BuildProductContextAsync(string userMessage, IEnumerable<AiChatMessage>? history = null)
     {
         var keyword = ExtractProductKeyword(userMessage);
-        if (IsImageRequest(userMessage))
+        if (string.IsNullOrEmpty(keyword) || IsImageRequest(userMessage))
         {
             var fallbackKeyword = ExtractLastProductKeywordFromHistory(history);
             if (!string.IsNullOrWhiteSpace(fallbackKeyword))
@@ -477,6 +496,7 @@ public class AiChatService : IAiChatService
         if (string.IsNullOrEmpty(keyword)) return string.Empty;
 
         var maxPrice = ExtractMaxPrice(userMessage);
+        var minPrice = ExtractMinPrice(userMessage);
 
         var query = GetFilteredProductsQuery(keyword);
 
@@ -484,6 +504,11 @@ public class AiChatService : IAiChatService
             query = query.Where(p =>
                 p.BasePrice <= maxPrice.Value ||
                 p.Variants.Any(v => v.IsActive && (v.Price ?? p.BasePrice) <= maxPrice.Value));
+
+        if (minPrice.HasValue)
+            query = query.Where(p =>
+                p.BasePrice >= minPrice.Value ||
+                p.Variants.Any(v => v.IsActive && (v.Price ?? p.BasePrice) >= minPrice.Value));
 
         var products = await query.OrderByDescending(p => p.CreatedAt).Take(18).ToListAsync();
         if (!products.Any()) return string.Empty;
@@ -742,7 +767,34 @@ public class AiChatService : IAiChatService
         };
     }
 
-    private async Task<List<ProductSuggestionDto>> SearchProductsAsync(string query, decimal? maxPrice = null)
+    /// <summary>
+    /// Trích xuất giá tối thiểu từ message.
+    /// Ví dụ: "trên 300k" → 300000, "hơn 1 triệu" → 1000000, "từ 500 nghìn trở lên" → 500000
+    /// </summary>
+    private static decimal? ExtractMinPrice(string message)
+    {
+        var lower = message.ToLower();
+
+        // Các pattern: "trên X", "hơn X", "từ X trở lên", "tối thiểu X", "ít nhất X", "từ X"
+        var pricePattern = new System.Text.RegularExpressions.Regex(
+            @"(?:trên|hơn|từ|tối thiểu|ít nhất)\s+(\d+(?:[,\.]\d+)?)\s*(nghìn|ngàn|triệu|k\b|tr\b)?");
+
+        var match = pricePattern.Match(lower);
+        if (!match.Success) return null;
+
+        if (!decimal.TryParse(match.Groups[1].Value.Replace(",", "").Replace(".", ""), out var amount))
+            return null;
+
+        var unit = match.Groups[2].Value.Trim();
+        return unit switch
+        {
+            "triệu" or "tr" => amount * 1_000_000,
+            "nghìn" or "ngàn" or "k" => amount * 1_000,
+            _ => amount >= 1000 ? amount : amount * 1_000
+        };
+    }
+
+    private async Task<List<ProductSuggestionDto>> SearchProductsAsync(string query, decimal? maxPrice = null, decimal? minPrice = null)
     {
         var dbQuery = GetFilteredProductsQuery(query);
 
@@ -750,6 +802,11 @@ public class AiChatService : IAiChatService
             dbQuery = dbQuery.Where(p =>
                 p.BasePrice <= maxPrice.Value ||
                 p.Variants.Any(v => v.IsActive && (v.Price ?? p.BasePrice) <= maxPrice.Value));
+
+        if (minPrice.HasValue)
+            dbQuery = dbQuery.Where(p =>
+                p.BasePrice >= minPrice.Value ||
+                p.Variants.Any(v => v.IsActive && (v.Price ?? p.BasePrice) >= minPrice.Value));
 
         // Đủ SP để hiển thị trong widget (trước đây Take(5) + AND token khiến thường chỉ còn 3–5 món)
         var products = await dbQuery
@@ -805,7 +862,7 @@ public class AiChatService : IAiChatService
             }
         }
 
-        return string.IsNullOrEmpty(raw) ? "Mặc định" : raw;
+        return string.IsNullOrEmpty(raw) || raw == "{}" ? "Mặc định" : raw;
     }
 
     private static string? TryFormatVariantAttributesLabel(JsonDocument? doc)
