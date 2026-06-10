@@ -1143,7 +1143,18 @@ public class SellerService : ISellerService
 
         if (status.HasValue)
         {
-            query = query.Where(o => o.Status == status.Value);
+            if (status.Value == -1)
+            {
+                query = query.Where(o => _context.Disputes.Any(d => d.OrderId == o.Id
+                    && d.Status != (short)DisputeStatus.Resolved
+                    && d.Status != (short)DisputeStatus.Rejected
+                    && d.Status != (short)DisputeStatus.Refunded
+                    && d.Status != (short)DisputeStatus.Cancelled));
+            }
+            else
+            {
+                query = query.Where(o => o.Status == status.Value);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(search))
