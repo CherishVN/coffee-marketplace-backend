@@ -269,27 +269,27 @@ docker build -f ECommerceAI/Dockerfile -t ecommerce-ai .
 
 | Module | Trạng thái | Ghi chú |
 |--------|------------|---------|
-| Admin Portal | ✅ Hoàn thành | Users, sellers, products, categories, tags, materials, disputes, withdrawals, dashboard, platform fees |
-| Authentication | ✅ Supabase | Không build auth API riêng |
-| User Profile | ✅ Hoàn thành | Profile, addresses, register seller |
-| Seller Portal | ✅ Hoàn thành | Shop, products, orders, wallet, reviews, disputes |
-| Customer Portal | ✅ Hoàn thành | Browse, cart, checkout, orders, favorites, reviews, wallet, disputes |
-| Order & Payment | ✅ Hoàn thành | VNPay, MoMo, GHN, SignalR tracking |
-| Coffee Local Brand | ✅ Hoàn thành | Hồ sơ vùng, ProductLocalMeta, AI validate-local-brand, admin duyệt |
-| AI Microservice | ✅ Hoàn thành | Chat, seller suggestions, coffee origin validation, admin analytics |
-| Messaging & Notifications | ✅ Hoàn thành | Conversations, in-app + email |
-| Background Services | ✅ Hoàn thành | 7 hosted services |
-| Unit/Integration Tests | 🔲 Chưa có | Chưa có test project trong solution |
+| Admin Portal |  Hoàn thành | Users, sellers, products, categories, tags, materials, disputes, withdrawals, dashboard, platform fees |
+| Authentication |  Supabase | Không build auth API riêng |
+| User Profile |  Hoàn thành | Profile, addresses, register seller |
+| Seller Portal |  Hoàn thành | Shop, products, orders, wallet, reviews, disputes |
+| Customer Portal |  Hoàn thành | Browse, cart, checkout, orders, favorites, reviews, wallet, disputes |
+| Order & Payment |  Hoàn thành | VNPay, MoMo, GHN, SignalR tracking |
+| Coffee Local Brand |  Hoàn thành | Hồ sơ vùng, ProductLocalMeta, AI validate-local-brand, admin duyệt |
+| AI Microservice |  Hoàn thành | Chat, seller suggestions, coffee origin validation, admin analytics |
+| Messaging & Notifications |  Hoàn thành | Conversations, in-app + email |
+| Background Services | Hoàn thành | 7 hosted services |
+| Unit/Integration Tests | Hoàn thành |
 
 **Tổng số endpoint HTTP:** ~232 (Main API ~200 + AI ~32)
 
 ## Quy trình phát triển
 
-1. Requirements & System Design ✅
+1. Requirements & System Design 
 2. Frontend (Customer/Seller Portal) — *repository riêng*
-3. Backend Development (repository này) ⚙️
-4. AI Module (ECommerceAI) 🤖 ✅
-5. Testing, Deployment & Documentation 📋 *đang tiếp tục*
+3. Backend Development (repository ) 
+4. AI Module (ECommerceAI)  
+5. Testing, Deployment & Documentation
 
 ### Hướng dẫn đóng góp
 
@@ -313,5 +313,5 @@ docker build -f ECommerceAI/Dockerfile -t ecommerce-ai .
 ---
 
 **License:** Dự án Capstone — FPT University  
-**Project Status:** 🟢 Active Development  
+**Project Status:**  Unactive Development  
 **Last Updated:** 2026-09-06 (Coffee Local Brand focus)
