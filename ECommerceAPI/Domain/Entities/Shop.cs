@@ -7,6 +7,8 @@ public partial class Shop
 {
     public Guid Id { get; set; }
 
+    public string ShopCode { get; set; } = null!;
+
     public Guid OwnerId { get; set; }
 
     public string Name { get; set; } = null!;
@@ -37,9 +39,44 @@ public partial class Shop
 
     public Guid? VerifiedBy { get; set; }
 
+    public string? CoverUrl { get; set; }
+
+    public string? Phone { get; set; }
+
+    public string? AddressLine { get; set; }
+
+    public string? WardCode { get; set; }
+
+    public int? DistrictId { get; set; }
+
+    public int? ProvinceId { get; set; }
+
+    public string? City { get; set; }
+
+    public int? GhnShopId { get; set; }
+
+    public string? BusinessType { get; set; }
+
+    public string? BusinessLicenseNumber { get; set; }
+
+    public string? TaxCode { get; set; }
+
+    public string? BankName { get; set; }
+
+    public string? BankAccountNumber { get; set; }
+
+    public string? BankAccountName { get; set; }
+
+    /// <summary>
+    /// JSON thông tin trích từ CCCD/CMND (chỉ chữ, không lưu file ảnh thẻ).
+    /// </summary>
+    public string? IdentitySnapshotJson { get; set; }
+
     public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 
     public virtual ICollection<Order> Orders { get; set; } = new List<Order>();
+
+    public virtual ICollection<Shipment> Shipments { get; set; } = new List<Shipment>();
 
     public virtual User Owner { get; set; } = null!;
 
@@ -47,7 +84,9 @@ public partial class Shop
 
     public virtual ICollection<ShopDocument> ShopDocuments { get; set; } = new List<ShopDocument>();
 
-    public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
+    public virtual ICollection<ShopFollow> ShopFollows { get; set; } = new List<ShopFollow>();
+
+
 
     public virtual User? VerifiedByNavigation { get; set; }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -22,6 +22,8 @@ public partial class SellerWithdrawalRequest
     public string BankAccountName { get; set; } = null!;
 
     public short Status { get; set; }
+
+    public decimal? WalletBalanceAtRequest { get; set; }
 
     public string? RejectionReason { get; set; }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -16,6 +16,7 @@ public partial class Cart
     public DateTime UpdatedAt { get; set; }
 
     public virtual ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();
+
 
     public virtual User Customer { get; set; } = null!;
 }

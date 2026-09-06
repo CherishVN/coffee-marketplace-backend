@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -10,6 +10,8 @@ public partial class Tag
     public string Name { get; set; } = null!;
 
     public string Slug { get; set; } = null!;
+
+    public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAt { get; set; }
 

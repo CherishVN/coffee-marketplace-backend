@@ -1,4 +1,4 @@
-﻿{
+{
   "$schema": "http://json.schemastore.org/launchsettings.json",
   "iisSettings": {
     "windowsAuthentication": false,
@@ -14,9 +14,22 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "http://localhost:5153",
+      "applicationUrl": "http://0.0.0.0:5153",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "http-android-emulator": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://0.0.0.0:5153",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "FrontendUrl": "http://10.0.2.2:3000",
+        "VNPay__ReturnUrl": "http://10.0.2.2:5153/api/payments/vnpay/return",
+        "MoMo__ReturnUrl": "http://10.0.2.2:5153/api/payments/momo/return"
       }
     },
     "https": {

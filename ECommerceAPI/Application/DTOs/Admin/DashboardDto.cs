@@ -1,0 +1,142 @@
+namespace ECommerceAPI.Application.DTOs.Admin;
+
+public class DashboardStatsDto
+{
+    public UserStats Users { get; set; } = new();
+    public ShopStats Shops { get; set; } = new();
+    public ProductStats Products { get; set; } = new();
+    public OrderStats Orders { get; set; } = new();
+    /// <summary>Platform fee revenue (non-reversed fee records).</summary>
+    public RevenueStats Revenue { get; set; } = new();
+    /// <summary>GMV: completed order totals (not platform income).</summary>
+    public CompletedOrderGmvStats CompletedOrderGmv { get; set; } = new();
+    public DisputeStats Disputes { get; set; } = new();
+    public PlatformFeeStats PlatformFees { get; set; } = new();
+    public List<DashboardTimeSeriesDto> DailyStats { get; set; } = new();
+    public List<DashboardTimeSeriesDto> MonthlyStats { get; set; } = new();
+}
+
+public class DashboardTimeSeriesDto
+{
+    public string DateLabel { get; set; } = string.Empty;
+    public decimal Revenue { get; set; }
+    public int Orders { get; set; }
+}
+public class UserStats
+{
+    public int Total { get; set; }
+    public int Active { get; set; }
+    public int Suspended { get; set; }
+    public int NewThisMonth { get; set; }
+    public int Customers { get; set; }
+    public int Sellers { get; set; }
+}
+
+public class ShopStats
+{
+    public int Total { get; set; }
+    public int Active { get; set; }
+    public int PendingVerification { get; set; }
+    public int Suspended { get; set; }
+    public int NewThisMonth { get; set; }
+}
+
+public class ProductStats
+{
+    public int Total { get; set; }
+    public int Active { get; set; }
+    public int Draft { get; set; }
+    public int Hidden { get; set; }
+    public int OutOfStock { get; set; }
+    public int PendingApproval { get; set; }
+    public int NewThisMonth { get; set; }
+}
+
+public class OrderStats
+{
+    public int Total { get; set; }
+    public int Pending { get; set; }
+    public int Processing { get; set; }
+    public int Confirmed { get; set; }
+    public int Delivered { get; set; }
+    public int Completed { get; set; }
+    public int Cancelled { get; set; }
+    public int Refunded { get; set; }
+    public int TodayOrders { get; set; }
+    public int ThisMonthOrders { get; set; }
+}
+
+public class RevenueStats
+{
+    public decimal TotalRevenue { get; set; }
+    public decimal TodayRevenue { get; set; }
+    public decimal ThisMonthRevenue { get; set; }
+    public decimal LastMonthRevenue { get; set; }
+    public decimal GrowthPercentage { get; set; }
+}
+
+public class CompletedOrderGmvStats
+{
+    public decimal TotalGmv { get; set; }
+    public decimal TodayGmv { get; set; }
+    public decimal ThisMonthGmv { get; set; }
+    public decimal LastMonthGmv { get; set; }
+    public decimal GrowthPercentage { get; set; }
+}
+
+public class DisputeStats
+{
+    public int Total { get; set; }
+    public int Pending { get; set; }
+    public int UnderReview { get; set; }
+    public int Resolved { get; set; }
+    public int Refunded { get; set; }
+    
+    public int TypeReturn { get; set; }
+    public int TypeRefund { get; set; }
+    public int TypeDamaged { get; set; }
+    public int TypeNotReceived { get; set; }
+    public int TypeWrongItem { get; set; }
+    public int TypeQualityIssue { get; set; }
+    public int TypeOther { get; set; }
+}
+
+public class PlatformFeeStats
+{
+    public decimal TotalFees { get; set; }
+    public decimal TodayFees { get; set; }
+    public decimal ThisMonthFees { get; set; }
+    public decimal LastMonthFees { get; set; }
+    public int SettledOrdersCount { get; set; }
+}
+
+public class DashboardResponseDto
+{
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public DashboardStatsDto? Stats { get; set; }
+}
+
+public class RecentActivityDto
+{
+    public string Type { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
+}
+
+public class TopShopDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int TotalOrders { get; set; }
+    public decimal TotalRevenue { get; set; }
+}
+
+public class TopProductDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string ShopName { get; set; } = string.Empty;
+    public int TotalSold { get; set; }
+    public decimal Revenue { get; set; }
+}

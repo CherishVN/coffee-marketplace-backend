@@ -1,8 +1,11 @@
+using ECommerceAPI.Application.DTOs.User;
+
 namespace ECommerceAPI.Application.DTOs.Admin;
 
 public class ShopVerificationDto
 {
     public Guid Id { get; set; }
+    public string ShopCode { get; set; } = string.Empty;
     public Guid OwnerId { get; set; }
     public string? OwnerName { get; set; }
     public string? OwnerEmail { get; set; }
@@ -10,6 +13,19 @@ public class ShopVerificationDto
     public string Slug { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? LogoUrl { get; set; }
+    public string? Phone { get; set; }
+    public string? AddressLine { get; set; }
+    public string? WardCode { get; set; }
+    public int? DistrictId { get; set; }
+    public int? ProvinceId { get; set; }
+    public string? City { get; set; }
+    public int? GhnShopId { get; set; }
+    public string? BusinessType { get; set; }
+    public string? BusinessLicenseNumber { get; set; }
+    public string? TaxCode { get; set; }
+    public string? BankName { get; set; }
+    public string? BankAccountNumber { get; set; }
+    public string? BankAccountName { get; set; }
     public short Status { get; set; }
     public string StatusName { get; set; } = string.Empty;
     public short VerificationStatus { get; set; }
@@ -20,6 +36,8 @@ public class ShopVerificationDto
     public string? VerifiedByName { get; set; }
     public DateTime CreatedAt { get; set; }
     public List<ShopDocumentDto> Documents { get; set; } = new();
+    /// <summary>Snapshot nội dung CCCD/CMND (JSON) từ đăng ký — không có URL ảnh thẻ.</summary>
+    public SellerIdentityInfoDto? Identity { get; set; }
 }
 
 public class ShopDocumentDto

@@ -16,7 +16,9 @@ public class UserRepository : IUserRepository
 
     public async Task<User?> GetByIdAsync(Guid id)
     {
-        return await _context.Users.FirstOrDefaultAsync(u => u.Id == id);
+        return await _context.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.Id == id);
     }
 
     public async Task<User> CreateAsync(User user)
@@ -33,7 +35,6 @@ public class UserRepository : IUserRepository
     public async Task<User> UpdateAsync(User user)
     {
         user.UpdatedAt = DateTime.UtcNow;
-        _context.Users.Update(user);
         await _context.SaveChangesAsync();
         
         return user;

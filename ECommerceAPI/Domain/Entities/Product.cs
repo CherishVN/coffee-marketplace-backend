@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using NpgsqlTypes;
 
@@ -7,6 +7,10 @@ namespace ECommerceAPI.Domain.Entities;
 public partial class Product
 {
     public Guid Id { get; set; }
+
+    public string ProductCode { get; set; } = null!;
+
+    public string Slug { get; set; } = null!;
 
     public Guid ShopId { get; set; }
 
@@ -22,15 +26,19 @@ public partial class Product
 
     public short Status { get; set; }
 
+    public int SoldCount { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }
 
+    public string? LastApprovedSnapshotJson { get; set; }
+
     public NpgsqlTsVector? SearchVector { get; set; }
 
-    public virtual ICollection<AiMaterialSuggestion> AiMaterialSuggestions { get; set; } = new List<AiMaterialSuggestion>();
 
-    public virtual ICollection<AiTagSuggestion> AiTagSuggestions { get; set; } = new List<AiTagSuggestion>();
+
+
 
     public virtual ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();
 
@@ -53,4 +61,6 @@ public partial class Product
     public virtual ICollection<ProductMaterial> ProductMaterials { get; set; } = new List<ProductMaterial>();
 
     public virtual ICollection<ProductTag> ProductTags { get; set; } = new List<ProductTag>();
+
+    public virtual ICollection<Conversation> Conversations { get; set; } = new List<Conversation>();
 }

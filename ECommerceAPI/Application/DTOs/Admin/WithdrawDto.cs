@@ -7,6 +7,7 @@ public class WithdrawRequestDto
     public string? SellerName { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = string.Empty;
+    public decimal? AvailableBalance { get; set; }
     public string BankName { get; set; } = string.Empty;
     public string BankAccountNumber { get; set; } = string.Empty;
     public string BankAccountName { get; set; } = string.Empty;

@@ -1,18 +1,39 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
+using ECommerceAPI.Application.DTOs.User;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ECommerceAPI.Application.Services;
 
 public class SellerApprovalService : ISellerApprovalService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IUserAuthEmailResolver _authEmailResolver;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<SellerApprovalService> _logger;
+    private readonly INotificationService _notificationService;
 
-    public SellerApprovalService(ApplicationDbContext context)
+    public SellerApprovalService(
+        ApplicationDbContext context,
+        IUserAuthEmailResolver authEmailResolver,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        ILogger<SellerApprovalService> logger,
+        INotificationService notificationService)
     {
         _context = context;
+        _authEmailResolver = authEmailResolver;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
+        _logger = logger;
+        _notificationService = notificationService;
     }
 
     public async Task<ShopListResponseDto> GetPendingShopsAsync(int page, int pageSize, short? verificationStatus)
@@ -34,10 +55,12 @@ public class SellerApprovalService : ISellerApprovalService
             .Take(pageSize)
             .ToListAsync();
 
+        var ownerEmails = await ResolveOwnerEmailsByUserIdsAsync(shops.Select(s => s.OwnerId));
+
         return new ShopListResponseDto
         {
             Success = true,
-            Shops = shops.Select(MapToDto).ToList(),
+            Shops = shops.Select(s => MapToDto(s, ownerEmails.GetValueOrDefault(s.OwnerId))).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
@@ -62,17 +85,19 @@ public class SellerApprovalService : ISellerApprovalService
             };
         }
 
+        var ownerEmail = await _authEmailResolver.GetEmailByUserIdAsync(shop.OwnerId);
+
         return new ShopResponseDto
         {
             Success = true,
-            Shop = MapToDto(shop)
+            Shop = MapToDto(shop, ownerEmail)
         };
     }
 
     public async Task<ShopResponseDto> ApproveShopAsync(Guid shopId, ApproveSellerDto dto, Guid adminId)
     {
         var shop = await _context.Shops
-            .Include(s => s.Owner)
+            .Include(s => s.Owner).ThenInclude(o => o!.Role)
             .Include(s => s.ShopDocuments)
             .FirstOrDefaultAsync(s => s.Id == shopId);
 
@@ -94,6 +119,35 @@ public class SellerApprovalService : ISellerApprovalService
             };
         }
 
+        if (string.IsNullOrWhiteSpace(shop.Phone)
+            || string.IsNullOrWhiteSpace(shop.AddressLine)
+            || string.IsNullOrWhiteSpace(shop.WardCode)
+            || !shop.DistrictId.HasValue
+            || !shop.ProvinceId.HasValue
+            || string.IsNullOrWhiteSpace(shop.City))
+        {
+            return new ShopResponseDto
+            {
+                Success = false,
+                Message = "Shop thiếu thông tin liên hệ/địa chỉ. Vui lòng cập nhật trước khi phê duyệt."
+            };
+        }
+
+        if (!shop.GhnShopId.HasValue || shop.GhnShopId.Value <= 0)
+        {
+            var createGhnResult = await CreateGhnShopAsync(shop);
+            if (!createGhnResult.Success)
+            {
+                return new ShopResponseDto
+                {
+                    Success = false,
+                    Message = createGhnResult.ErrorMessage
+                };
+            }
+
+            shop.GhnShopId = createGhnResult.ShopId;
+        }
+
         shop.VerificationStatus = 1;
         shop.Status = 1;
         shop.VerifiedAt = DateTime.UtcNow;
@@ -101,10 +155,35 @@ public class SellerApprovalService : ISellerApprovalService
         shop.RejectionReason = null;
         shop.UpdatedAt = DateTime.UtcNow;
 
-        if (shop.Owner != null && shop.Owner.Role == "customer")
+        if (shop.Owner != null && shop.Owner.Role?.Code == "customer")
         {
-            shop.Owner.Role = "seller";
+            var sellerRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "seller");
+            if (sellerRole != null)
+            {
+                shop.Owner.RoleId = sellerRole.Id;
+                shop.Owner.Role = sellerRole;
+            }
             shop.Owner.UpdatedAt = DateTime.UtcNow;
+            
+            // Tạo ví cho seller mới (nếu chưa có)
+            var existingWallet = await _context.SellerWallets
+                .FirstOrDefaultAsync(w => w.SellerId == shop.OwnerId);
+                
+            if (existingWallet == null)
+            {
+                var wallet = new SellerWallet
+                {
+                    Id = Guid.NewGuid(),
+                    SellerId = shop.OwnerId,
+                    AvailableBalance = 0,
+                    HeldBalance = 0,
+                    PendingBalance = 0,
+                    Currency = "VND",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                await _context.SellerWallets.AddAsync(wallet);
+            }
         }
 
         foreach (var doc in shop.ShopDocuments.Where(d => d.Status == 0))
@@ -127,7 +206,36 @@ public class SellerApprovalService : ISellerApprovalService
         };
         await _context.UserAuditLogs.AddAsync(auditLog);
 
-        await _context.SaveChangesAsync();
+        await SaveChangesWithAdminContextAsync(adminId);
+
+        // Gửi in-app notification + email cho seller
+        try
+        {
+            var emailHtml = $"""
+                <html><body style="font-family:sans-serif;color:#333">
+                  <h2 style="color:#e87f19">🎉 Chúc mừng! Shop của bạn đã được duyệt</h2>
+                  <p>Shop <strong>{shop.Name}</strong> đã được phê duyệt thành công.</p>
+                  <p>Bạn có thể bắt đầu đăng sản phẩm và bán hàng ngay bây giờ.</p>
+                  <p style="color:#e87f19;font-weight:bold">⚠️ Lưu ý: Vui lòng đăng xuất và đăng nhập lại để hệ thống cập nhật quyền Seller.</p>
+                  {(string.IsNullOrWhiteSpace(dto.Note) ? "" : $"<p>Ghi chú từ admin: {dto.Note}</p>")}
+                </body></html>
+                """;
+
+            await _notificationService.PublishAsync(
+                userId: shop.OwnerId,
+                type: "Shop",
+                title: "Shop của bạn đã được duyệt! 🎉",
+                content: $"Shop \"{shop.Name}\" đã được phê duyệt. Đăng xuất và đăng nhập lại để sử dụng tính năng Seller.",
+                referenceType: "shop",
+                referenceId: shop.Id,
+                queueEmail: true,
+                emailHtmlBody: emailHtml,
+                emailSubjectOverride: $"[EcomViet] Shop {shop.Name} đã được duyệt");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Không thể gửi notification duyệt shop cho seller {SellerId}", shop.OwnerId);
+        }
 
         var updatedShop = await _context.Shops
             .Include(s => s.Owner)
@@ -135,11 +243,15 @@ public class SellerApprovalService : ISellerApprovalService
             .Include(s => s.VerifiedByNavigation)
             .FirstOrDefaultAsync(s => s.Id == shopId);
 
+        var ownerEmail = updatedShop != null
+            ? await _authEmailResolver.GetEmailByUserIdAsync(updatedShop.OwnerId)
+            : null;
+
         return new ShopResponseDto
         {
             Success = true,
             Message = "Đã duyệt shop thành công. Seller có thể bắt đầu bán hàng.",
-            Shop = MapToDto(updatedShop!)
+            Shop = MapToDto(updatedShop!, ownerEmail)
         };
     }
 
@@ -196,7 +308,25 @@ public class SellerApprovalService : ISellerApprovalService
         };
         await _context.UserAuditLogs.AddAsync(auditLog);
 
-        await _context.SaveChangesAsync();
+        await SaveChangesWithAdminContextAsync(adminId);
+
+        // Gửi notification từ chối cho seller
+        try
+        {
+            await _notificationService.PublishAsync(
+                userId: shop.OwnerId,
+                type: "Shop",
+                title: "Yêu cầu mở shop bị từ chối",
+                content: $"Shop \"{shop.Name}\" chưa được duyệt. Lý do: {dto.Reason}. Vui lòng điều chỉnh thông tin và gửi lại.",
+                referenceType: "shop",
+                referenceId: shop.Id,
+                queueEmail: true,
+                emailSubjectOverride: $"[EcomViet] Yêu cầu mở shop {shop.Name} bị từ chối");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Không thể gửi notification từ chối shop cho seller {SellerId}", shop.OwnerId);
+        }
 
         var updatedShop = await _context.Shops
             .Include(s => s.Owner)
@@ -204,25 +334,44 @@ public class SellerApprovalService : ISellerApprovalService
             .Include(s => s.VerifiedByNavigation)
             .FirstOrDefaultAsync(s => s.Id == shopId);
 
+        var ownerEmail = updatedShop != null
+            ? await _authEmailResolver.GetEmailByUserIdAsync(updatedShop.OwnerId)
+            : null;
+
         return new ShopResponseDto
         {
             Success = true,
             Message = "Đã từ chối shop. Seller có thể resubmit sau khi sửa thông tin.",
-            Shop = MapToDto(updatedShop!)
+            Shop = MapToDto(updatedShop!, ownerEmail)
         };
     }
 
-    private static ShopVerificationDto MapToDto(Shop s)
+    private static ShopVerificationDto MapToDto(Shop s, string? ownerEmail = null)
     {
         return new ShopVerificationDto
         {
             Id = s.Id,
+            ShopCode = s.ShopCode,
             OwnerId = s.OwnerId,
             OwnerName = s.Owner?.FullName,
+            OwnerEmail = ownerEmail,
             Name = s.Name,
             Slug = s.Slug,
             Description = s.Description,
             LogoUrl = s.LogoUrl,
+            Phone = s.Phone,
+            AddressLine = s.AddressLine,
+            WardCode = s.WardCode,
+            DistrictId = s.DistrictId,
+            ProvinceId = s.ProvinceId,
+            City = s.City,
+            GhnShopId = s.GhnShopId,
+            BusinessType = s.BusinessType,
+            BusinessLicenseNumber = s.BusinessLicenseNumber,
+            TaxCode = s.TaxCode,
+            BankName = s.BankName,
+            BankAccountNumber = s.BankAccountNumber,
+            BankAccountName = s.BankAccountName,
             Status = s.Status,
             StatusName = GetStatusName(s.Status),
             VerificationStatus = s.VerificationStatus,
@@ -232,6 +381,7 @@ public class SellerApprovalService : ISellerApprovalService
             VerifiedBy = s.VerifiedBy,
             VerifiedByName = s.VerifiedByNavigation?.FullName,
             CreatedAt = s.CreatedAt,
+            Identity = TryDeserializeIdentity(s.IdentitySnapshotJson),
             Documents = s.ShopDocuments?.Select(d => new ShopDocumentDto
             {
                 Id = d.Id,
@@ -294,11 +444,15 @@ public class SellerApprovalService : ISellerApprovalService
             .Include(s => s.VerifiedByNavigation)
             .FirstOrDefaultAsync(s => s.Id == shopId);
 
+        var ownerEmail = updatedShop != null
+            ? await _authEmailResolver.GetEmailByUserIdAsync(updatedShop.OwnerId)
+            : null;
+
         return new ShopResponseDto
         {
             Success = true,
             Message = "Đã kích hoạt shop thành công",
-            Shop = MapToDto(updatedShop!)
+            Shop = MapToDto(updatedShop!, ownerEmail)
         };
     }
 
@@ -354,6 +508,10 @@ public class SellerApprovalService : ISellerApprovalService
             .Include(s => s.VerifiedByNavigation)
             .FirstOrDefaultAsync(s => s.Id == shopId);
 
+        var ownerEmail = updatedShop != null
+            ? await _authEmailResolver.GetEmailByUserIdAsync(updatedShop.OwnerId)
+            : null;
+
         var message = activeOrdersCount > 0
             ? $"Đã tạm ngưng shop. Lưu ý: Shop có {activeOrdersCount} đơn hàng đang xử lý, cần tiếp tục hoàn thành."
             : "Đã tạm ngưng shop thành công. Sản phẩm sẽ bị ẩn khỏi tìm kiếm.";
@@ -362,7 +520,7 @@ public class SellerApprovalService : ISellerApprovalService
         {
             Success = true,
             Message = message,
-            Shop = MapToDto(updatedShop!)
+            Shop = MapToDto(updatedShop!, ownerEmail)
         };
     }
 
@@ -426,12 +584,50 @@ public class SellerApprovalService : ISellerApprovalService
             .Include(s => s.VerifiedByNavigation)
             .FirstOrDefaultAsync(s => s.Id == shopId);
 
+        var ownerEmail = updatedShop != null
+            ? await _authEmailResolver.GetEmailByUserIdAsync(updatedShop.OwnerId)
+            : null;
+
         return new ShopResponseDto
         {
             Success = true,
             Message = "Đã đóng shop vĩnh viễn",
-            Shop = MapToDto(updatedShop!)
+            Shop = MapToDto(updatedShop!, ownerEmail)
         };
+    }
+
+    private async Task<Dictionary<Guid, string?>> ResolveOwnerEmailsByUserIdsAsync(IEnumerable<Guid> userIds)
+    {
+        var distinctIds = userIds.Distinct().ToList();
+        if (distinctIds.Count == 0)
+        {
+            return new Dictionary<Guid, string?>();
+        }
+
+        var tasks = distinctIds.Select(async id => new
+        {
+            Id = id,
+            Email = await _authEmailResolver.GetEmailByUserIdAsync(id)
+        });
+
+        var resolved = await Task.WhenAll(tasks);
+        return resolved.ToDictionary(x => x.Id, x => x.Email);
+    }
+
+    private static SellerIdentityInfoDto? TryDeserializeIdentity(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<SellerIdentityInfoDto>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string GetStatusName(short status)
@@ -466,5 +662,106 @@ public class SellerApprovalService : ISellerApprovalService
             2 => "Rejected",
             _ => "Unknown"
         };
+    }
+
+    private async Task SaveChangesWithAdminContextAsync(Guid adminId)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _context.Database.BeginTransactionAsync();
+
+            await _context.Database.ExecuteSqlRawAsync(
+                "SET LOCAL session_replication_role = replica");
+
+            await _context.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
+    private async Task<(bool Success, int? ShopId, string ErrorMessage)> CreateGhnShopAsync(Shop shop)
+    {
+        var ghnToken = (_configuration["GHN:Token"])?.Trim();
+        var ghnBaseUrl = (_configuration["GHN:BaseUrl"] ?? string.Empty).TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(ghnToken))
+        {
+            return (false, null, "Thiếu cấu hình GHN Token, không thể tạo cửa hàng trên GHN.");
+        }
+
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{ghnBaseUrl}/shiip/public-api/v2/shop/register");
+
+        request.Headers.TryAddWithoutValidation("Token", ghnToken);
+        request.Content = JsonContent.Create(new
+        {
+            district_id = shop.DistrictId!.Value,
+            ward_code = shop.WardCode,
+            name = shop.Name,
+            phone = shop.Phone,
+            address = shop.AddressLine
+        });
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(request);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to call GHN create-store API for shop {ShopId}", shop.Id);
+            return (false, null, $"Không thể kết nối GHN để tạo cửa hàng: {ex.Message}");
+        }
+
+        var responseText = await response.Content.ReadAsStringAsync();
+        GhnCreateShopResponse? ghnResponse;
+        try
+        {
+            ghnResponse = JsonSerializer.Deserialize<GhnCreateShopResponse>(
+                responseText,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            ghnResponse = null;
+        }
+
+        if (!response.IsSuccessStatusCode || ghnResponse?.Code != 200 || ghnResponse.Data?.ShopId is null || ghnResponse.Data.ShopId <= 0)
+        {
+            var message = GhnApiErrorText.FromResponseBody(responseText, (int)response.StatusCode);
+
+            _logger.LogWarning(
+                "GHN create-store failed for shop {ShopId}. StatusCode={StatusCode}, Response={Response}",
+                shop.Id,
+                (int)response.StatusCode,
+                responseText);
+
+            return (false, null, $"Tạo cửa hàng GHN thất bại: {message}");
+        }
+
+        return (true, ghnResponse.Data.ShopId, string.Empty);
+    }
+
+    private sealed class GhnCreateShopResponse
+    {
+        public int Code { get; set; }
+        public string? Message { get; set; }
+
+        [JsonPropertyName("code_message")]
+        public string? CodeMessage { get; set; }
+
+        [JsonPropertyName("code_message_value")]
+        public string? CodeMessageValue { get; set; }
+
+        public GhnCreateShopData? Data { get; set; }
+    }
+
+    private sealed class GhnCreateShopData
+    {
+        [JsonPropertyName("shop_id")]
+        public int ShopId { get; set; }
     }
 }

@@ -11,6 +11,8 @@ public partial class Order
 
     public Guid ShopId { get; set; }
 
+    public string OrderCode { get; set; } = null!;
+
     public short Status { get; set; }
 
     public decimal Subtotal { get; set; }
@@ -24,6 +26,14 @@ public partial class Order
     public string? ShipPhone { get; set; }
 
     public string? ShipAddress { get; set; }
+
+    public string? CancelReason { get; set; }
+
+    /// <summary>
+    /// Thời điểm khách gửi yêu cầu hủy đang chờ shop duyệt (lưu UTC với timezone).
+    /// Null = không có yêu cầu. CancelReason dùng chung làm lý do cho yêu cầu này.
+    /// </summary>
+    public DateTimeOffset? CancelRequestedAt { get; set; }
 
     public DateTime CreatedAt { get; set; }
 
@@ -45,10 +55,14 @@ public partial class Order
 
     public virtual Shop Shop { get; set; } = null!;
 
-    public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
+
 
     public virtual Transaction? Transaction { get; set; }
 
     // Dispute (mỗi order chỉ có tối đa 1 dispute)
     public virtual Dispute? Dispute { get; set; }
+
+    public virtual ICollection<Shipment> Shipments { get; set; } = new List<Shipment>();
+
+    public virtual ICollection<OrderStatusHistory> OrderStatusHistories { get; set; } = new List<OrderStatusHistory>();
 }

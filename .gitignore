@@ -178,6 +178,7 @@ DocProject/Help/html
 
 # Click-Once directory
 publish/
+publish_test/
 
 # Publish Web Output
 *.[Pp]ublish.xml
@@ -402,11 +403,12 @@ FodyWeavers.xsd
 # macOS
 .DS_Store
 
-# appsettings with sensitive data
-appsettings.Development.json
-appsettings.Production.json
-appsettings.*.json
-!appsettings.json
+# appsettings — không commit bí mật; dùng appsettings.Example.json làm mẫu
+**/appsettings.json
+**/appsettings.Development.json
+**/appsettings.Production.json
+**/appsettings.Local.json
+!**/appsettings.Example.json
 
 # Environment variables
 .env
@@ -436,3 +438,9 @@ yarn-error.log*
 *.crt
 *.cer
 *.pem
+
+# Documentation files
+*.md
+!README.md
+
+*.sql

@@ -1,18 +1,28 @@
+using ECommerceAPI.Application;
 using ECommerceAPI.Application.DTOs.Admin;
 using ECommerceAPI.Application.Interfaces;
 using ECommerceAPI.Domain.Entities;
+using ECommerceAPI.Domain.Enums;
 using ECommerceAPI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace ECommerceAPI.Application.Services;
 
 public class WithdrawAdminService : IWithdrawAdminService
 {
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService _notifications;
+    private readonly ILogger<WithdrawAdminService> _logger;
 
-    public WithdrawAdminService(ApplicationDbContext context)
+    public WithdrawAdminService(
+        ApplicationDbContext context,
+        INotificationService notifications,
+        ILogger<WithdrawAdminService> logger)
     {
         _context = context;
+        _notifications = notifications;
+        _logger = logger;
     }
 
     public async Task<WithdrawListResponseDto> GetAllRequestsAsync(int page, int pageSize, short? status)
@@ -20,6 +30,7 @@ public class WithdrawAdminService : IWithdrawAdminService
         var query = _context.SellerWithdrawalRequests
             .Include(r => r.Seller)
             .Include(r => r.ReviewedByNavigation)
+            .Include(r => r.Wallet)
             .AsQueryable();
 
         if (status.HasValue)
@@ -27,12 +38,13 @@ public class WithdrawAdminService : IWithdrawAdminService
 
         var totalCount = await query.CountAsync();
 
-        var requests = await query
+        var raw = await query
             .OrderByDescending(r => r.RequestedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(r => MapToDto(r))
             .ToListAsync();
+
+        var requests = raw.Select(r => MapToDto(r, r.WalletBalanceAtRequest ?? r.Wallet?.AvailableBalance)).ToList();
 
         return new WithdrawListResponseDto
         {
@@ -98,10 +110,36 @@ public class WithdrawAdminService : IWithdrawAdminService
         request.AdminNote = dto.AdminNote;
         request.PaidAt = DateTime.UtcNow;
 
+        // Tiền đã chuyển từ Available → Pending lúc seller tạo yêu cầu; duyệt chỉ trừ Pending (đã chi).
         if (request.Wallet != null)
         {
-            request.Wallet.AvailableBalance -= request.Amount;
+            if (request.Wallet.PendingBalance < request.Amount)
+            {
+                _logger.LogWarning(
+                    "Withdraw approve: wallet {WalletId} pending {Pending} < amount {Amount}, clearing pending",
+                    request.Wallet.Id, request.Wallet.PendingBalance, request.Amount);
+                request.Wallet.PendingBalance = 0;
+            }
+            else
+            {
+                request.Wallet.PendingBalance -= request.Amount;
+            }
+
             request.Wallet.UpdatedAt = DateTime.UtcNow;
+
+            var withdrawLedger = new SellerWalletLedger
+            {
+                Id = Guid.NewGuid(),
+                WalletId = request.Wallet.Id,
+                Type = "debit",
+                Amount = -request.Amount,
+                Currency = request.Wallet.Currency,
+                ReferenceType = WalletLedgerReferenceTypes.Withdrawal,
+                ReferenceId = request.Id,
+                Note = $"Rút tiền đã duyệt (yêu cầu {request.Id})",
+                CreatedAt = DateTime.UtcNow
+            };
+            await _context.SellerWalletLedgers.AddAsync(withdrawLedger);
         }
 
         var auditLog = new UserAuditLog
@@ -118,6 +156,15 @@ public class WithdrawAdminService : IWithdrawAdminService
         await _context.UserAuditLogs.AddAsync(auditLog);
 
         await _context.SaveChangesAsync();
+
+        await _notifications.PublishAsync(
+            request.SellerId,
+            nameof(NotificationType.Payment),
+            "Rút tiền đã được duyệt",
+            $"Yêu cầu rút {request.Amount:N0} {request.Currency} đã được duyệt. Số tiền đang giữ (pending) đã được ghi nhận chi trả.",
+            "WithdrawalRequest",
+            request.Id,
+            queueEmail: true);
 
         var updatedRequest = await _context.SellerWithdrawalRequests
             .Include(r => r.Seller)
@@ -145,6 +192,7 @@ public class WithdrawAdminService : IWithdrawAdminService
 
         var request = await _context.SellerWithdrawalRequests
             .Include(r => r.Seller)
+            .Include(r => r.Wallet)
             .FirstOrDefaultAsync(r => r.Id == requestId);
 
         if (request == null)
@@ -163,6 +211,15 @@ public class WithdrawAdminService : IWithdrawAdminService
                 Success = false,
                 Message = "Chỉ có thể từ chối yêu cầu đang chờ xử lý"
             };
+        }
+
+        if (request.Wallet != null)
+        {
+            request.Wallet.AvailableBalance += request.Amount;
+            request.Wallet.PendingBalance -= request.Amount;
+            if (request.Wallet.PendingBalance < 0)
+                request.Wallet.PendingBalance = 0;
+            request.Wallet.UpdatedAt = DateTime.UtcNow;
         }
 
         request.Status = 2;
@@ -186,6 +243,15 @@ public class WithdrawAdminService : IWithdrawAdminService
 
         await _context.SaveChangesAsync();
 
+        await _notifications.PublishAsync(
+            request.SellerId,
+            nameof(NotificationType.Payment),
+            "Yêu cầu rút tiền bị từ chối",
+            $"Yêu cầu rút {request.Amount:N0} {request.Currency} đã bị từ chối. Lý do: {dto.Reason}",
+            "WithdrawalRequest",
+            request.Id,
+            queueEmail: true);
+
         var updatedRequest = await _context.SellerWithdrawalRequests
             .Include(r => r.Seller)
             .Include(r => r.ReviewedByNavigation)
@@ -199,7 +265,7 @@ public class WithdrawAdminService : IWithdrawAdminService
         };
     }
 
-    private static WithdrawRequestDto MapToDto(SellerWithdrawalRequest r)
+    private static WithdrawRequestDto MapToDto(SellerWithdrawalRequest r, decimal? availableBalance = null)
     {
         return new WithdrawRequestDto
         {
@@ -208,6 +274,7 @@ public class WithdrawAdminService : IWithdrawAdminService
             SellerName = r.Seller?.FullName,
             Amount = r.Amount,
             Currency = r.Currency,
+            AvailableBalance = availableBalance,
             BankName = r.BankName,
             BankAccountNumber = r.BankAccountNumber,
             BankAccountName = r.BankAccountName,

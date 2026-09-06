@@ -48,5 +48,14 @@ public enum OrderStatus : short
     /// <summary>
     /// Đã hoàn tiền
     /// </summary>
-    Refunded = 8
+    Refunded = 8,
+    /// <summary>
+    /// Đang trả hàng (về cho seller)
+    /// </summary>
+    Returning = 9,
+
+    /// <summary>
+    /// Đã nhận hàng trả (seller đã nhận)
+    /// </summary>
+    Returned = 10
 }

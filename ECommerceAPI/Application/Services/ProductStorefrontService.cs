@@ -1,0 +1,570 @@
+using ECommerceAPI.Application.DTOs.Storefront;
+using ECommerceAPI.Application.Interfaces;
+using ECommerceAPI.Domain.Enums;
+using ECommerceAPI.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
+namespace ECommerceAPI.Application.Services;
+
+public class ProductStorefrontService : IProductStorefrontService
+{
+    private readonly ApplicationDbContext _context;
+    private readonly ILogger<ProductStorefrontService> _logger;
+
+    public ProductStorefrontService(
+        ApplicationDbContext context,
+        ILogger<ProductStorefrontService> logger)
+    {
+        _context = context;
+        _logger = logger;
+    }
+
+    public async Task<ProductStorefrontListResponseDto> GetProductsAsync(
+        int page,
+        int pageSize,
+        long? categoryId = null,
+        string? search = null,
+        decimal? minPrice = null,
+        decimal? maxPrice = null,
+        double? minRating = null,
+        string? sortBy = null,
+        List<long>? tagIds = null,
+        List<Guid>? materialIds = null)
+    {
+        try
+        {
+            string? searchLower = null;
+
+            var query = _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Where(p => p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1)
+                .AsQueryable();
+
+            if (categoryId.HasValue)
+            {
+                var allowedCategoryIds = await GetDescendantCategoryIdsAsync(categoryId.Value);
+                query = query.Where(p => p.CategoryId.HasValue && allowedCategoryIds.Contains(p.CategoryId.Value));
+            }
+
+            // Match name, category, or tags only — not description/fts (SEO text causes irrelevant hits, e.g. "túi" matching jackets).
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var searchTerm = search.Trim();
+                searchLower = searchTerm.ToLower();
+
+                query = query.Where(p =>
+                    p.Name.ToLower().Contains(searchLower)
+                    || (p.Shop != null && (
+                        p.Shop.Name.ToLower().Contains(searchLower)
+                        || p.Shop.Slug.ToLower().Contains(searchLower)))
+                    || (p.Category != null && (
+                        p.Category.Name.ToLower().Contains(searchLower)
+                        || p.Category.Slug.ToLower().Contains(searchLower)))
+                    || p.ProductTags.Any(pt =>
+                        pt.Tag.IsActive && (
+                        pt.Tag.Name.ToLower().Contains(searchLower)
+                        || pt.Tag.Slug.ToLower().Contains(searchLower))));
+            }
+
+            // Giá trên danh sách = min(giá gốc, variant active); variant không Price thì dùng giá gốc.
+            if (minPrice.HasValue)
+            {
+                query = query.Where(p =>
+                    (!p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    >= minPrice.Value);
+            }
+
+            if (maxPrice.HasValue)
+            {
+                query = query.Where(p =>
+                    (!p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    <= maxPrice.Value);
+            }
+
+            if (minRating.HasValue)
+                query = query.Where(p => p.ProductReviews.Any() && p.ProductReviews.Average(r => (double)r.Rating) >= minRating.Value);
+
+            if (tagIds != null && tagIds.Count > 0)
+                query = query.Where(p => p.ProductTags.Any(pt => tagIds.Contains(pt.TagId)));
+
+            if (materialIds != null && materialIds.Count > 0)
+                query = query.Where(p => p.ProductMaterials.Any(pm => materialIds.Contains(pm.MaterialId)));
+
+            // relevance: ưu tiên khớp tên → chất lượng đánh giá (có bù số lượt review) → bán chạy → giá tốt hơn
+            var sortKey = string.IsNullOrWhiteSpace(sortBy) ? "newest" : sortBy.Trim().ToLowerInvariant();
+            if (sortKey == "relevance" && string.IsNullOrEmpty(searchLower))
+                sortKey = "newest";
+
+            if (sortKey == "relevance")
+            {
+                query = query
+                    .OrderByDescending(p => p.Name.ToLower().Contains(searchLower!))
+                    .ThenByDescending(p => p.ProductReviews.Any()
+                        ? p.ProductReviews.Average(r => (double)r.Rating) * (1.0 + Math.Log(1.0 + p.ProductReviews.Count) / 8.0)
+                        : 0.0)
+                    .ThenByDescending(p => p.SoldCount)
+                    .ThenBy(p =>
+                        !p.ProductVariants.Any(v => v.IsActive)
+                            ? p.BasePrice
+                            : Math.Min(
+                                p.BasePrice,
+                                p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                    .ThenBy(p => p.Id);
+            }
+            else
+            {
+                query = sortKey switch
+                {
+                    "price_asc" => query.OrderBy(p =>
+                            !p.ProductVariants.Any(v => v.IsActive)
+                                ? p.BasePrice
+                                : Math.Min(
+                                    p.BasePrice,
+                                    p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                        .ThenBy(p => p.Id),
+                    "price_desc" => query.OrderByDescending(p =>
+                            !p.ProductVariants.Any(v => v.IsActive)
+                                ? p.BasePrice
+                                : Math.Min(
+                                    p.BasePrice,
+                                    p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)))
+                        .ThenBy(p => p.Id),
+                    "rating"      => query.OrderByDescending(p => p.ProductReviews.Any() ? p.ProductReviews.Average(r => (double)r.Rating) : 0).ThenBy(p => p.Id),
+                    "newest"      => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id),
+                    "best_seller" => query.OrderByDescending(p => p.SoldCount).ThenBy(p => p.Id),
+                    _             => query.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id)
+                };
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var products = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new ProductStorefrontDto
+                {
+                    Id           = p.Id,
+                    Slug         = p.Slug,
+                    Name         = p.Name,
+                    ShopId       = p.ShopId,
+                    ShopName     = p.Shop.Name,
+                    ShopSlug     = p.Shop.Slug,
+                    ShopLogoUrl  = p.Shop.LogoUrl,
+                    BasePrice    = !p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)),
+                    Currency     = p.Currency,
+                    CategoryId   = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    ImageUrls    = p.ProductImages
+                        .OrderBy(img => img.SortOrder)
+                        .Select(img => img.ImageUrl)
+                        .ToList(),
+                    CreatedAt    = p.CreatedAt,
+                    SoldCount    = p.SoldCount,
+                    AverageRating = p.ProductReviews.Any()
+                        ? p.ProductReviews.Average(r => (double)r.Rating)
+                        : 0,
+                    ReviewCount  = p.ProductReviews.Count,
+                })
+                .ToListAsync();
+
+            return new ProductStorefrontListResponseDto
+            {
+                Success    = true,
+                Products   = products,
+                TotalCount = totalCount,
+                Page       = page,
+                PageSize   = pageSize
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching storefront products");
+            return new ProductStorefrontListResponseDto
+            {
+                Success = false,
+                Message = "Có lỗi xảy ra khi lấy danh sách sản phẩm"
+            };
+        }
+    }
+
+    public async Task<ProductStorefrontDetailResponseDto> GetProductByIdAsync(Guid productId)
+    {
+        try
+        {
+            var product = await _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Include(p => p.ProductReviews)
+                .Include(p => p.ProductVariants).ThenInclude(v => v.Inventories)
+                .Include(p => p.Inventories)
+                .Include(p => p.ProductTags).ThenInclude(pt => pt.Tag)
+                .Include(p => p.ProductMaterials).ThenInclude(pm => pm.Material)
+                .Where(p => p.Id == productId && p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1)
+                .Select(p => new ProductStorefrontDetailDto
+                {
+                    Id = p.Id,
+                    Slug         = p.Slug,
+                    Name         = p.Name,
+                    Description  = p.Description,
+                    ShopId       = p.ShopId,
+                    ShopName     = p.Shop.Name,
+                    ShopSlug     = p.Shop.Slug,
+                    ShopLogoUrl  = p.Shop.LogoUrl,
+                    BasePrice    = p.BasePrice,
+                    Currency     = p.Currency,
+                    CategoryId   = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    AverageRating = p.ProductReviews.Any()
+                        ? Math.Round(p.ProductReviews.Average(r => (double)r.Rating), 1)
+                        : 0,
+                    ReviewCount  = p.ProductReviews.Count,
+                    ImageUrls    = p.ProductImages
+                        .OrderBy(img => img.SortOrder)
+                        .Select(img => img.ImageUrl)
+                        .ToList(),
+                    Variants = p.ProductVariants
+                        .Where(v => v.IsActive)
+                        .Select(v => new ProductVariantStorefrontDto
+                        {
+                            Id            = v.Id,
+                            VariantName   = v.VariantName,
+                            Attributes    = v.Attributes,
+                            Price         = v.Price,
+                            IsActive      = v.IsActive,
+                            StockQuantity = v.Inventories
+                                .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                        })
+                        .ToList(),
+                    TotalStock = p.Inventories
+                        .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                    Tags = p.ProductTags.Where(pt => pt.Tag.IsActive).Select(pt => pt.Tag.Name).ToList(),
+                    Materials = p.ProductMaterials.Select(pm => pm.Material.Name).ToList(),
+                    CreatedAt = p.CreatedAt,
+                    SoldCount = p.SoldCount,
+                })
+                .FirstOrDefaultAsync();
+
+            if (product is null)
+                return new ProductStorefrontDetailResponseDto
+                {
+                    Success = false,
+                    Message = "Không tìm thấy sản phẩm"
+                };
+
+            return new ProductStorefrontDetailResponseDto { Success = true, Product = product };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching storefront product {ProductId}", productId);
+            return new ProductStorefrontDetailResponseDto
+            {
+                Success = false,
+                Message = "Có lỗi xảy ra khi lấy thông tin sản phẩm"
+            };
+        }
+    }
+
+    public async Task<ProductStorefrontListResponseDto> GetSuggestionsAsync(int limit = 10)
+    {
+        try
+        {
+            // Top bán chạy + mới nhất, trộn để đa dạng
+            var trending = await _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Where(p => p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1 && p.SoldCount > 0)
+                .OrderByDescending(p => p.SoldCount)
+                .Take(limit / 2)
+                .Select(p => new ProductStorefrontDto
+                {
+                    Id = p.Id, Slug = p.Slug, Name = p.Name,
+                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug, ShopLogoUrl = p.Shop.LogoUrl,
+                    BasePrice = !p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)),
+                    Currency = p.Currency,
+                    CategoryId = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    ImageUrls = p.ProductImages.OrderBy(img => img.SortOrder).Select(img => img.ImageUrl).ToList(),
+                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount,
+                    AverageRating = 0,
+                    ReviewCount = 0
+                })
+                .ToListAsync();
+
+            var newest = await _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Where(p => p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1 && trending.Select(t => t.Id).All(id => id != p.Id))
+                .OrderByDescending(p => p.CreatedAt)
+                .Take(limit - trending.Count)
+                .Select(p => new ProductStorefrontDto
+                {
+                    Id = p.Id, Slug = p.Slug, Name = p.Name,
+                    ShopId = p.ShopId, ShopName = p.Shop.Name, ShopSlug = p.Shop.Slug, ShopLogoUrl = p.Shop.LogoUrl,
+                    BasePrice = !p.ProductVariants.Any(v => v.IsActive)
+                        ? p.BasePrice
+                        : Math.Min(
+                            p.BasePrice,
+                            p.ProductVariants.Where(v => v.IsActive).Min(v => v.Price ?? p.BasePrice)),
+                    Currency = p.Currency,
+                    CategoryId = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    ImageUrls = p.ProductImages.OrderBy(img => img.SortOrder).Select(img => img.ImageUrl).ToList(),
+                    CreatedAt = p.CreatedAt, SoldCount = p.SoldCount,
+                    AverageRating = 0,
+                    ReviewCount = 0
+                })
+                .ToListAsync();
+
+            var combined = trending.Concat(newest).ToList();
+
+            return new ProductStorefrontListResponseDto
+            {
+                Success = true,
+                Products = combined,
+                TotalCount = combined.Count,
+                Page = 1,
+                PageSize = limit
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching product suggestions");
+            return new ProductStorefrontListResponseDto { Success = false, Message = "Có lỗi xảy ra khi lấy gợi ý sản phẩm" };
+        }
+    }
+
+    public async Task<ProductStorefrontDetailResponseDto> GetProductBySlugAsync(string slug)
+    {
+        try
+        {
+            var product = await _context.Products
+                .Include(p => p.Shop)
+                .Include(p => p.Category)
+                .Include(p => p.ProductImages)
+                .Include(p => p.ProductReviews)
+                .Include(p => p.ProductVariants).ThenInclude(v => v.Inventories)
+                .Include(p => p.Inventories)
+                .Include(p => p.ProductTags).ThenInclude(pt => pt.Tag)
+                .Include(p => p.ProductMaterials).ThenInclude(pm => pm.Material)
+                .Where(p => p.Slug == slug && p.Status == (short)ProductStatus.Active && p.Shop != null && p.Shop.Status == 1 && p.Shop.VerificationStatus == 1)
+                .Select(p => new ProductStorefrontDetailDto
+                {
+                    Id           = p.Id,
+                    Slug         = p.Slug,
+                    Name         = p.Name,
+                    Description  = p.Description,
+                    ShopId       = p.ShopId,
+                    ShopName     = p.Shop.Name,
+                    ShopSlug     = p.Shop.Slug,
+                    ShopLogoUrl  = p.Shop.LogoUrl,
+                    BasePrice    = p.BasePrice,
+                    Currency     = p.Currency,
+                    CategoryId   = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null,
+                    CategorySlug = p.Category != null ? p.Category.Slug : null,
+                    AverageRating = p.ProductReviews.Any()
+                        ? Math.Round(p.ProductReviews.Average(r => (double)r.Rating), 1)
+                        : 0,
+                    ReviewCount  = p.ProductReviews.Count,
+                    ImageUrls    = p.ProductImages
+                        .OrderBy(img => img.SortOrder)
+                        .Select(img => img.ImageUrl)
+                        .ToList(),
+                    Variants = p.ProductVariants
+                        .Where(v => v.IsActive)
+                        .Select(v => new ProductVariantStorefrontDto
+                        {
+                            Id            = v.Id,
+                            VariantName   = v.VariantName,
+                            Attributes    = v.Attributes,
+                            Price         = v.Price,
+                            IsActive      = v.IsActive,
+                            StockQuantity = v.Inventories
+                                .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                        })
+                        .ToList(),
+                    TotalStock = p.Inventories
+                        .Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity)),
+                    Tags = p.ProductTags.Where(pt => pt.Tag.IsActive).Select(pt => pt.Tag.Name).ToList(),
+                    Materials = p.ProductMaterials.Select(pm => pm.Material.Name).ToList(),
+                    CreatedAt = p.CreatedAt,
+                    SoldCount = p.SoldCount,
+                })
+                .FirstOrDefaultAsync();
+
+            if (product is null)
+                return new ProductStorefrontDetailResponseDto
+                {
+                    Success = false,
+                    Message = "Không tìm thấy sản phẩm"
+                };
+
+            // Load local meta riêng — Split() không thể dịch sang SQL trong EF Core + Npgsql
+            var rawMeta = await _context.ProductLocalMetas
+                .AsNoTracking()
+                .Include(m => m.LocalSpecialtyProfile)
+                .Where(m => m.ProductId == product.Id)
+                .FirstOrDefaultAsync();
+
+            if (rawMeta != null)
+            {
+                product.LocalMeta = new ProductLocalMetaDto
+                {
+                    ProfileId      = rawMeta.LocalSpecialtyProfileId,
+                    ProvinceName   = rawMeta.LocalSpecialtyProfile.ProvinceName,
+                    ArchetypeName  = rawMeta.LocalSpecialtyProfile.ArchetypeName,
+                    DisplayNote    = rawMeta.LocalSpecialtyProfile.DisplayNote,
+                    SelectedTraits = string.IsNullOrEmpty(rawMeta.SelectedTraitsPipe)
+                        ? new List<string>()
+                        : rawMeta.SelectedTraitsPipe.Split('|', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                    ExpectedTraits = string.IsNullOrEmpty(rawMeta.LocalSpecialtyProfile.ExpectedTraitsPipe)
+                        ? new List<string>()
+                        : rawMeta.LocalSpecialtyProfile.ExpectedTraitsPipe.Split('|', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                };
+            }
+
+            return new ProductStorefrontDetailResponseDto { Success = true, Product = product };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching storefront product by slug {Slug}", slug);
+            return new ProductStorefrontDetailResponseDto
+            {
+                Success = false,
+                Message = "Có lỗi xảy ra khi lấy thông tin sản phẩm"
+            };
+        }
+    }
+
+    public async Task<ProductStockBatchResponseDto> GetStockBatchAsync(List<Guid> productIds)
+    {
+        try
+        {
+            if (productIds == null || productIds.Count == 0)
+                return new ProductStockBatchResponseDto { Success = true, Items = new() };
+
+            // Cap at 50 to prevent abuse
+            var ids = productIds.Take(50).ToList();
+
+            // 1. Variant-level stock (products with active variants)
+            var variants = await _context.ProductVariants
+                .Include(v => v.Inventories)
+                .Where(v => ids.Contains(v.ProductId) && v.IsActive)
+                .Select(v => new
+                {
+                    v.Id,
+                    v.ProductId,
+                    Stock = v.Inventories.Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity))
+                })
+                .ToListAsync();
+
+            // 2. For products with NO active variants, fall back to product-level inventory
+            //    (rows where VariantId IS NULL — same source as the product detail page)
+            var idsWithVariants = variants.Select(v => v.ProductId).ToHashSet();
+            var idsWithoutVariants = ids.Where(pid => !idsWithVariants.Contains(pid)).ToList();
+
+            var productStockMap = new Dictionary<Guid, int>();
+            if (idsWithoutVariants.Count > 0)
+            {
+                var productStocks = await _context.Inventories
+                    .Where(i => idsWithoutVariants.Contains(i.ProductId) && i.VariantId == null)
+                    .GroupBy(i => i.ProductId)
+                    .Select(g => new
+                    {
+                        ProductId = g.Key,
+                        Stock = g.Sum(i => Math.Max(0, i.Quantity - i.ReservedQuantity))
+                    })
+                    .ToListAsync();
+
+                foreach (var ps in productStocks)
+                    productStockMap[ps.ProductId] = ps.Stock;
+            }
+
+            var result = ids.Select(pid =>
+            {
+                var pVariants = variants.Where(v => v.ProductId == pid).ToList();
+                return new ProductStockDto
+                {
+                    ProductId  = pid,
+                    TotalStock = pVariants.Count > 0
+                        ? pVariants.Sum(v => v.Stock)
+                        : productStockMap.GetValueOrDefault(pid, 0),
+                    Variants = pVariants
+                        .Select(v => new VariantStockDto { VariantId = v.Id, Stock = v.Stock })
+                        .ToList()
+                };
+            }).ToList();
+
+            return new ProductStockBatchResponseDto { Success = true, Items = result };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching stock batch");
+            return new ProductStockBatchResponseDto { Success = false, Items = new() };
+        }
+    }
+
+    private async Task<HashSet<long>> GetDescendantCategoryIdsAsync(long rootCategoryId)
+    {
+        var categories = await _context.Categories
+            .AsNoTracking()
+            .Where(c => c.IsActive)
+            .Select(c => new { c.Id, c.ParentId })
+            .ToListAsync();
+
+        var childrenByParent = categories
+            .Where(c => c.ParentId.HasValue)
+            .GroupBy(c => c.ParentId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Id).ToList());
+
+        var result = new HashSet<long> { rootCategoryId };
+        var queue = new Queue<long>();
+        queue.Enqueue(rootCategoryId);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!childrenByParent.TryGetValue(current, out var children))
+            {
+                continue;
+            }
+
+            foreach (var childId in children)
+            {
+                if (!result.Add(childId))
+                {
+                    continue;
+                }
+
+                queue.Enqueue(childId);
+            }
+        }
+
+        return result;
+    }
+}

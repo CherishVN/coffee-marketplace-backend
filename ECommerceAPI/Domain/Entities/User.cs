@@ -7,11 +7,13 @@ public partial class User
 {
     public Guid Id { get; set; }
 
+    public string UserCode { get; set; } = null!;
+
     public string? FullName { get; set; }
 
     public string? Phone { get; set; }
 
-    public string Role { get; set; } = "customer";
+    public short? RoleId { get; set; }
 
     public short Status { get; set; }
 
@@ -25,17 +27,20 @@ public partial class User
 
     public DateTime UpdatedAt { get; set; }
 
-    public virtual Address? Address { get; set; }
+    public virtual Role? Role { get; set; }
 
-    public virtual ICollection<AiMaterialSuggestion> AiMaterialSuggestions { get; set; } = new List<AiMaterialSuggestion>();
+    public virtual ICollection<Address> Addresses { get; set; } = new List<Address>();
 
-    public virtual ICollection<AiTagSuggestion> AiTagSuggestions { get; set; } = new List<AiTagSuggestion>();
+
+
 
     public virtual ICollection<Cart> Carts { get; set; } = new List<Cart>();
 
     public virtual ICollection<Conversation> ConversationBuyers { get; set; } = new List<Conversation>();
 
     public virtual ICollection<Conversation> ConversationSellers { get; set; } = new List<Conversation>();
+
+    public virtual ICollection<ConversationUserPreference> ConversationUserPreferences { get; set; } = new List<ConversationUserPreference>();
 
     public virtual ICollection<FavoriteProduct> FavoriteProducts { get; set; } = new List<FavoriteProduct>();
 
@@ -49,6 +54,12 @@ public partial class User
 
     public virtual SellerWallet? SellerWallet { get; set; }
 
+    public virtual CustomerWallet? CustomerWallet { get; set; }
+
+    public virtual ICollection<CustomerWithdrawalRequest> CustomerWithdrawalRequestCustomers { get; set; } = new List<CustomerWithdrawalRequest>();
+
+    public virtual ICollection<CustomerWithdrawalRequest> CustomerWithdrawalRequestReviewedByNavigations { get; set; } = new List<CustomerWithdrawalRequest>();
+
     public virtual ICollection<SellerWithdrawalRequest> SellerWithdrawalRequestReviewedByNavigations { get; set; } = new List<SellerWithdrawalRequest>();
 
     public virtual ICollection<SellerWithdrawalRequest> SellerWithdrawalRequestSellers { get; set; } = new List<SellerWithdrawalRequest>();
@@ -57,14 +68,15 @@ public partial class User
 
     public virtual ICollection<Shop> ShopOwners { get; set; } = new List<Shop>();
 
-    public virtual ICollection<ShopReview> ShopReviews { get; set; } = new List<ShopReview>();
+
 
     public virtual ICollection<Shop> ShopVerifiedByNavigations { get; set; } = new List<Shop>();
 
     public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
 
-    // Disputes
     public virtual ICollection<Dispute> DisputesAsCustomer { get; set; } = new List<Dispute>();
     public virtual ICollection<Dispute> DisputesResolvedByNavigation { get; set; } = new List<Dispute>();
     public virtual ICollection<DisputeMessage> DisputeMessages { get; set; } = new List<DisputeMessage>();
+
+    public virtual ICollection<ShopFollow> ShopFollows { get; set; } = new List<ShopFollow>();
 }

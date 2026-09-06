@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace ECommerceAPI.Domain.Entities;
@@ -28,4 +28,6 @@ public partial class OrderItem
     public virtual Product Product { get; set; } = null!;
 
     public virtual ProductVariant? Variant { get; set; }
+
+    public virtual ICollection<DisputeOrderItem> DisputeOrderItems { get; set; } = new List<DisputeOrderItem>();
 }

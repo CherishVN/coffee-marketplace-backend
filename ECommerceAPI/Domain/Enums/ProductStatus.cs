@@ -28,5 +28,10 @@ public enum ProductStatus : short
     /// <summary>
     /// Bị gỡ bởi admin
     /// </summary>
-    Removed = 4
+    Removed = 4,
+
+    /// <summary>
+    /// Chờ admin duyệt (tạo mới hoặc cập nhật từ seller)
+    /// </summary>
+    PendingApproval = 5
 }
