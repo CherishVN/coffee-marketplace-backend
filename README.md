@@ -1,376 +1,317 @@
-# E-Commerce Platform for Local Brands - Backend API
-
+# Coffee Local Brand Marketplace — Backend
 
 **Project Code:** SP26SE114  
-**Duration:** January 2026 - April 2026  
+**Duration:** January 2026 – April 2026  
 **Supervisor:** Phan Minh Tâm (tampm@fe.edu.vn)
 
-## 📋 Project Overview
+## Tổng quan
 
-A specialized e-commerce platform designed for local Vietnamese brands (fashion, handmade crafts, organic food, and cosmetics). This backend API provides comprehensive services for sellers, customers, and administrators, with a key innovation: **AI-based product category tagging** to assist sellers in standardizing product classification and improving customer search experience.
+Backend cho **sàn thương mại điện tử cà phê đặc sản / thương hiệu địa phương Việt Nam** — nơi người bán đăng bán cà phê theo vùng trồng (Robusta Buôn Ma Thuột, Arabica Cầu Đất, …) và người mua có thể tin cậy xuất xứ sản phẩm.
 
-### English Name
-E-Commerce platform for local brands with AI-based product category tagging
+Điểm khác biệt cốt lõi của dự án là **xác thực & phân biệt thương hiệu cà phê địa phương bằng AI**: seller khai báo vùng xuất xứ và đặc tính hương vị; hệ thống (rule + Gemini) kiểm tra tên/mô tả có thực sự là cà phê vùng đó hay không — ví dụ phát hiện *"cà phê bún bò Huế"* là không hợp lệ.
 
-### Vietnamese Name
-Nền tảng thương mại điện tử dành cho các thương hiệu địa phương với AI phân loại và gắn nhãn sản phẩm
+Ngoài luồng cà phê đặc sản, platform vẫn hỗ trợ các nghiệp vụ marketplace chung (giỏ hàng, thanh toán, vận chuyển, ví, tranh chấp…) để vận hành sàn; **phạm vi ưu tiên và tính năng AI phân biệt thương hiệu tập trung vào sản phẩm cà phê**.
 
-## 👥 Development Team
+**English name:** Coffee Local Brand Marketplace with AI-based origin verification  
+**Vietnamese name:** Sàn thương mại điện tử cà phê thương hiệu địa phương với AI xác thực xuất xứ  
+**Capstone title (SP26SE114):** E-Commerce platform for local brands with AI-based product category tagging
 
-| Name | Student Code | Role |
-|------|--------------|------|
-| Nguyễn Hồ Quốc Thắng | SE183534 | Team Member |
+## Nhóm phát triển
+
+| Họ tên | MSSV | Vai trò |
+|--------|------|---------|
+| Nguyễn Hồ Quốc Thắng | SE183534 | Team Leader |
 | Lê Huỳnh Thiên Bảo | SE183554 | Team Member |
 | Vũ An Khang | SE183550 | Team Member |
 | Võ Thành Nam | SE183565 | Team Member |
 
-## 🎯 Key Features
+## Kiến trúc hệ thống
 
-### 1. **User & Authentication**
-- User registration and login
-- Role-based access control (Customer, Seller, Admin)
-- JWT token authentication
+Repository gồm **2 service ASP.NET Core 8** trong solution `ECommerceAPI.sln`:
 
-### 2. **Seller Portal**
-- Create and manage shop profiles
-- Product management (CRUD operations)
-- Image upload with multiple variants
-- Inventory tracking
-- **AI-powered category & tag suggestions** during product upload
-- Order management and status updates
-
-### 3. **AI-based Product Category Tagging** 🤖
-- Analyzes product title, description, and optional images
-- Suggests main category, subcategory, and relevant tags
-- Allows sellers to accept, override, or modify AI suggestions
-- Logs suggestions for continuous model improvement
-
-### 4. **Customer Portal**
-- Browse products by category, tags, brand, or popularity
-- Advanced search with AI-enhanced relevance
-- Filter by price, category, shop, and attributes
-- Shopping cart management
-- Order placement and tracking
-
-### 5. **Admin Portal**
-- User, shop, and product management
-- Seller and product approval workflow
-- Category taxonomy maintenance
-- System statistics and reports
-
-### 6. **Order & Payment**
-- Shopping cart operations
-- Checkout workflow with shipping details
-- Payment gateway integration
-- Order tracking and history
-
-## 🛠️ Technology Stack
-
-### Backend
-- **Framework:** ASP.NET Core 8.0 (Web API)
-- **Language:** C# 12
-- **Architecture:** RESTful API, Clean Architecture
-
-### Database
-- **Primary Database:** SQL Server / PostgreSQL
-- **Caching:** Redis
-- **ORM:** Entity Framework Core
-
-### AI/ML
-- **NLP:** Natural Language Processing for text classification
-- **Framework:** ML.NET / Python integration
-- **Microservice:** Separate AI service for category tagging
-
-### DevOps
-- **Containerization:** Docker
-- **CI/CD:** GitHub Actions / Azure DevOps
-- **Cloud:** Azure / AWS (planned)
-
-### Security
-- JWT Authentication
-- Role-based Authorization
-- Data encryption
-- Input validation & sanitization
-
-## 📦 Project Structure
+| Service | Mô tả | Port mặc định (dev) |
+|---------|--------|---------------------|
+| **ECommerceAPI** | Main API — marketplace cà phê & nghiệp vụ TMĐT | `http://localhost:5153` |
+| **ECommerceAI** | Microservice AI — xác thực xuất xứ cà phê, chat, gợi ý seller | `http://localhost:5001` |
 
 ```
-ECommerceAPI/
-├── Controllers/           # API endpoints
-├── Models/               # Domain models
-├── DTOs/                 # Data Transfer Objects
-├── Services/             # Business logic
-├── Repositories/         # Data access layer
-├── Data/                 # Database context & configurations
-├── Middleware/           # Custom middleware
-├── Filters/              # Action filters
-├── Helpers/              # Utility classes
-├── AI/                   # AI integration module
-└── appsettings.json      # Configuration
+┌─────────────┐     JWT (Supabase)     ┌──────────────────┐
+│   Frontend  │ ─────────────────────► │   ECommerceAPI   │
+└─────────────┘                        │  (Main API)      │
+       │                               └────────┬─────────┘
+       │                                        │
+       │         JWT + Internal API Key         │ PostgreSQL
+       └──────────────────────────────────────► │ ECommerceAI
+                                                └────────┬─────────┘
+                                                         │
+                                              Google Gemini API
 ```
 
-## 🚀 Getting Started
+- **Xác thực:** Supabase Auth (JWKS), không tự triển khai `/api/auth/*`
+- **Cơ sở dữ liệu:** PostgreSQL (EF Core), mỗi service có DbContext riêng
+- **Realtime:** SignalR hub `/hubs/order-tracking`
+- **Triển khai:** Docker + GitHub Actions → Google Cloud Run
 
-### Prerequisites
+## Phạm vi sản phẩm
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [SQL Server](https://www.microsoft.com/sql-server) or [PostgreSQL](https://www.postgresql.org/)
-- [Redis](https://redis.io/) (optional, for caching)
-- [Visual Studio 2022](https://visualstudio.microsoft.com/) or [VS Code](https://code.visualstudio.com/)
-- [Git](https://git-scm.com/)
+| Phạm vi | Mô tả |
+|---------|--------|
+| **Trọng tâm** | Cà phê đặc sản Việt Nam — hạt rang xay, bột, drip bag, quà tặng cà phê theo vùng trồng |
+| **Local Brand AI** | Chỉ áp dụng cho luồng đăng ký/xác thực **cà phê vùng** (`validate-local-brand`, `LocalSpecialtyProfile`) |
+| **Marketplace chung** | Seller vẫn có thể bán sản phẩm khác qua category thông thường; AI gợi ý category/tag/material dùng chung |
+| **Hồ sơ vùng** | Admin quản lý danh mục vùng cà phê (tỉnh, archetype, đặc tính hương vị) — `CategoryCode: ca_phe` |
 
-### Installation
+## Tính năng chính
 
-1. **Clone the repository**
+### Cà phê Local Brand (điểm nhấn dự án)
+
+- **Hồ sơ đặc sản vùng** (`/api/local-specialty-profiles/*`) — Robusta Buôn Ma Thuột, Arabica Cầu Đất, …
+- Seller gắn sản phẩm với profile vùng + chọn đặc tính hương vị (`ProductLocalMeta`)
+- **AI xác thực xuất xứ** (`POST /api/ai/seller/validate-local-brand`) — Gemini phân tích ngữ nghĩa tên & mô tả có phải cà phê vùng đăng ký
+- Admin duyệt sản phẩm kèm thông tin Local Brand; cảnh báo mâu thuẫn (`MismatchWarning`) nếu rule/AI phát hiện sai lệch
+
+### Xác thực & hồ sơ người dùng
+- Đăng ký/đăng nhập qua **Supabase** (frontend); backend validate JWT
+- Phân quyền theo role: Customer, Seller, Admin
+- Quản lý profile, địa chỉ giao hàng, đăng ký seller, đổi email (OTP)
+
+### Cổng người bán (`/api/seller/*`)
+- Quản lý shop, xem phí sàn hiện hành
+- CRUD sản phẩm, biến thể, tồn kho
+- Quản lý đơn hàng, duyệt/từ chối yêu cầu hủy
+- Ví seller, yêu cầu rút tiền, trả lời review
+- Xử lý tranh chấp (dispute) phía seller
+- Gợi ý AI qua ECommerceAI (category, tags, materials, phân tích ảnh)
+- Đăng ký **Local Brand cà phê** — chọn hồ sơ vùng, xác thực AI trước khi gửi duyệt
+
+### Cổng khách hàng
+- Duyệt cà phê theo vùng, shop, danh mục, bộ sưu tập, trang chủ
+- Giỏ hàng & checkout (`/api/cart/*`)
+- Đặt hàng, theo dõi, xác nhận nhận hàng, yêu cầu hủy (`/api/orders/*`)
+- Yêu thích, review sản phẩm/shop
+- Ví khách hàng & rút tiền (`/api/customer-wallet/*`)
+- Tranh chấp & hoàn tiền (`/api/disputes/*`)
+- Tin nhắn (`/api/conversations/*`), thông báo in-app
+
+### Cổng quản trị (`/api/admin/*`)
+- Quản lý user (suspend, audit log, reset password)
+- Duyệt/từ chối seller, shop, sản phẩm
+- CRUD category, tag, material; migrate sản phẩm giữa category
+- Quản lý đơn hàng, tranh chấp, rút tiền seller & customer
+- Dashboard thống kê, cấu hình & báo cáo phí sàn
+
+### Thanh toán & vận chuyển
+- **VNPay** và **MoMo** (single + batch payment, IPN/return URL)
+- Tích hợp **GHN** — webhook cập nhật trạng thái giao hàng
+- SignalR theo dõi đơn realtime
+
+### AI Microservice (`ECommerceAI`)
+- **Chat assistant** — tư vấn chọn cà phê & đặt hàng qua AI (`/api/ai/chat/*`)
+- **Seller AI** — gợi ý category/tags/materials, phân tích text/ảnh
+- **Xác thực cà phê vùng** — `validate-local-brand`: prompt chuyên biệt cho cà phê đặc sản VN (xem `ECommerceAI/Prompts/LocalBrandValidationPrompt.txt`)
+- **Admin AI** — báo cáo, phân tích xu hướng, anomaly detection, dự báo metrics
+- Lưu lịch sử gợi ý & phản hồi seller để cải thiện chất lượng
+- Model: **Google Gemini** (C#, không dùng Python/FastAPI)
+
+### Dịch vụ nền (background jobs)
+- Timeout thanh toán, timeout yêu cầu hủy đơn
+- Tự động hoàn thành đơn, giải phóng ví seller
+- Auto refund khi trả hàng, timeout tranh chấp
+- Gửi email thông báo đơn hàng (SMTP queue)
+
+### Khác
+- OCR căn cước VN qua FPT AI (`/api/ocr/vnm-id-card`) — xác minh seller
+- Rate limiting cho tạo payment
+- Health check & public config (`/api/system/*`)
+
+## Công nghệ
+
+| Thành phần | Công nghệ |
+|------------|-----------|
+| Backend | ASP.NET Core 8, C# 12, Clean Architecture |
+| Database | PostgreSQL, Entity Framework Core 8 |
+| Cache | `IMemoryCache` (in-process) |
+| Auth | Supabase Auth + JWT Bearer (JWKS) |
+| Validation | FluentValidation |
+| AI | Google Gemini API (microservice C#) |
+| Realtime | SignalR |
+| Payment | VNPay, MoMo |
+| Shipping | GHN (Giao Hàng Nhanh) |
+| Email | SMTP |
+| Container | Docker |
+| CI/CD | GitHub Actions → Google Cloud Run |
+
+## Cấu trúc project
+
+```
+E-Commerce-BE/
+├── ECommerceAPI.sln
+├── ECommerceAPI/                 # Main API
+│   ├── Application/              # Services, DTOs, Interfaces
+│   ├── Domain/                   # Entities, Enums
+│   ├── Infrastructure/           # Data, Background, Payment, Notifications
+│   ├── Controllers/
+│   ├── Middleware/
+│   ├── Hubs/                     # SignalR (OrderTrackingHub)
+│   ├── migrations/
+│   ├── Dockerfile
+│   └── appsettings.Example.json
+├── ECommerceAI/                  # AI Microservice
+│   ├── Controllers/
+│   ├── Services/
+│   ├── Data/
+│   ├── Prompts/
+│   ├── Dockerfile
+│   └── appsettings.Example.json
+└── .github/workflows/
+    └── deploy-cloud-run.yml
+```
+
+## Bắt đầu (Development)
+
+### Yêu cầu
+
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [PostgreSQL](https://www.postgresql.org/)
+- Tài khoản [Supabase](https://supabase.com/) (auth)
+- API key [Google Gemini](https://ai.google.dev/) (cho AI service)
+- (Tuỳ chọn) Tài khoản VNPay/MoMo/GHN sandbox cho test payment & shipping
+
+### Cài đặt
+
+1. **Clone repository**
    ```bash
    git clone <repository-url>
-   cd ECommerceAPI
+   cd E-Commerce-BE
    ```
 
 2. **Restore dependencies**
    ```bash
-   dotnet restore
+   dotnet restore ECommerceAPI.sln
    ```
 
-3. **Update database connection string**
-   
-   Edit `appsettings.json`:
-   ```json
-   {
-     "ConnectionStrings": {
-       "DefaultConnection": "Server=localhost;Database=ECommerceDB;Trusted_Connection=True;"
-     }
-   }
-   ```
+3. **Cấu hình**
 
-4. **Apply database migrations**
+   Copy file mẫu cho từng service:
    ```bash
-   dotnet ef database update
+   cp ECommerceAPI/appsettings.Example.json ECommerceAPI/appsettings.json
+   cp ECommerceAI/appsettings.Example.json ECommerceAI/appsettings.json
    ```
 
-5. **Run the application**
+   Điền các giá trị quan trọng:
+   - `ConnectionStrings:DefaultConnection` — PostgreSQL
+   - `Supabase:Url`, `Supabase:ServiceRoleKey` (Main API)
+   - `AiService:BaseUrl` → `http://localhost:5001` (Main API trỏ tới AI service)
+   - `Gemini:ApiKey` (AI service)
+   - `InternalAuth:ApiKey`, `MainApi:BaseUrl` (AI service trỏ ngược Main API)
+   - `FrontendUrl`, `Cors:AllowedOrigins`
+   - (Tuỳ chọn) `VNPay`, `MoMo`, `GHN`, `Smtp`
+
+4. **Chạy migration**
    ```bash
-   dotnet run
+   dotnet ef database update --project ECommerceAPI
+   dotnet ef database update --project ECommerceAI
    ```
 
-6. **Access the API**
-   - API: `https://localhost:5001` or `http://localhost:5000`
-   - Swagger UI: `https://localhost:5001/swagger`
+5. **Chạy ứng dụng** (2 terminal)
 
-## 📚 API Documentation
+   ```bash
+   # Terminal 1 — Main API
+   dotnet run --project ECommerceAPI
 
-Once the application is running, visit the Swagger UI at:
-```
-https://localhost:5001/swagger
-```
+   # Terminal 2 — AI Service
+   dotnet run --project ECommerceAI
+   ```
 
-### Main Endpoints
+6. **Truy cập Swagger**
+   - Main API: http://localhost:5153/swagger
+   - AI Service: http://localhost:5001/swagger
 
-- **Authentication:** `/api/auth/*`
-- **Users:** `/api/users/*`
-- **Shops:** `/api/shops/*`
-- **Products:** `/api/products/*`
-- **AI Tagging:** `/api/ai/categorize`
-- **Orders:** `/api/orders/*`
-- **Cart:** `/api/cart/*`
-- **Admin:** `/api/admin/*`
+## Tài liệu API
 
-## 🧪 Testing
+Swagger là nguồn tài liệu chính khi chạy local hoặc trên môi trường deploy (`EnableSwagger: true`).
+
+### Nhóm endpoint chính
+
+| Nhóm | Route | Ghi chú |
+|------|-------|---------|
+| Profile | `/api/user/*` | Profile, địa chỉ, đăng ký seller |
+| Coffee Local Brand | `/api/local-specialty-profiles/*` | Hồ sơ vùng cà phê (public) |
+| AI — Coffee validation | `POST /api/ai/seller/validate-local-brand` | Xác thực xuất xứ cà phê (AI service) |
+| Storefront | `/api/products`, `/api/shops`, `/api/home`, `/api/collections` | Public / authenticated |
+| Cart & Orders | `/api/cart/*`, `/api/orders/*` | Checkout, tracking |
+| Payments | `/api/payments/vnpay/*`, `/api/payments/momo/*` | |
+| Seller | `/api/seller/*` | Shop, products, orders, wallet |
+| Admin | `/api/admin/*` | Users, sellers, products, disputes, fees |
+| Disputes | `/api/disputes/*`, `/api/seller/disputes/*` | Customer & seller |
+| Wallet | `/api/customer-wallet/*` | Ví khách hàng |
+| Chat | `/api/conversations/*` | Tin nhắn user-to-user |
+| Notifications | `/api/notifications/*` | |
+| AI (microservice) | `/api/ai/chat/*`, `/api/ai/seller/*`, `/api/ai/admin/*` | Chạy trên port 5001 |
+| Webhooks | `/api/webhooks/ghn/*` | GHN shipping |
+| Realtime | `/hubs/order-tracking` | SignalR |
+
+> **Lưu ý:** Không có endpoint `/api/auth/*` — frontend xác thực trực tiếp với Supabase, gửi JWT Bearer cho backend.
+
+## Triển khai (Production)
+
+- Mỗi service có `Dockerfile` riêng
+- Workflow `.github/workflows/deploy-cloud-run.yml` deploy lên **Google Cloud Run** (region `asia-southeast1`)
+- Auto-deploy khi push branch `dev`; có thể chạy thủ công qua GitHub Actions
 
 ```bash
-# Run all tests
-dotnet test
-
-# Run with coverage
-dotnet test /p:CollectCoverage=true
+# Build Docker (ví dụ)
+docker build -f ECommerceAPI/Dockerfile -t ecommerce-api .
+docker build -f ECommerceAI/Dockerfile -t ecommerce-ai .
 ```
 
-## 📝 Development Workflow
+## Tiến độ phát triển
 
-### Task Packages
+| Module | Trạng thái | Ghi chú |
+|--------|------------|---------|
+| Admin Portal | ✅ Hoàn thành | Users, sellers, products, categories, tags, materials, disputes, withdrawals, dashboard, platform fees |
+| Authentication | ✅ Supabase | Không build auth API riêng |
+| User Profile | ✅ Hoàn thành | Profile, addresses, register seller |
+| Seller Portal | ✅ Hoàn thành | Shop, products, orders, wallet, reviews, disputes |
+| Customer Portal | ✅ Hoàn thành | Browse, cart, checkout, orders, favorites, reviews, wallet, disputes |
+| Order & Payment | ✅ Hoàn thành | VNPay, MoMo, GHN, SignalR tracking |
+| Coffee Local Brand | ✅ Hoàn thành | Hồ sơ vùng, ProductLocalMeta, AI validate-local-brand, admin duyệt |
+| AI Microservice | ✅ Hoàn thành | Chat, seller suggestions, coffee origin validation, admin analytics |
+| Messaging & Notifications | ✅ Hoàn thành | Conversations, in-app + email |
+| Background Services | ✅ Hoàn thành | 7 hosted services |
+| Unit/Integration Tests | 🔲 Chưa có | Chưa có test project trong solution |
 
-1. **Requirements & System Design** ✅
-2. **Frontend Development** (Customer Portal) - *Separate Repository*
-3. **Seller Portal Implementation** - *Separate Repository*
-4. **Backend Development** ⚙️ *Current Repository*
-5. **AI Module Development** 🤖
-6. **Testing, Deployment & Documentation** 📋
+**Tổng số endpoint HTTP:** ~232 (Main API ~200 + AI ~32)
 
-## 🔧 Configuration
+## Quy trình phát triển
 
-### Environment Variables
+1. Requirements & System Design ✅
+2. Frontend (Customer/Seller Portal) — *repository riêng*
+3. Backend Development (repository này) ⚙️
+4. AI Module (ECommerceAI) 🤖 ✅
+5. Testing, Deployment & Documentation 📋 *đang tiếp tục*
 
-Create an `appsettings.Development.json` file (not tracked in Git):
+### Hướng dẫn đóng góp
 
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "your-connection-string"
-  },
-  "JwtSettings": {
-    "Secret": "your-secret-key",
-    "Issuer": "ECommerceAPI",
-    "Audience": "ECommerceClient",
-    "ExpiryMinutes": 60
-  },
-  "Redis": {
-    "ConnectionString": "localhost:6379"
-  },
-  "AI": {
-    "ServiceUrl": "http://localhost:5002/api/categorize"
-  }
-}
-```
+1. Tuân thủ quy ước C# và cấu trúc Clean Architecture hiện có
+2. Commit message rõ ràng
+3. Tạo branch: `feature/ten-tinh-nang`
+4. Tạo pull request để review
 
-## 🤝 Contributing
+## Thông tin học thuật
 
-This is a Capstone Project. Contributions are managed by the development team listed above.
+**Lớp:** SE1835  
+**Chuyên ngành:** Software Engineering (ES/IS/JS)  
+**Trường:** FPT University  
+**Thời gian dự án:** 01/01/2026 – 30/04/2026
 
-### Development Guidelines
-
-1. Follow C# coding conventions
-2. Write meaningful commit messages
-3. Create feature branches: `feature/your-feature-name`
-4. Submit pull requests for review
-5. Ensure all tests pass before merging
-
-## 📄 License
-
-This project is developed as part of FPT University Capstone Project requirements.
-
-## 📞 Contact
+## Liên hệ
 
 **Supervisor:** Phan Minh Tâm  
 **Email:** tampm@fe.edu.vn
 
 ---
 
-## 🎓 Academic Information
-
-**Class:** SE1835  
-**Specialty:** Software Engineering (ES/IS/JS)  
-**Institution:** FPT University  
-**Project Duration:** 01/01/2026 - 30/04/2026
-
----
-
-**Last Updated:** 2026-02-25
-
----
-
-## 🚀 Development Sprints Progress
-
-### ✅ Sprint 0: Admin Portal (COMPLETED)
-**Duration:** Tuần 0  
-**Status:** ✅ Complete  
-**APIs:** 44 endpoints  
-**Documentation:** [ADMIN_PORTAL_APIs.md](ADMIN_PORTAL_APIs.md)
-
-**Features:**
-- User Management (suspend, unsuspend, audit logs)
-- Seller Approval (approve, reject shops)
-- Shop Management (activate, suspend, close)
-- Category Management (CRUD, taxonomy tree, migrate products)
-- Tag Management (CRUD)
-- Product Moderation (hide, unhide, remove)
-- Withdrawal Management (approve, reject)
-- Dispute Management (approve refund, reject)
-- Dashboard Statistics (comprehensive metrics)
-
----
-
-### ✅ Sprint 2: User Profile Management (COMPLETED)
-**Duration:** Tuần 3  
-**Status:** ✅ Complete  
-**APIs:** 8 endpoints  
-**Documentation:** [USER_PROFILE_APIs.md](USER_PROFILE_APIs.md) | [Sprint Summary](SPRINT_2_SUMMARY.md)
-
-**Features:**
-- Get/Update user profile
-- Register as seller (with business info)
-- Address management (CRUD + set default)
-- FluentValidation for all inputs
-- Vietnamese slug generator
-- Business rules enforcement
-
-**Technical:**
-- Service pattern implementation
-- DTO pattern for clean API contracts
-- Integration với Admin Portal (seller approval)
-
----
-
-### ✅ Sprint 4: Seller Shop Management & Withdrawal (COMPLETED)
-**Duration:** Tuần 6  
-**Status:** ✅ Complete  
-**APIs:** 5 endpoints  
-**Documentation:** [SELLER_PORTAL_APIs.md](SELLER_PORTAL_APIs.md) | [Sprint Summary](SPRINT_4_SUMMARY.md)
-
-**Features:**
-- Shop management (get, update shop info)
-- Wallet management (view balance, earnings, withdrawn)
-- Withdrawal requests (create, view history)
-- Auto reserve balance on withdrawal
-- Prevent duplicate pending requests
-
-**Technical:**
-- Wallet entity integration
-- Transaction ledger tracking
-- FluentValidation for withdrawal requests
-- Business rules: balance check, pending limit
-
----
-
-### 🔄 Sprint 3: AI Microservice (SKIPPED - DO LATER)
-**Duration:** TBD  
-**Status:** ⏸️ Postponed  
-
-**Planned Features:**
-- AI Category Suggestion API
-- AI Tag Suggestion API
-- AI Material Suggestion API
-- Product title/description analysis
-- Optional image analysis
-- Suggestion logging for model improvement
-- Integration with backend
-
-**Technology Stack:**
-- Python + FastAPI
-- PhoBERT for Vietnamese NLP
-- TensorFlow/PyTorch for ML models
-- Docker containerization
-
----
-
-### 📊 Overall Progress
-
-| Module | Progress | APIs | Status |
-|--------|----------|------|--------|
-| **Admin Portal** | 100% | 44/44 | ✅ Complete |
-| **Authentication** | N/A | 0/0 | ✅ Supabase handles |
-| **User Profile** | 100% | 8/8 | ✅ Complete |
-| **Seller Shop & Withdrawal** | 100% | 5/5 | ✅ Complete |
-| **Seller Products & Orders** | 0% | 0/10 | 🔲 Sprint 5 Next |
-| **AI Service** | 0% | 0/4 | ⏸️ Postponed |
-| **Customer Portal** | 0% | 0/20 | 🔲 Planned |
-| **System Services** | 0% | 0/5 | 🔲 Planned |
-
-**Total APIs Implemented:** 57 / ~100 endpoints (57% complete)
-
----
-
-## 📚 Quick Links
-
-- 📖 [Admin Portal API Documentation](ADMIN_PORTAL_APIs.md)
-- 👤 [User Profile API Documentation](USER_PROFILE_APIs.md)
-- 🏪 [Seller Portal API Documentation](SELLER_PORTAL_APIs.md)
-- 🔐 [Authentication Strategy](AUTHENTICATION_STRATEGY.md)
-- 🤖 [AI Service Integration Guide](AI_SERVICE_INTEGRATION.md)
-- 📝 [Sprint 2 Summary](SPRINT_2_SUMMARY.md)
-- 📝 [Sprint 4 Summary](SPRINT_4_SUMMARY.md)
-
----
-
+**License:** Dự án Capstone — FPT University  
 **Project Status:** 🟢 Active Development  
-**Current Sprint:** Sprint 2 (User Profile) ✅ COMPLETED  
-**Next Sprint:** Sprint 3 (AI Microservice) 🤖 READY TO START
+**Last Updated:** 2026-09-06 (Coffee Local Brand focus)
